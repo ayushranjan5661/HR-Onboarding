@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HR Portal — Dashboard</title>
+<link rel="stylesheet" href="css/style.css?v=20260822h">
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">HR Portal — Candidate Onboarding</div>
+    <div class="who">
+      <span id="whoami"></span>
+      <button onclick="hrLogout()">Log out</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="page-header">
+      <h2>Candidates</h2>
+      <button class="btn btn-primary" onclick="document.getElementById('inviteModal').classList.remove('hidden')">+ Invite Candidate</button>
+    </div>
+
+    <div class="card">
+      <table id="candTable">
+        <thead>
+          <tr><th>Name</th><th>Email</th><th>Stage</th><th>Invited On</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="candBody"></tbody>
+      </table>
+      <div class="empty-state hidden" id="emptyState">No candidates yet. Click "Invite Candidate" to get started.</div>
+    </div>
+  </div>
+
+  <!-- Invite modal -->
+  <div class="modal-backdrop hidden" id="inviteModal">
+    <div class="modal">
+      <h3>Invite a Candidate</h3>
+      <p style="color:#6b7280;font-size:0.85rem;margin-top:-6px;">
+        This creates their candidate portal login and unlocks the CIF form for them.
+      </p>
+      <form id="inviteForm">
+        <label>Full Name</label>
+        <input type="text" id="inviteName" required>
+        <label>Email</label>
+        <input type="email" id="inviteEmail" required>
+        <label>Candidate Type</label>
+        <select id="inviteType">
+          <option value="EXPERIENCED">Experienced</option>
+          <option value="FRESHER">Fresher / Trainee</option>
+        </select>
+        <div style="color:#6b7280;font-size:0.8rem;margin-top:4px;">
+          Decides which Document Collection form they receive. Experienced hires must also
+          submit current-company offer letter and pay slips.
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-outline" onclick="closeInviteModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Send Invite</button>
+        </div>
+        <div class="error-msg" id="inviteError"></div>
+      </form>
+      <div class="credential-box hidden" id="credentialBox"></div>
+    </div>
+  </div>
+
+  <script src="../js/config.js?v=20260822h"></script>
+  <script src="js/api.js?v=20260822h"></script>
+  <script>
+    requireAuth();
+    document.getElementById("whoami").textContent = getName();
+
+    function badge(stage) {
+      return `<span class="badge badge-${stage.toLowerCase()}">${stage.replaceAll("_", " ")}</span>`;
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    async function loadCandidates() {
+      const rows = await apiFetch("/hr/candidates");
+      const body = document.getElementById("candBody");
+      body.innerHTML = "";
+      document.getElementById("emptyState").classList.toggle("hidden", rows.length > 0);
+      rows.forEach(c => {
+        const tr = document.createElement("tr");
+        tr.onclick = () => window.location.href = `candidate.html?id=${c.id}`;
+        tr.innerHTML = `<td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.email)}</td>
+          <td>${badge(c.stage)}</td><td>${new Date(c.created_at).toLocaleDateString()}</td>`;
+
+        const actions = document.createElement("td");
+        const del = document.createElement("button");
+        del.className = "btn btn-danger btn-small";
+        del.textContent = "Delete Invitation";
+        // Row itself navigates to the detail page, so keep the click here.
+        del.addEventListener("click", (e) => {
+          e.stopPropagation();
+          deleteInvitation(c, del);
+        });
+        actions.appendChild(del);
+        tr.appendChild(actions);
+
+        body.appendChild(tr);
+      });
+    }
+
+    async function deleteInvitation(candidate, btn) {
+      if (!confirm(
+        `Delete the invitation for ${candidate.name} (${candidate.email})?\n\n` +
+        "Their login, submitted forms and uploaded documents will be permanently removed. " +
+        "This cannot be undone."
+      )) return;
+      btn.disabled = true;
+      btn.textContent = "Deleting...";
+      try {
+        await apiFetch(`/hr/candidates/${candidate.id}`, { method: "DELETE" });
+        await loadCandidates();
+      } catch (err) {
+        alert(err.message);
+        btn.disabled = false;
+        btn.textContent = "Delete Invitation";
+      }
+    }
+
+    let lastInvite = null;
+    // Copies the login link only — that's the one thing HR sends the candidate.
+    async function copyInviteLink(btn) {
+      if (!lastInvite) return;
+      const original = btn.textContent;
+      try {
+        await navigator.clipboard.writeText(lastInvite.login_url);
+        btn.textContent = "Copied!";
+      } catch {
+        window.prompt("Copy the login link:", lastInvite.login_url);
+        return;
+      }
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    }
+
+    function closeInviteModal() {
+      document.getElementById("inviteModal").classList.add("hidden");
+      document.getElementById("inviteForm").reset();
+      document.getElementById("inviteForm").classList.remove("hidden");
+      document.getElementById("credentialBox").classList.add("hidden");
+      document.getElementById("inviteError").textContent = "";
+    }
+
+    document.getElementById("inviteForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorMsg = document.getElementById("inviteError");
+      errorMsg.textContent = "";
+      try {
+        const data = await apiFetch("/hr/candidates", {
+          method: "POST",
+          body: JSON.stringify({
+            name: document.getElementById("inviteName").value.trim(),
+            email: document.getElementById("inviteEmail").value.trim(),
+            candidate_type: document.getElementById("inviteType").value,
+          }),
+        });
+        document.getElementById("inviteForm").classList.add("hidden");
+        const box = document.getElementById("credentialBox");
+        box.classList.remove("hidden");
+        box.innerHTML = `
+          <strong>Candidate account created.</strong><br>
+          Send these login details to the candidate (e.g. by email):<br><br>
+          Login ID: <code>${data.email}</code><br>
+          Password: <code>${data.temp_password}</code><br>
+          Login link: <a href="${data.login_url}" target="_blank">${data.login_url}</a><br>
+          <button class="btn btn-outline btn-small" style="margin-top:10px" onclick="copyInviteLink(this)">Copy Link</button>
+          <button class="btn btn-primary btn-small" style="margin-top:10px" onclick="closeInviteModal(); loadCandidates();">Done</button>
+        `;
+        lastInvite = data;
+        loadCandidates();
+      } catch (err) {
+        errorMsg.textContent = err.message;
+      }
+    });
+
+    loadCandidates();
+  </script>
+</body>
+</html>

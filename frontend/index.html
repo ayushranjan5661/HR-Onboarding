@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LevelShift Onboarding — Login</title>
+<link rel="stylesheet" href="hr-portal/css/style.css?v=20260822h">
+<style>
+  .role-tabs { display: flex; gap: 0; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .role-tab {
+    flex: 1; text-align: center; padding: 10px; cursor: pointer;
+    background: #f9fafb; color: var(--muted); font-weight: 600; font-size: 0.9rem;
+    border: none;
+  }
+  .role-tab.active { background: var(--brand); color: #fff; }
+</style>
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="card login-card">
+      <h1>LevelShift Onboarding</h1>
+      <p class="sub">One login for HR and candidates. Pick your role below.</p>
+
+      <div class="role-tabs" id="roleTabs">
+        <button type="button" class="role-tab active" id="tabHr" onclick="setRole('hr')">HR</button>
+        <button type="button" class="role-tab" id="tabCandidate" onclick="setRole('candidate')">Candidate</button>
+      </div>
+
+      <div id="busy" style="color:#6b7280;font-size:0.9rem;padding:8px 0;"></div>
+
+      <form id="loginForm">
+        <label for="email">Email</label>
+        <input type="email" id="email" required autocomplete="username">
+        <label for="password">Password</label>
+        <input type="password" id="password" required autocomplete="current-password">
+        <button class="btn btn-primary btn-block" type="submit" id="loginBtn">Log in as HR</button>
+        <div class="error-msg" id="errorMsg"></div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/config.js?v=20260822h"></script>
+  <script>
+    let role = "hr";
+
+    function setRole(r) {
+      role = r;
+      document.getElementById("tabHr").classList.toggle("active", r === "hr");
+      document.getElementById("tabCandidate").classList.toggle("active", r === "candidate");
+      document.getElementById("loginBtn").textContent = r === "hr" ? "Log in as HR" : "Log in as Candidate";
+    }
+
+    // Invite links open this page as index.html?role=candidate&email=...&next=form
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("role") === "candidate") setRole("candidate");
+    if (params.get("email")) document.getElementById("email").value = params.get("email");
+
+    (async () => {
+      // 1. One-click invite link: the token signs them in, no password needed.
+      const inviteToken = params.get("token");
+      if (inviteToken) {
+        showBusy("Opening your form...");
+        try {
+          const res = await fetch(`${API_BASE}/auth/candidate/invite-token`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: inviteToken }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "This invite link is not valid.");
+          sessionStorage.setItem("candidate_token", data.access_token);
+          sessionStorage.setItem("candidate_name", data.name);
+          window.location.href = await pendingFormPage(data.access_token);
+          return;
+        } catch (err) {
+          // Link dead or expired: fall back to the normal login form.
+          showBusy(null);
+          setRole("candidate");
+          document.getElementById("errorMsg").textContent = err.message;
+        }
+        return;
+      }
+
+      // 2. Already signed in on this browser? Skip the login step.
+      const existing = sessionStorage.getItem("candidate_token");
+      if (params.get("role") === "candidate" && existing) {
+        const res = await fetch(`${API_BASE}/candidate/me/status`, {
+          headers: { Authorization: `Bearer ${existing}` },
+        }).catch(() => null);
+        if (res && res.status === 200) {
+          window.location.href = params.get("next") === "form"
+            ? await pendingFormPage(existing)
+            : "candidate-portal/home.html";
+        }
+      }
+    })();
+
+    // While a one-click link is being exchanged, hide the login form so the
+    // candidate never sees a password box they don't need.
+    function showBusy(message) {
+      document.getElementById("loginForm").style.display = message ? "none" : "";
+      document.getElementById("roleTabs").style.display = message ? "none" : "";
+      document.getElementById("busy").textContent = message || "";
+    }
+
+    // Which page the candidate should land on: the first form still awaiting
+    // them. CIF first, then BGV, then Document Collection. Falls back to the
+    // status page if nothing is pending (or anything goes wrong).
+    const FORM_PAGES = {
+      CIF: "candidate-portal/cif-form.html",
+      BGV: "candidate-portal/bgv-form.html",
+      DOCUMENT_COLLECTION: "candidate-portal/document-form.html",
+    };
+
+    async function pendingFormPage(token) {
+      const home = "candidate-portal/home.html";
+      try {
+        const res = await fetch(`${API_BASE}/candidate/me/status`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return home;
+        const status = await res.json();
+        if (status.stage === "REJECTED") return home;
+        // Sequential order: CIF -> Document Collection -> BGV.
+        for (const type of ["CIF", "DOCUMENT_COLLECTION", "BGV"]) {
+          const form = status.forms.find(f => f.form_type === type);
+          if (form && form.status === "PENDING") return FORM_PAGES[type];
+        }
+        return home;  // everything submitted already
+      } catch {
+        return home;
+      }
+    }
+
+    document.getElementById("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorMsg = document.getElementById("errorMsg");
+      errorMsg.textContent = "";
+      try {
+        const res = await fetch(`${API_BASE}/auth/${role}/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: document.getElementById("email").value.trim(),
+            password: document.getElementById("password").value,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(typeof data.detail === "string" ? data.detail : "Login failed — check your email and password");
+        }
+
+        if (role === "hr") {
+          sessionStorage.setItem("hr_token", data.access_token);
+          sessionStorage.setItem("hr_name", data.name);
+          window.location.href = "hr-portal/dashboard.html";
+        } else {
+          sessionStorage.setItem("candidate_token", data.access_token);
+          sessionStorage.setItem("candidate_name", data.name);
+          // Invite links carry next=form: drop the candidate straight into
+          // whichever form is waiting for them instead of the status page.
+          const target = params.get("next") === "form"
+            ? await pendingFormPage(data.access_token)
+            : "candidate-portal/home.html";
+          window.location.href = target;
+        }
+      } catch (err) {
+        errorMsg.textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

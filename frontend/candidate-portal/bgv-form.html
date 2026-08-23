@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Background Verification Form</title>
+<link rel="stylesheet" href="css/style.css?v=20260822h">
+<style>
+  .form-card { max-width: 1000px; }
+  .tbl-wrap { overflow-x: auto; margin-top: 6px; }
+  table.rep { width: 100%; border-collapse: collapse; }
+  table.rep th { background: #eceef4; font-size: 0.74rem; padding: 8px; text-transform: none;
+                 letter-spacing: 0; white-space: nowrap; }
+  table.rep td { padding: 6px; border-bottom: 1px solid var(--border); }
+  table.rep input, table.rep select { min-width: 140px; }
+  .tbl-head { display: flex; justify-content: space-between; align-items: center; margin-top: 24px; }
+  .tbl-head h3 { border: none; margin: 0; padding: 0; font-size: 0.95rem; }
+  .tbl-note { color: var(--muted); font-size: 0.8rem; margin: 4px 0 0; }
+  .btn-addrow { background: #dbeafe; color: var(--brand); border: none; padding: 7px 14px;
+                border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.82rem; }
+  .del-row { background: none; border: none; cursor: pointer; font-size: 1rem; }
+  .consent-box { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 14px 16px; }
+  .legal-q { padding: 10px 0; border-bottom: 1px solid #f1f2f4; }
+  .legal-q:last-child { border-bottom: none; }
+  .legal-q label { color: var(--text); font-weight: 500; }
+  .legal-q select { max-width: 220px; }
+  .detail-box { margin-top: 8px; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Candidate Portal</div>
+    <div class="who">
+      <span id="whoami"></span>
+      <button onclick="candidateLogout()">Log out</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <a class="back-link" href="home.html">&larr; Back</a>
+    <div class="card form-card" style="margin-top:14px;">
+      <h2>Background Verification (BGV) Form</h2>
+      <p style="color:#6b7280;font-size:0.85rem;">
+        We verify what you have already told us &mdash; this form asks <em>who can confirm it</em>.
+        Your personal details are carried over from your CIF and are not asked again.
+      </p>
+
+      <div class="form-section">
+        <h3>Your Details (from CIF)</h3>
+        <div id="prefill"></div>
+      </div>
+
+      <form id="bgvForm" enctype="multipart/form-data">
+
+        <div class="form-section">
+          <h3>1. Consent &amp; Authorisation</h3>
+          <div class="consent-box">
+            <div class="checkbox-row">
+              <input type="checkbox" id="c1" name="consent_bgv" value="Yes" required>
+              <label for="c1">I authorise LevelShift and its appointed verification agency to verify the
+                information I have provided, including my identity, address, education and employment history. *</label>
+            </div>
+            <div class="checkbox-row">
+              <input type="checkbox" id="c2" name="consent_criminal_check" value="Yes" required>
+              <label for="c2">I consent to a criminal record and public database check. *</label>
+            </div>
+            <label style="margin-top:12px;">May we contact your <strong>current</strong> employer now? *</label>
+            <select name="may_contact_current_employer" required>
+              <option value="">Select</option>
+              <option>Yes, contact them now</option>
+              <option>No, only after I accept the offer</option>
+              <option>Not applicable</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3>2. Identity</h3>
+          <div class="grid-2">
+            <div><label>Full name exactly as per government records *</label>
+              <input name="name_as_per_records" required></div>
+            <div><label>Any other / former name used (maiden name, alias)</label>
+              <input name="other_names_used"></div>
+            <div><label>Passport Number</label><input name="passport_number"></div>
+            <div><label>Passport Expiry</label><input type="date" name="passport_expiry"></div>
+            <div><label>Driving Licence Number</label><input name="driving_licence_number"></div>
+          </div>
+        </div>
+
+        <div class="tbl-head">
+          <h3>Address History</h3>
+          <button type="button" class="btn-addrow" onclick="addRow('addrTable')">+ Add Row</button>
+        </div>
+        <p class="tbl-note">List every address you have lived at for the last 3 years.</p>
+        <div class="tbl-wrap"><table class="rep" id="addrTable">
+          <thead><tr><th>Address Type</th><th>Full Address</th><th>City</th><th>State</th><th>PIN Code</th><th>From</th><th>To</th><th>Residence Type</th><th>Contact Person</th><th>Contact Number</th><th>Nearest Police Station</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="tbl-head">
+          <h3>Education Verification</h3>
+          <button type="button" class="btn-addrow" onclick="addRow('eduTable')">+ Add Row</button>
+        </div>
+        <p class="tbl-note">Pre-filled from your CIF where possible — add the roll/registration numbers we need to verify with.</p>
+        <div class="tbl-wrap"><table class="rep" id="eduTable">
+          <thead><tr><th>Qualification</th><th>Institution</th><th>University / Board</th><th>Roll / Enrollment No.</th><th>Registration No.</th><th>Year of Passing</th><th>Mode of Study</th><th>College Verification Contact</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="tbl-head">
+          <h3>Employment Verification</h3>
+          <button type="button" class="btn-addrow" onclick="addRow('empTable')">+ Add Row</button>
+        </div>
+        <p class="tbl-note">Pre-filled from your CIF where possible — add the manager and HR contacts who can confirm each role.</p>
+        <div class="tbl-wrap"><table class="rep" id="empTable">
+          <thead><tr><th>Company Name</th><th>Company Address</th><th>Employee ID</th><th>Designation (joining)</th><th>Designation (leaving)</th><th>From</th><th>To</th><th>Employment Type</th><th>Payroll Company (if third-party)</th><th>Last Drawn CTC</th><th>Reporting Manager</th><th>Manager Designation</th><th>Manager Email</th><th>Manager Phone</th><th>HR Contact Name</th><th>HR Email</th><th>HR Phone</th><th>Reason for Leaving</th><th>Eligible for Rehire?</th><th>May we contact now?</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="tbl-head">
+          <h3>Professional References</h3>
+          <button type="button" class="btn-addrow" onclick="addRow('refTable')">+ Add Row</button>
+        </div>
+        <p class="tbl-note">Two references who are not relatives.</p>
+        <div class="tbl-wrap"><table class="rep" id="refTable">
+          <thead><tr><th>Name</th><th>Designation</th><th>Company</th><th>Relationship</th><th>Email</th><th>Phone</th><th>Years Known</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="tbl-head">
+          <h3>Gaps in Education / Employment</h3>
+          <button type="button" class="btn-addrow" onclick="addRow('gapTable')">+ Add Row</button>
+        </div>
+        <p class="tbl-note">Only needed if you answered Yes above.</p>
+        <div class="tbl-wrap"><table class="rep" id="gapTable">
+          <thead><tr><th>Gap Type</th><th>From</th><th>To</th><th>Duration</th><th>Reason</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+
+
+        <div class="form-section" style="margin-top:24px;">
+          <h3>Gap Declaration</h3>
+          <label>Have you had any gap of more than 60 days in your education or employment? *</label>
+          <select name="has_gaps" id="hasGaps" required><option value="">Select</option><option>Yes</option><option>No</option></select>
+        </div>
+
+        <div class="form-section" style="margin-top:24px;">
+          <h3>Legal &amp; Compliance Declarations</h3>
+          <p class="tbl-note" style="margin-bottom:8px;">Answering "Yes" does not automatically disqualify you.
+             Undisclosed information discovered during verification is treated far more seriously.</p>
+          <div class="legal-q">
+            <label>Have you ever been convicted of a criminal offence? *</label>
+            <select name="ever_convicted" data-details="conviction_details" required><option value="">Select</option><option>Yes</option><option>No</option></select>
+            <textarea name="conviction_details" rows="2" placeholder="Please provide details" class="hidden detail-box"></textarea>
+          </div>
+          <div class="legal-q">
+            <label>Do you have any pending court case or investigation? *</label>
+            <select name="pending_case" data-details="pending_case_details" required><option value="">Select</option><option>Yes</option><option>No</option></select>
+            <textarea name="pending_case_details" rows="2" placeholder="Please provide details" class="hidden detail-box"></textarea>
+          </div>
+          <div class="legal-q">
+            <label>Have you ever been terminated or asked to resign? *</label>
+            <select name="ever_terminated" data-details="termination_details" required><option value="">Select</option><option>Yes</option><option>No</option></select>
+            <textarea name="termination_details" rows="2" placeholder="Please provide details" class="hidden detail-box"></textarea>
+          </div>
+          <div class="legal-q">
+            <label>Have you ever been subject to disciplinary action? *</label>
+            <select name="disciplinary_action" data-details="disciplinary_details" required><option value="">Select</option><option>Yes</option><option>No</option></select>
+            <textarea name="disciplinary_details" rows="2" placeholder="Please provide details" class="hidden detail-box"></textarea>
+          </div>
+          <div class="legal-q">
+            <label>Are you under any bond or non-compete agreement? *</label>
+            <select name="has_bond_noncompete" data-details="bond_details" required><option value="">Select</option><option>Yes</option><option>No</option></select>
+            <textarea name="bond_details" rows="2" placeholder="Please provide details" class="hidden detail-box"></textarea>
+          </div>
+          <div class="legal-q">
+            <label>Do you currently hold any other employment? *</label>
+            <select name="dual_employment" data-details="dual_employment_details" required><option value="">Select</option><option>Yes</option><option>No</option></select>
+            <textarea name="dual_employment_details" rows="2" placeholder="Please provide details" class="hidden detail-box"></textarea>
+          </div>
+
+        </div>
+
+        <div class="form-section">
+          <h3>Supporting Documents</h3>
+          <div class="grid-2">
+            <div><label>Signed BGV Consent Form</label><input type="file" name="signed_consent_form" accept="image/*,.pdf"></div>
+            <div><label>Passport Copy</label><input type="file" name="passport_copy_bgv" accept="image/*,.pdf"></div>
+            <div><label>Form 16 / ITR &ndash; Last Year</label><input type="file" name="form16_last_year" accept="image/*,.pdf"></div>
+            <div><label>Form 16 / ITR &ndash; Previous Year</label><input type="file" name="form16_previous_year" accept="image/*,.pdf"></div>
+            <div><label>Bank Statement showing salary credits (3&ndash;6 months)</label><input type="file" name="bank_statement_salary" accept="image/*,.pdf"></div>
+            <div><label>Police Clearance Certificate (if available)</label><input type="file" name="police_clearance_certificate" accept="image/*,.pdf"></div>
+
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3>Declaration</h3>
+          <div class="checkbox-row">
+            <input type="checkbox" id="decl" name="declaration_accepted" value="Yes" required>
+            <label for="decl">I declare that the information given above is true and complete to the best of my
+              knowledge. I understand that any false statement or omission may lead to withdrawal of the offer
+              or termination of employment. *</label>
+          </div>
+          <div class="grid-2" style="margin-top:10px;">
+            <div><label>Signature</label><input type="file" name="bgv_signature" accept=".jpg,.jpeg,.png,.gif">
+              <div class="file-hint">JPG, PNG or GIF</div></div>
+            <div><label>Place *</label><input name="declaration_place" required></div>
+            <div><label>Date</label><input type="date" name="declaration_date"></div>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" type="submit" style="padding:10px 30px;">Submit BGV Form</button>
+        <div class="error-msg" id="errorMsg"></div>
+      </form>
+    </div>
+  </div>
+
+  <script src="../js/config.js?v=20260822h"></script>
+  <script src="js/api.js?v=20260822h"></script>
+  <script src="js/prefill.js?v=20260822h"></script>
+  <script src="js/edit-mode.js?v=20260822h"></script>
+  <script>
+    requireAuth();
+    document.getElementById("whoami").textContent = getName();
+
+    const ROW_TEMPLATES = {
+      addrTable: "<td><select data-k=\"address_type\"><option value=\"\">Select</option><option>Current</option><option>Permanent</option><option>Previous</option></select></td><td><input data-k=\"full_address\"></td><td><input data-k=\"city\"></td><td><input data-k=\"state\"></td><td><input data-k=\"pin_code\"></td><td><input type=\"date\" data-k=\"from_date\"></td><td><input type=\"date\" data-k=\"to_date\"></td><td><select data-k=\"residence_type\"><option value=\"\">Select</option><option>Owned</option><option>Rented</option><option>Family</option><option>PG / Hostel</option></select></td><td><input data-k=\"verifier_name\"></td><td><input data-k=\"verifier_contact\"></td><td><input data-k=\"nearest_police_station\"></td>",
+      eduTable: "<td><input data-k=\"qualification\"></td><td><input data-k=\"institution\"></td><td><input data-k=\"university_board\"></td><td><input data-k=\"roll_number\"></td><td><input data-k=\"registration_number\"></td><td><input data-k=\"year_of_passing\"></td><td><select data-k=\"study_mode\"><option value=\"\">Select</option><option>Full-time</option><option>Part-time</option><option>Distance</option><option>Correspondence</option></select></td><td><input data-k=\"verification_contact\"></td>",
+      empTable: "<td><input data-k=\"company_name\"></td><td><input data-k=\"company_address\"></td><td><input data-k=\"employee_id\"></td><td><input data-k=\"designation_joining\"></td><td><input data-k=\"designation_leaving\"></td><td><input type=\"date\" data-k=\"from_date\"></td><td><input type=\"date\" data-k=\"to_date\"></td><td><select data-k=\"employment_type\"><option value=\"\">Select</option><option>Permanent</option><option>Contract</option><option>Third-party payroll</option><option>Internship</option></select></td><td><input data-k=\"payroll_company\"></td><td><input data-k=\"last_drawn_ctc\"></td><td><input data-k=\"manager_name\"></td><td><input data-k=\"manager_designation\"></td><td><input type=\"email\" data-k=\"manager_email\"></td><td><input data-k=\"manager_phone\"></td><td><input data-k=\"hr_name\"></td><td><input type=\"email\" data-k=\"hr_email\"></td><td><input data-k=\"hr_phone\"></td><td><input data-k=\"reason_for_leaving\"></td><td><select data-k=\"eligible_for_rehire\"><option value=\"\">Select</option><option>Yes</option><option>No</option><option>Not sure</option></select></td><td><select data-k=\"may_contact_now\"><option value=\"\">Select</option><option>Yes</option><option>No</option></select></td>",
+      refTable: "<td><input data-k=\"name\"></td><td><input data-k=\"designation\"></td><td><input data-k=\"company\"></td><td><select data-k=\"relationship\"><option value=\"\">Select</option><option>Reporting Manager</option><option>Colleague</option><option>Client</option><option>Professor</option></select></td><td><input type=\"email\" data-k=\"email\"></td><td><input data-k=\"phone\"></td><td><input data-k=\"years_known\"></td>",
+      gapTable: "<td><select data-k=\"gap_type\"><option value=\"\">Select</option><option>Education</option><option>Employment</option></select></td><td><input type=\"date\" data-k=\"from_date\"></td><td><input type=\"date\" data-k=\"to_date\"></td><td><input data-k=\"duration\" placeholder=\"e.g. 4 months\"></td><td><input data-k=\"reason\"></td>",
+    };
+
+    function delRow(btn) { btn.closest("tr").remove(); }
+
+    function addRow(tableId, values) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = ROW_TEMPLATES[tableId] +
+        '<td><button type="button" class="del-row" onclick="delRow(this)">&#128465;</button></td>';
+      if (values) {
+        tr.querySelectorAll("[data-k]").forEach(el => {
+          if (values[el.dataset.k]) el.value = values[el.dataset.k];
+        });
+      }
+      document.querySelector("#" + tableId + " tbody").appendChild(tr);
+    }
+
+    function collectRows(tableId) {
+      return Array.from(document.querySelectorAll("#" + tableId + " tbody tr")).map(tr => {
+        const row = {};
+        tr.querySelectorAll("[data-k]").forEach(el => { row[el.dataset.k] = el.value; });
+        return row;
+      }).filter(row => Object.values(row).some(v => v && v.trim()));
+    }
+
+    // "Yes" on a legal question reveals its details box and makes it required.
+    document.querySelectorAll("[data-details]").forEach(sel => {
+      sel.addEventListener("change", () => {
+        const box = document.querySelector('[name="' + sel.dataset.details + '"]');
+        const show = sel.value === "Yes";
+        box.classList.toggle("hidden", !show);
+        box.required = show;
+        if (!show) box.value = "";
+      });
+    });
+
+    // The gap table only matters if they declared a gap.
+    const gapSel = document.getElementById("hasGaps");
+    function syncGapTable() {
+      const show = gapSel.value === "Yes";
+      const wrap = document.querySelector("#gapTable").closest(".tbl-wrap");
+      wrap.style.display = show ? "" : "none";
+      wrap.previousElementSibling.style.display = show ? "" : "none";           // note
+      wrap.previousElementSibling.previousElementSibling.style.display = show ? "" : "none"; // heading
+      if (show && !document.querySelector("#gapTable tbody tr")) addRow("gapTable");
+    }
+    gapSel.addEventListener("change", syncGapTable);
+
+    (async () => {
+      const data = await apiFetch("/candidate/me/status");
+      renderPrefill(data.profile, document.getElementById("prefill"));
+
+      const bgv = data.forms.find(f => f.form_type === "BGV");
+      if (!bgv || bgv.status === "LOCKED") {
+        alert("This form is not available yet.");
+        window.location.href = "home.html"; return;
+      }
+      if (!["PENDING", "SUBMITTED"].includes(bgv.status)) {
+        alert("This form has already been reviewed and can no longer be edited.");
+        window.location.href = "home.html"; return;
+      }
+
+      // Already submitted -> reload the saved answers for editing.
+      if (bgv.status === "SUBMITTED") {
+        const formEl = document.getElementById("bgvForm");
+        const saved = await loadExistingSubmission("BGV");
+        if (saved) {
+          fillFlatFields(formEl, saved.fields);
+          markExistingUploads(formEl, saved.documents);
+          const t = saved.tables || {};
+          fillTable("addrTable", t.bgv_address_history, addRow);
+          fillTable("eduTable", t.bgv_education_checks, addRow);
+          fillTable("empTable", t.bgv_employment_checks, addRow);
+          fillTable("refTable", t.bgv_reference_checks, addRow);
+          fillTable("gapTable", t.bgv_gaps, addRow);
+        }
+        applyEditModeChrome(formEl.querySelector('button[type="submit"]'),
+                             document.querySelector(".form-card"), "BGV Form");
+        syncGapTable();
+        return;   // skip the fresh-form seeding below
+      }
+
+      // Carry the CIF answers forward so nothing is typed twice.
+      if (data.profile) {
+        const nameField = document.querySelector('[name="name_as_per_records"]');
+        if (!nameField.value && data.profile.full_name) nameField.value = data.profile.full_name;
+        if (data.profile.current_address) {
+          addRow("addrTable", { address_type: "Current", full_address: data.profile.current_address });
+        }
+        if (data.profile.permanent_address &&
+            data.profile.permanent_address !== data.profile.current_address) {
+          addRow("addrTable", { address_type: "Permanent", full_address: data.profile.permanent_address });
+        }
+      }
+      const seeded = await seedFromCIF();
+      if (!document.querySelector("#addrTable tbody tr")) addRow("addrTable");
+      if (!seeded.education) addRow("eduTable");
+      if (!seeded.employment) addRow("empTable");
+      addRow("refTable"); addRow("refTable");
+      syncGapTable();
+    })();
+
+    // Pull the candidate's own CIF education/employment rows into this form.
+    async function seedFromCIF() {
+      const out = { education: 0, employment: 0 };
+      try {
+        const cif = await apiFetch("/candidate/me/cif-summary");
+        (cif.education || []).forEach(e => {
+          addRow("eduTable", {
+            qualification: e.qualification, institution: e.course_college,
+            year_of_passing: e.year_of_passing,
+          });
+          out.education++;
+        });
+        (cif.employment || []).forEach(e => {
+          addRow("empTable", {
+            company_name: e.company_name, designation_leaving: e.position_held,
+            from_date: e.from_date, to_date: e.to_date,
+            reason_for_leaving: e.reason_for_leaving,
+          });
+          out.employment++;
+        });
+      } catch (err) { /* no CIF rows to carry over */ }
+      return out;
+    }
+
+    document.getElementById("bgvForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorMsg = document.getElementById("errorMsg");
+      errorMsg.textContent = "";
+      try {
+        const fd = new FormData(e.target);
+        fd.set("bgv_address_history", JSON.stringify(collectRows("addrTable")));
+        fd.set("bgv_education_checks", JSON.stringify(collectRows("eduTable")));
+        fd.set("bgv_employment_checks", JSON.stringify(collectRows("empTable")));
+        fd.set("bgv_reference_checks", JSON.stringify(collectRows("refTable")));
+        fd.set("bgv_gaps", JSON.stringify(gapSel.value === "Yes" ? collectRows("gapTable") : []));
+        await apiFetch("/candidate/forms/BGV/submit", { method: "POST", body: fd });
+        alert("BGV form submitted successfully. HR will review it.");
+        window.location.href = "home.html";
+      } catch (err) {
+        errorMsg.textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

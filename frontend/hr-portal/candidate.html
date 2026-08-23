@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HR Portal — Candidate</title>
+<link rel="stylesheet" href="css/style.css?v=20260822h">
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">HR Portal — Candidate Onboarding</div>
+    <div class="who">
+      <span id="whoami"></span>
+      <button onclick="hrLogout()">Log out</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <a class="back-link" href="dashboard.html">&larr; Back to all candidates</a>
+    <div class="page-header" style="margin-top:10px;">
+      <h2 id="candName">Loading...</h2>
+      <span id="candStage"></span>
+    </div>
+
+    <div class="card section-card" id="credentialsCard">
+      <div class="section-title">
+        <h3>Candidate Login Credentials</h3>
+      </div>
+      <div id="credentialsBody"></div>
+    </div>
+
+    <div class="card section-card hidden" id="decisionCard">
+      <div class="section-title"><h3>Final Interview Decision</h3></div>
+      <p style="color:#6b7280;font-size:0.88rem;">
+        Review the CIF details below. Approve to unlock the Background Verification
+        and Document Collection forms for this candidate, or reject to close the application.
+      </p>
+      <div class="decision-bar">
+        <button class="btn btn-success" id="approveBtn">Approve</button>
+        <button class="btn btn-danger" id="rejectBtn">Reject</button>
+      </div>
+    </div>
+
+    <div class="card section-card hidden" id="rejectedNotice"></div>
+
+    <div class="card section-card" id="cifCard">
+      <div class="section-title"><h3>Candidate Details (CIF)</h3></div>
+      <div id="profileFields"></div>
+      <div id="cifExtraFields"></div>
+      <div id="cifDocs"></div>
+    </div>
+
+    <div id="followupForms"></div>
+  </div>
+
+  <!-- Reject reason modal -->
+  <div class="modal-backdrop hidden" id="rejectModal">
+    <div class="modal">
+      <h3>Reject Candidate</h3>
+      <label>Reason (optional, visible only to HR)</label>
+      <textarea id="rejectReason" rows="3"></textarea>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="document.getElementById('rejectModal').classList.add('hidden')">Cancel</button>
+        <button class="btn btn-danger" id="confirmRejectBtn">Confirm Reject</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit field modal -->
+  <div class="modal-backdrop hidden" id="editModal">
+    <div class="modal">
+      <h3 id="editModalTitle">Edit Field</h3>
+      <label id="editModalLabel">Value</label>
+      <textarea id="editModalValue" rows="2"></textarea>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="document.getElementById('editModal').classList.add('hidden')">Cancel</button>
+        <button class="btn btn-primary" id="saveEditBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Document preview -->
+  <div class="modal-backdrop hidden" id="viewModal">
+    <div class="modal" style="width:90vw;max-width:1000px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <h3 id="viewTitle" style="margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Document</h3>
+        <div style="display:flex;gap:8px;flex:0 0 auto;">
+          <button class="btn btn-outline btn-small" id="viewNewTabBtn">Open in new tab</button>
+          <button class="btn btn-outline btn-small" id="viewDownloadBtn">Download</button>
+          <button class="btn btn-primary btn-small" onclick="closeViewModal()">Close</button>
+        </div>
+      </div>
+      <div id="viewBody" style="margin-top:14px;background:#f9fafb;border:1px solid var(--border);
+           border-radius:8px;height:70vh;display:flex;align-items:center;justify-content:center;
+           overflow:auto;"></div>
+    </div>
+  </div>
+
+  <script src="../js/config.js?v=20260822h"></script>
+  <script src="js/api.js?v=20260822h"></script>
+  <script src="js/field-labels.js?v=20260822h"></script>
+  <script src="js/candidate.js?v=20260822h"></script>
+</body>
+</html>

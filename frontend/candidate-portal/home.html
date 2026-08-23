@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Candidate Portal — Home</title>
+<link rel="stylesheet" href="css/style.css?v=20260822h">
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Candidate Portal</div>
+    <div class="who">
+      <span id="whoami"></span>
+      <button onclick="candidateLogout()">Log out</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <h2>Your Application Status</h2>
+    <div class="status-track" id="statusTrack"></div>
+
+    <div class="card" id="rejectedCard" style="display:none;">
+      <strong style="color:#b91c1c;">Your application is not proceeding further.</strong>
+      <p style="color:#6b7280;">Thank you for your interest. HR will reach out if anything further is needed.</p>
+    </div>
+
+    <div id="formTiles"></div>
+  </div>
+
+  <script src="../js/config.js?v=20260822h"></script>
+  <script src="js/api.js?v=20260822h"></script>
+  <script>
+    requireAuth();
+    document.getElementById("whoami").textContent = getName();
+
+    const STEPS = ["INVITED", "CIF_SUBMITTED", "APPROVED_FOR_BGV", "ONBOARDING_COMPLETE"];
+    const STEP_LABELS = {
+      INVITED: "Invited", CIF_SUBMITTED: "CIF Submitted",
+      APPROVED_FOR_BGV: "Cleared Final Round", ONBOARDING_COMPLETE: "Onboarding Complete",
+    };
+
+    const FORM_META = {
+      CIF: { title: "Candidate Information Form (CIF)", desc: "Your personal, education and identity details.", page: "cif-form.html" },
+      BGV: { title: "Background Verification Form", desc: "Employment history and reference details for verification.", page: "bgv-form.html" },
+      DOCUMENT_COLLECTION: { title: "Document Collection Form", desc: "Upload your ID proof, resume and other documents.", page: "document-form.html" },
+    };
+
+    function renderTrack(stage) {
+      const track = document.getElementById("statusTrack");
+      track.innerHTML = "";
+      if (stage === "REJECTED") {
+        document.getElementById("rejectedCard").style.display = "block";
+        track.innerHTML = `<div class="status-step blocked">Application Closed</div>`;
+        return;
+      }
+      const currentIdx = STEPS.indexOf(stage);
+      STEPS.forEach((s, i) => {
+        const div = document.createElement("div");
+        div.className = "status-step " + (i < currentIdx ? "done" : i === currentIdx ? "active" : "");
+        div.textContent = STEP_LABELS[s];
+        track.appendChild(div);
+      });
+    }
+
+    function statusBadgeText(status) {
+      return status.replaceAll("_", " ");
+    }
+
+    // Show the forms in the order they must be completed, not DB order.
+    const FORM_ORDER = ["CIF", "DOCUMENT_COLLECTION", "BGV"];
+
+    function renderTiles(forms) {
+      const container = document.getElementById("formTiles");
+      container.innerHTML = "";
+      const ordered = FORM_ORDER
+        .map(t => forms.find(f => f.form_type === t))
+        .filter(Boolean);
+      ordered.forEach(f => {
+        const meta = FORM_META[f.form_type];
+        if (f.status === "LOCKED") {
+          // Show it greyed out so the candidate knows what is still to come.
+          const locked = document.createElement("div");
+          locked.className = "card form-tile";
+          locked.style.opacity = "0.6";
+          locked.innerHTML = `
+            <div>
+              <div class="ft-name">${meta.title}</div>
+              <div class="ft-desc">${meta.desc}</div>
+              <div class="ft-desc" style="color:#b45309;margin-top:4px;">
+                Unlocks after HR approves your documents.</div>
+            </div>
+            <div style="text-align:right;">
+              <div class="badge badge-locked">LOCKED</div>
+            </div>`;
+          container.appendChild(locked);
+          return;
+        }
+        const tile = document.createElement("div");
+        tile.className = "card form-tile";
+        const canFill = f.status === "PENDING";
+        // Still awaiting review -> the candidate can go back in and correct it.
+        const canEdit = f.status === "SUBMITTED";
+        const label = canFill ? "Fill Form" : canEdit ? "Edit" : "View";
+        const note = canEdit
+          ? "<div class='ft-desc' style='color:#b45309;margin-top:4px;'>You can still edit this until HR reviews it.</div>"
+          : "";
+        tile.innerHTML = `
+          <div>
+            <div class="ft-name">${meta.title}</div>
+            <div class="ft-desc">${meta.desc}</div>
+            ${note}
+          </div>
+          <div style="text-align:right;">
+            <div class="badge badge-${f.status.toLowerCase()}" style="margin-bottom:8px;">${statusBadgeText(f.status)}</div><br>
+            <button class="btn ${(canFill || canEdit) ? "btn-primary" : "btn-outline"} btn-small"
+              ${(canFill || canEdit) ? "" : "disabled"}
+              onclick="window.location.href='${meta.page}'">${label}</button>
+          </div>`;
+        container.appendChild(tile);
+      });
+    }
+
+    async function load() {
+      const data = await apiFetch("/candidate/me/status");
+      renderTrack(data.stage);
+      if (data.stage !== "REJECTED") renderTiles(data.forms);
+    }
+
+    load();
+  </script>
+</body>
+</html>

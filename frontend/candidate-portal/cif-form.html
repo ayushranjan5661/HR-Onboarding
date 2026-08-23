@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Candidate Information Form (CIF)</title>
+<link rel="stylesheet" href="css/style.css?v=20260822h">
+<style>
+  .form-card { max-width: 980px; }
+  .note-red { color: #b91c1c; font-style: italic; font-size: 0.85rem; margin: 10px 0; }
+  .tbl-wrap { overflow-x: auto; margin-top: 8px; }
+  table.rep { width: 100%; border-collapse: collapse; }
+  table.rep th { background: #eceef4; font-size: 0.75rem; padding: 8px; text-transform: none; letter-spacing: 0; white-space: nowrap; }
+  table.rep th .req { color: #ef4444; }
+  table.rep td { padding: 6px; border-bottom: 1px solid var(--border); }
+  table.rep input, table.rep select { min-width: 120px; }
+  .tbl-head { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
+  .tbl-head h3 { border: none; margin: 0; padding: 0; }
+  .btn-addrow { background: #dbeafe; color: var(--brand); border: none; padding: 7px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.82rem; }
+  .del-row { background: none; border: none; cursor: pointer; font-size: 1rem; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Candidate Portal</div>
+    <div class="who">
+      <span id="whoami"></span>
+      <button onclick="candidateLogout()">Log out</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <a class="back-link" href="home.html">&larr; Back</a>
+    <div class="card form-card" style="margin-top:14px;">
+      <h2>Candidate Information Form (CIF)</h2>
+
+      <form id="cifForm" enctype="multipart/form-data">
+
+        <div class="form-section">
+          <h3>Position Details</h3>
+          <div class="grid-2">
+            <div><label>Position Applied For *</label><input name="position_applied_for" required></div>
+            <div><label>Skill/Technologies Worked *</label><textarea name="skills_technologies" rows="3" required></textarea></div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3>Candidate Details</h3>
+          <label>Candidate Profile Picture *</label>
+          <input type="file" name="profile_picture" accept=".jpg,.jpeg,.png,.gif" required>
+          <div class="file-hint">Files supported: JPG, PNG, GIF, JPEG &bull; Max. size is 10 MB</div>
+
+          <label>Name *</label><input name="full_name" required>
+          <label>Present/Communication Address *</label><textarea name="current_address" rows="3" required></textarea>
+
+          <div class="checkbox-row">
+            <input type="checkbox" id="sameAddr">
+            <label for="sameAddr">Permanent Address same as Present/Communication address</label>
+          </div>
+          <label>Permanent Address *</label><textarea name="permanent_address" rows="3" required></textarea>
+
+          <div class="grid-2">
+            <div><label>Mobile Number *</label><input name="contact_number" required></div>
+            <div><label>Alternate Contact *</label><input name="alternate_number" required></div>
+            <div><label>Email ID *</label><input type="email" name="email" required></div>
+            <div><label>Alternate E-Mail ID *</label><input type="email" name="alternate_email" required></div>
+            <div><label>Blood Group *</label><input name="blood_group" required></div>
+            <div><label>LinkedIn Page link</label><input name="linkedin_link"></div>
+            <div><label>PAN Number</label><input name="pan_number" pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]{1}" title="e.g. ABCDE1234F"></div>
+            <div><label>Gender *</label>
+              <select name="gender" required><option value="">Select</option><option>Male</option><option>Female</option><option>Other</option></select>
+            </div>
+            <div><label>Marital Status *</label>
+              <select name="marital_status" required><option value="">Select</option><option>Single</option><option>Married</option></select>
+            </div>
+            <div><label>Date of Birth *</label><input type="date" name="date_of_birth" required></div>
+            <div><label>Any Backlogs in the Education *</label>
+              <select name="any_backlogs" required><option value="">Select</option><option>Yes</option><option>No</option></select>
+            </div>
+            <div><label>Source *</label>
+              <select name="source" required><option value="">Select</option><option>Job Portal</option><option>Employee Referral</option><option>Social Media</option><option>Campus</option><option>Walk-in</option><option>Other</option></select>
+            </div>
+            <div><label>Have you Worked in LevelShift before *</label>
+              <select name="worked_in_levelshift_before" required><option value="">Select</option><option>Yes</option><option>No</option></select>
+            </div>
+            <div><label>Total Experience (in Yrs.) *</label><input type="number" step="0.1" min="0" name="total_experience_yrs" required></div>
+            <div><label>Relevant Skill Exp. (in Yrs.) *</label><input type="number" step="0.1" min="0" name="relevant_skill_exp_yrs" required></div>
+            <div><label>Current CTC Details (LPA) *</label><input name="current_ctc_lpa" required></div>
+            <div><label>Expected CTC (LPA): Rs *</label><input name="expected_ctc_lpa" required></div>
+            <div><label>Additional Allowance: Rs</label><input name="additional_allowance"></div>
+            <div><label>Variable Comp: Rs *</label><input name="variable_comp" required></div>
+            <div><label>Notice Period (in Days): *</label><input type="number" min="0" name="notice_period_days" required></div>
+            <div><label>Do you hold any other offers currently? *</label>
+              <select name="other_offers" required><option value="">Select</option><option>Yes</option><option>No</option></select>
+            </div>
+          </div>
+          <div class="note-red">If you have completed PG kindly click the + Add Row button from right hand side and fill your PG Details</div>
+        </div>
+
+        <div class="tbl-head">
+          <h3>UG and PG Education Details</h3>
+          <button type="button" class="btn-addrow" onclick="addEduRow('eduUgPg')">+ Add Row</button>
+        </div>
+        <div class="tbl-wrap"><table class="rep" id="eduUgPg">
+          <thead><tr>
+            <th>Qualification<span class="req">*</span></th><th>Course Name / Specialization and College<span class="req">*</span></th>
+            <th>% CGPA Obtained<span class="req">*</span></th><th>Year of Passing<span class="req">*</span></th>
+            <th>Have Mark Sheet and Certificate<span class="req">*</span></th><th>Gaps if any</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table></div>
+
+        <div class="tbl-head">
+          <h3>12th / Diploma Education Details</h3>
+          <button type="button" class="btn-addrow" onclick="addEduRow('edu12th')">+ Add Row</button>
+        </div>
+        <div class="tbl-wrap"><table class="rep" id="edu12th">
+          <thead><tr>
+            <th>Qualification<span class="req">*</span></th><th>Course Name / Specialization and College<span class="req">*</span></th>
+            <th>% CGPA Obtained<span class="req">*</span></th><th>Year of Passing<span class="req">*</span></th>
+            <th>Have Mark Sheet and Certificate<span class="req">*</span></th><th>Gaps if any</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table></div>
+
+        <div class="tbl-head">
+          <h3>10th Education Details:</h3>
+          <button type="button" class="btn-addrow" onclick="addEduRow('edu10th')">+ Add Row</button>
+        </div>
+        <div class="tbl-wrap"><table class="rep" id="edu10th">
+          <thead><tr>
+            <th>Qualification<span class="req">*</span></th><th>Course Name / Specialization and College<span class="req">*</span></th>
+            <th>% CGPA Obtained<span class="req">*</span></th><th>Year of Passing<span class="req">*</span></th>
+            <th>Have Mark Sheet and Certificate<span class="req">*</span></th><th>Gaps if any</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table></div>
+
+        <div class="tbl-head">
+          <h3>Employment Details (Starting with your present or most recent employer, please list of all your past employments)</h3>
+          <button type="button" class="btn-addrow" onclick="addEmpRow()">+ Add Row</button>
+        </div>
+        <div class="tbl-wrap"><table class="rep" id="empTable">
+          <thead><tr>
+            <th>Company Name<span class="req">*</span></th><th>Position Held(While leaving)<span class="req">*</span></th>
+            <th>From<span class="req">*</span></th><th>To<span class="req">*</span></th>
+            <th>Currently Working here<span class="req">*</span></th><th>Reason for leaving<span class="req">*</span></th>
+            <th>Offer Letter (OL)<span class="req">*</span></th><th>Relieving letter (RL)<span class="req">*</span></th>
+            <th>Experience Certificate (EC)<span class="req">*</span></th><th>Gaps if any</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table></div>
+
+        <div class="form-section" style="margin-top:22px;">
+          <h3>Certifications</h3>
+          <label>Technical Certifications (if any)</label>
+          <textarea name="technical_certifications" rows="3"></textarea>
+        </div>
+
+        <div class="form-section">
+          <h3>Please describe</h3>
+          <label>What is your understanding of LevelShift and why do you want to be a part of LevelShift? *</label>
+          <textarea name="understanding_of_levelshift" rows="3" required></textarea>
+          <label>What do you aspire for? and how do you think LevelShift will help you achieve it?</label>
+          <textarea name="aspirations" rows="3"></textarea>
+        </div>
+
+        <div class="tbl-head">
+          <h3>References (You may refer your known ones who are looking out for change)</h3>
+          <button type="button" class="btn-addrow" onclick="addRefRow()">+ Add Row</button>
+        </div>
+        <div class="tbl-wrap"><table class="rep" id="refTable">
+          <thead><tr>
+            <th>Employee Name</th><th>Email ID</th><th>Technology</th><th>Experience</th><th>Contact Number</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table></div>
+
+        <div class="form-section" style="margin-top:22px;">
+          <h3>Declaration</h3>
+          <div class="checkbox-row">
+            <input type="checkbox" id="declare" name="declaration_accepted" value="true" required>
+            <label for="declare">I declare that the information provided by me above is true to the best of my
+              knowledge and belief. Any misinterpretation or omission in the above details renders me liable
+              and I will abide by the action taken by the company. *</label>
+          </div>
+          <div class="grid-2" style="margin-top:10px;">
+            <div>
+              <label>Signature</label>
+              <input type="file" name="signature" accept=".jpg,.jpeg,.png,.gif">
+              <div class="file-hint">Files supported: JPG, PNG, GIF, JPEG &bull; Max. size is 10 MB</div>
+            </div>
+            <div><label>Place *</label><input name="declaration_place" required></div>
+            <div><label>Date</label><input type="date" name="declaration_date"></div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3>HR Team Purpose</h3>
+          <div class="grid-2">
+            <div><label>Candidate ID</label><input name="hr_candidate_id" placeholder="For HR use"></div>
+            <div><label>Candidate Email ID</label><input name="hr_candidate_email" placeholder="For HR use"></div>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" type="submit" style="padding:10px 30px;">Submit</button>
+        <div class="error-msg" id="errorMsg"></div>
+      </form>
+    </div>
+  </div>
+
+  <script src="../js/config.js?v=20260822h"></script>
+  <script src="js/api.js?v=20260822h"></script>
+  <script src="js/edit-mode.js?v=20260822h"></script>
+  <script>
+    requireAuth();
+    document.getElementById("whoami").textContent = getName();
+
+    // ---- Repeating rows ----
+    const YES_NO = `<option value="">Select</option><option>Yes</option><option>No</option>`;
+
+    function delRow(btn) { btn.closest("tr").remove(); }
+
+    function addEduRow(tableId) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input data-k="qualification"></td>
+        <td><input data-k="course_college"></td>
+        <td><input data-k="cgpa_percent"></td>
+        <td><input data-k="year_of_passing"></td>
+        <td><select data-k="has_marksheet">${YES_NO}</select></td>
+        <td><input data-k="gaps"></td>
+        <td><button type="button" class="del-row" onclick="delRow(this)">🗑️</button></td>`;
+      document.querySelector(`#${tableId} tbody`).appendChild(tr);
+    }
+
+    function addEmpRow() {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input data-k="company_name"></td>
+        <td><input data-k="position_held"></td>
+        <td><input type="date" data-k="from_date"></td>
+        <td><input type="date" data-k="to_date"></td>
+        <td><select data-k="currently_working">${YES_NO}</select></td>
+        <td><input data-k="reason_for_leaving"></td>
+        <td><select data-k="offer_letter">${YES_NO}</select></td>
+        <td><select data-k="relieving_letter_status">${YES_NO}</select></td>
+        <td><select data-k="experience_certificate">${YES_NO}</select></td>
+        <td><input data-k="gaps"></td>
+        <td><button type="button" class="del-row" onclick="delRow(this)">🗑️</button></td>`;
+      document.querySelector("#empTable tbody").appendChild(tr);
+    }
+
+    function addRefRow() {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input data-k="employee_name"></td>
+        <td><input type="email" data-k="email_id"></td>
+        <td><input data-k="technology"></td>
+        <td><input data-k="experience"></td>
+        <td><input data-k="contact_number"></td>
+        <td><button type="button" class="del-row" onclick="delRow(this)">🗑️</button></td>`;
+      document.querySelector("#refTable tbody").appendChild(tr);
+    }
+
+    function collectRows(tableId) {
+      return Array.from(document.querySelectorAll(`#${tableId} tbody tr`)).map(tr => {
+        const row = {};
+        tr.querySelectorAll("[data-k]").forEach(el => { row[el.dataset.k] = el.value; });
+        return row;
+      }).filter(row => Object.values(row).some(v => v && v.trim()));
+    }
+
+    // Start each section with one empty row, like the original form.
+    addEduRow("eduUgPg"); addEduRow("edu12th"); addEduRow("edu10th"); addEmpRow(); addRefRow();
+
+    // ---- Permanent address same as present ----
+    document.getElementById("sameAddr").addEventListener("change", (e) => {
+      const perm = document.querySelector('textarea[name="permanent_address"]');
+      if (e.target.checked) {
+        perm.value = document.querySelector('textarea[name="current_address"]').value;
+        perm.readOnly = true;
+      } else {
+        perm.readOnly = false;
+      }
+    });
+
+    // ---- Load: fresh form, or reload a submission that is still editable ----
+    (async () => {
+      const data = await apiFetch("/candidate/me/status");
+      const cif = data.forms.find(f => f.form_type === "CIF");
+      const editing = cif && cif.status === "SUBMITTED";
+
+      if (cif && !["PENDING", "SUBMITTED"].includes(cif.status)) {
+        alert("Your CIF has already been reviewed and can no longer be edited.");
+        window.location.href = "home.html";
+        return;
+      }
+
+      const formEl = document.getElementById("cifForm");
+      if (editing) {
+        const saved = await loadExistingSubmission("CIF");
+        if (saved) {
+          fillFlatFields(formEl, saved.fields);
+          markExistingUploads(formEl, saved.documents);
+          const t = saved.tables || {};
+          fillTable("eduUgPg", t.education_ug_pg, addEduRowWith);
+          fillTable("edu12th", t.education_12th, addEduRowWith);
+          fillTable("edu10th", t.education_10th, addEduRowWith);
+          fillTable("empTable", t.employment_details, addEmpRowWith);
+          fillTable("refTable", t.references_list, addRefRowWith);
+        }
+        applyEditModeChrome(formEl.querySelector('button[type="submit"]'),
+                             document.querySelector(".form-card"), "CIF");
+      } else if (data.profile) {
+        if (data.profile.email) document.querySelector('input[name="email"]').value = data.profile.email;
+        if (data.profile.full_name) document.querySelector('input[name="full_name"]').value = data.profile.full_name;
+      }
+    })();
+
+    // fillTable() passes (tableId, rowValues); adapt the page's row builders.
+    function applyRowValues(tableId, values) {
+      const tr = document.querySelector(`#${tableId} tbody tr:last-child`);
+      if (!tr || !values) return;
+      tr.querySelectorAll("[data-k]").forEach(el => {
+        if (values[el.dataset.k]) el.value = values[el.dataset.k];
+      });
+    }
+    function addEduRowWith(tableId, values) { addEduRow(tableId); applyRowValues(tableId, values); }
+    function addEmpRowWith(tableId, values) { addEmpRow(); applyRowValues(tableId, values); }
+    function addRefRowWith(tableId, values) { addRefRow(); applyRowValues(tableId, values); }
+
+    // ---- Submit ----
+    document.getElementById("cifForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorMsg = document.getElementById("errorMsg");
+      errorMsg.textContent = "";
+      try {
+        const formData = new FormData(e.target);
+        // Repeating tables -> JSON strings the backend parses into arrays
+        formData.set("education_ug_pg", JSON.stringify(collectRows("eduUgPg")));
+        formData.set("education_12th", JSON.stringify(collectRows("edu12th")));
+        formData.set("education_10th", JSON.stringify(collectRows("edu10th")));
+        formData.set("employment_details", JSON.stringify(collectRows("empTable")));
+        formData.set("references_list", JSON.stringify(collectRows("refTable")));
+
+        await apiFetch("/candidate/forms/cif", { method: "POST", body: formData });
+        alert("CIF submitted successfully. HR will review your details.");
+        window.location.href = "home.html";
+      } catch (err) {
+        errorMsg.textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

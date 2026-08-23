@@ -1,0 +1,32 @@
+# --- Secrets / environment ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+myenv/
+venv/
+.venv/
+backend/venv/
+backend/myenv/
+
+# --- Candidate-uploaded files (PII, not source) ---
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# --- Node (if any frontend tooling is added later) ---
+node_modules/
+dist/
+build/
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log
