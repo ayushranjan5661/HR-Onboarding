@@ -181,6 +181,10 @@ tr { cursor: pointer; }
 }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
 .file-hint { color: var(--muted); font-size: 0.76rem; margin-top: 2px; }
+.file-reject-msg { color: var(--danger); font-size: 0.78rem; margin-top: 3px; }
+.file-reject-msg:empty { display: none; }
+.btn-remove-file { color: var(--danger); border-color: var(--danger); margin-left: 6px; }
+.btn-remove-file:hover { background: #fef2f2; }
 .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
 .checkbox-row input { width: auto; }
 .checkbox-row label { margin: 0; font-weight: 500; }
@@ -205,4 +209,3 @@ tr { cursor: pointer; }
 .auto-filled { background: #f0fdf4; border-color: #86efac; }
 .auto-filled-note { color: #15803d; font-size: 0.76rem; margin-top: 3px; }
 .auto-filled-note.carried-doc { color: #0369a1; }
-.company-tag { color: var(--brand); font-weight: 600; }

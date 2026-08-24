@@ -457,9 +457,22 @@ tbody tr:last-child td { border-bottom: none; }
 .hidden { display: none !important; }
 .credential-box {
   background: var(--success-bg); border: 1px solid #a7f3d0; border-radius: var(--radius-sm);
-  padding: 16px; margin-top: 16px; font-size: 0.88rem; line-height: 1.7;
+  padding: 18px; margin-top: 16px; font-size: 0.88rem;
 }
-.credential-box code { background: #fff; padding: 2px 7px; border-radius: 5px; border: 1px solid #d1fae5; }
+.credential-box code {
+  background: #fff; padding: 3px 9px; border-radius: 5px; border: 1px solid #d1fae5;
+  word-break: break-all;
+}
+.credential-box .cred-title { display: block; margin-bottom: 4px; font-size: 0.95rem; }
+.credential-box .cred-sub { color: var(--muted); font-size: 0.84rem; margin: 0 0 14px; }
+.cred-row { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.cred-row:last-of-type { margin-bottom: 0; }
+.cred-row .cred-label {
+  flex: 0 0 78px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.03em; color: var(--success);
+}
+.cred-row .cred-link { color: var(--brand); word-break: break-all; font-size: 0.85rem; }
+.cred-row .cred-link:hover { color: var(--brand-dark); }
 
 .empty-state { text-align: center; color: var(--muted); padding: 48px 0; font-size: 0.92rem; }
 

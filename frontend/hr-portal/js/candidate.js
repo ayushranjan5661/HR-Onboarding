@@ -16,6 +16,35 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// Replaces native confirm() with an in-page modal — native dialogs are
+// positioned by the browser/OS, not the page, so they can't be centered or
+// styled and end up landing wherever the browser feels like. Returns a
+// Promise<boolean>, so call sites just `if (!await showConfirm(...)) return;`
+// in place of the old `if (!confirm(...)) return;`.
+function showConfirm(message, { title = "Please confirm", confirmText = "Confirm", danger = false } = {}) {
+  const modal = document.getElementById("confirmModal");
+  const okBtn = document.getElementById("confirmOkBtn");
+  const cancelBtn = document.getElementById("confirmCancelBtn");
+  document.getElementById("confirmTitle").textContent = title;
+  document.getElementById("confirmMessage").textContent = message;
+  okBtn.textContent = confirmText;
+  okBtn.className = `btn ${danger ? "btn-danger" : "btn-primary"}`;
+  modal.classList.remove("hidden");
+
+  return new Promise((resolve) => {
+    function done(result) {
+      modal.classList.add("hidden");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      resolve(result);
+    }
+    function onOk() { done(true); }
+    function onCancel() { done(false); }
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+  });
+}
+
 // One editable field row: value stored in a relational column, edited/deleted
 // through /hr/candidates/{id}/details/{form}/field. The current value is
 // looked up from currentData at click time — never inlined into onclick,
@@ -342,7 +371,8 @@ function render() {
 
 async function regenerateLink() {
   if (!currentData) return;
-  if (!confirm("Issue a new login link?\n\nThe link already sent to this candidate will stop working immediately.")) return;
+  if (!await showConfirm("The link already sent to this candidate will stop working immediately.",
+      { title: "Issue a new login link?", confirmText: "Issue New Link" })) return;
   try {
     await apiFetch(`/hr/candidates/${candidateId}/regenerate-link`, { method: "POST" });
     await load();
@@ -392,7 +422,8 @@ document.getElementById("saveEditBtn").addEventListener("click", async () => {
 });
 
 async function deleteField(form, field) {
-  if (!confirm(`Delete "${labelFor(field)}"? This cannot be undone.`)) return;
+  if (!await showConfirm("This cannot be undone.",
+      { title: `Delete "${labelFor(field)}"?`, confirmText: "Delete", danger: true })) return;
   try {
     await apiFetch(`/hr/candidates/${candidateId}/details/${form}/field/${field}`, { method: "DELETE" });
     await load();
@@ -402,7 +433,8 @@ async function deleteField(form, field) {
 }
 
 async function deleteRow(tableName, rowId) {
-  if (!confirm("Delete this entry? This cannot be undone.")) return;
+  if (!await showConfirm("This cannot be undone.",
+      { title: "Delete this entry?", confirmText: "Delete", danger: true })) return;
   try {
     await apiFetch(`/hr/rows/${tableName}/${rowId}`, { method: "DELETE" });
     await load();
@@ -455,7 +487,7 @@ async function loadInsights() {
 // ---- Decisions ----
 
 async function reviewSubmission(submissionId, decision) {
-  if (!confirm(`Mark this form as ${decision}?`)) return;
+  if (!await showConfirm(`Mark this form as ${decision}?`, { confirmText: "Confirm" })) return;
   try {
     await apiFetch(`/hr/submissions/${submissionId}/review`, {
       method: "POST",
@@ -468,7 +500,7 @@ async function reviewSubmission(submissionId, decision) {
 }
 
 async function markComplete() {
-  if (!confirm("Mark this candidate's onboarding as complete?")) return;
+  if (!await showConfirm("Mark this candidate's onboarding as complete?", { confirmText: "Mark Complete" })) return;
   try {
     await apiFetch(`/hr/candidates/${candidateId}/mark-complete`, { method: "POST" });
     await load();
@@ -481,7 +513,8 @@ async function markComplete() {
 
 document.getElementById("approveBtn").addEventListener("click", async () => {
   if (!currentData) return;  // page never loaded — don't act on a stale id
-  if (!confirm("Approve this candidate? The Document Collection form will be unlocked. BGV opens once you approve their documents.")) return;
+  if (!await showConfirm("The Document Collection form will be unlocked. BGV opens once you approve their documents.",
+      { title: "Approve this candidate?", confirmText: "Approve" })) return;
   try {
     await apiFetch(`/hr/candidates/${candidateId}/approve`, { method: "POST", body: JSON.stringify({}) });
     await load();
