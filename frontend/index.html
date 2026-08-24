@@ -2,43 +2,49 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LevelShift Onboarding — Login</title>
-<link rel="stylesheet" href="hr-portal/css/style.css?v=20260822j">
-<style>
-  .role-tabs { display: flex; gap: 0; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-  .role-tab {
-    flex: 1; text-align: center; padding: 10px; cursor: pointer;
-    background: #f9fafb; color: var(--muted); font-weight: 600; font-size: 0.9rem;
-    border: none;
-  }
-  .role-tab.active { background: var(--brand); color: #fff; }
-</style>
+<link rel="stylesheet" href="hr-portal/css/style.css?v=20260824e">
 </head>
 <body>
   <div class="login-wrap">
-    <div class="card login-card">
-      <h1>LevelShift Onboarding</h1>
-      <p class="sub">One login for HR and candidates. Pick your role below.</p>
-
-      <div class="role-tabs" id="roleTabs">
-        <button type="button" class="role-tab active" id="tabHr" onclick="setRole('hr')">HR</button>
-        <button type="button" class="role-tab" id="tabCandidate" onclick="setRole('candidate')">Candidate</button>
+    <div class="login-shell">
+      <div class="login-visual">
+        <div class="mark">LS</div>
+        <div class="pitch">
+          <h2>LevelShift Onboarding</h2>
+          <p>One secure workspace for HR to manage candidates end-to-end, and for
+             candidates to complete their forms — from offer to day one.</p>
+        </div>
+        <div class="foot">© LevelShift · Internal Use</div>
       </div>
 
-      <div id="busy" style="color:#6b7280;font-size:0.9rem;padding:8px 0;"></div>
+      <div class="login-form-panel">
+        <div class="login-card">
+          <h1>Welcome back</h1>
+          <p class="sub">One login for HR and candidates. Pick your role below.</p>
 
-      <form id="loginForm">
-        <label for="email">Email</label>
-        <input type="email" id="email" required autocomplete="username">
-        <label for="password">Password</label>
-        <input type="password" id="password" required autocomplete="current-password">
-        <button class="btn btn-primary btn-block" type="submit" id="loginBtn">Log in as HR</button>
-        <div class="error-msg" id="errorMsg"></div>
-      </form>
+          <div class="role-tabs" id="roleTabs">
+            <button type="button" class="role-tab active" id="tabHr" onclick="setRole('hr')">HR</button>
+            <button type="button" class="role-tab" id="tabCandidate" onclick="setRole('candidate')">Candidate</button>
+          </div>
+
+          <div id="busy" style="color:var(--muted);font-size:0.9rem;padding:8px 0;"></div>
+
+          <form id="loginForm">
+            <label for="email">Email</label>
+            <input type="email" id="email" placeholder="you@example.com" required autocomplete="username">
+            <label for="password">Password</label>
+            <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password">
+            <button class="btn btn-primary btn-block" type="submit" id="loginBtn">Log in as HR</button>
+            <div class="error-msg" id="errorMsg"></div>
+          </form>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="js/config.js?v=20260822j"></script>
+  <script src="js/config.js?v=20260824e"></script>
   <script>
     let role = "hr";
 

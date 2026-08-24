@@ -3,31 +3,64 @@
 <head>
 <meta charset="UTF-8">
 <title>HR Portal — Dashboard</title>
-<link rel="stylesheet" href="css/style.css?v=20260822j">
+<link rel="stylesheet" href="css/style.css?v=20260824f">
 </head>
 <body>
-  <div class="topbar">
-    <div class="brand">HR Portal — Candidate Onboarding</div>
-    <div class="who">
-      <span id="whoami"></span>
-      <button onclick="hrLogout()">Log out</button>
-    </div>
-  </div>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-brand"><span class="brand-mark">LS</span><span>HR Portal</span></div>
+      <nav class="sidebar-nav">
+        <a href="dashboard.html" class="nav-item active"><span class="nav-dot"></span> Candidates</a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="user-chip">
+          <span class="avatar" id="whoamiAvatar"></span>
+          <span class="user-name" id="whoami"></span>
+        </div>
+        <button class="logout-btn" onclick="hrLogout()">Log out</button>
+      </div>
+    </aside>
 
-  <div class="container">
-    <div class="page-header">
-      <h2>Candidates</h2>
-      <button class="btn btn-primary" onclick="document.getElementById('inviteModal').classList.remove('hidden')">+ Invite Candidate</button>
-    </div>
+    <div class="main-area">
+      <div class="container">
+        <div class="page-header">
+          <h2>Candidates</h2>
+          <button class="btn btn-primary" onclick="document.getElementById('inviteModal').classList.remove('hidden')">+ Invite Candidate</button>
+        </div>
 
-    <div class="card">
-      <table id="candTable">
-        <thead>
-          <tr><th>Name</th><th>Email</th><th>Stage</th><th>Invited On</th><th>Actions</th></tr>
-        </thead>
-        <tbody id="candBody"></tbody>
-      </table>
-      <div class="empty-state hidden" id="emptyState">No candidates yet. Click "Invite Candidate" to get started.</div>
+        <div class="stat-grid" id="statGrid">
+          <div class="stat-card">
+            <div class="stat-value" id="statTotal">0</div>
+            <div class="stat-label">Total Candidates</div>
+          </div>
+          <div class="stat-card accent-warn">
+            <div class="stat-value" id="statPending">0</div>
+            <div class="stat-label">Awaiting Decision</div>
+          </div>
+          <div class="stat-card accent-brand">
+            <div class="stat-value" id="statInProgress">0</div>
+            <div class="stat-label">BGV / Docs In Progress</div>
+          </div>
+          <div class="stat-card accent-success">
+            <div class="stat-value" id="statComplete">0</div>
+            <div class="stat-label">Onboarding Complete</div>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <input type="text" class="search-input" id="searchInput" placeholder="Search by name or email...">
+        </div>
+
+        <div class="card">
+          <table id="candTable">
+            <thead>
+              <tr><th>Name</th><th>Email</th><th>Stage</th><th>Invited On</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="candBody"></tbody>
+          </table>
+          <div class="empty-state hidden" id="emptyState">No candidates yet. Click "Invite Candidate" to get started.</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -62,11 +95,29 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260822j"></script>
-  <script src="js/api.js?v=20260822j"></script>
+  <!-- Delete candidate modal -->
+  <div class="modal-backdrop hidden" id="deleteModal">
+    <div class="modal">
+      <h3>Delete Candidate</h3>
+      <p style="color:var(--muted);font-size:0.85rem;">
+        This permanently removes <strong id="deleteCandName"></strong>'s login, submitted forms,
+        and uploaded documents. <strong>This cannot be undone.</strong>
+      </p>
+      <label>Type <strong id="deleteCandNameConfirm"></strong> to confirm</label>
+      <input type="text" id="deleteConfirmInput" autocomplete="off" placeholder="Candidate name">
+      <div class="modal-actions">
+        <button type="button" class="btn btn-outline" onclick="closeDeleteModal()">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirmDeleteBtn" disabled>Delete Candidate</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/config.js?v=20260824f"></script>
+  <script src="js/api.js?v=20260824f"></script>
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
+    document.getElementById("whoamiAvatar").textContent = getName().charAt(0).toUpperCase();
 
     function badge(stage) {
       return `<span class="badge badge-${stage.toLowerCase()}">${stage.replaceAll("_", " ")}</span>`;
@@ -78,15 +129,29 @@
       return div.innerHTML;
     }
 
-    async function loadCandidates() {
-      const rows = await apiFetch("/hr/candidates");
+    function initials(name) {
+      const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+      if (!parts.length) return "?";
+      return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+    }
+
+    function renderStats(rows) {
+      const inProgress = rows.filter(c => c.stage === "APPROVED_FOR_BGV").length;
+      document.getElementById("statTotal").textContent = rows.length;
+      document.getElementById("statPending").textContent = rows.filter(c => c.stage === "CIF_SUBMITTED").length;
+      document.getElementById("statInProgress").textContent = inProgress;
+      document.getElementById("statComplete").textContent = rows.filter(c => c.stage === "ONBOARDING_COMPLETE").length;
+    }
+
+    function renderRows(rows) {
       const body = document.getElementById("candBody");
       body.innerHTML = "";
       document.getElementById("emptyState").classList.toggle("hidden", rows.length > 0);
       rows.forEach(c => {
         const tr = document.createElement("tr");
         tr.onclick = () => window.location.href = `candidate.html?id=${c.id}`;
-        tr.innerHTML = `<td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.email)}</td>
+        tr.innerHTML = `<td><div class="name-cell"><span class="row-avatar">${initials(c.name)}</span>${escapeHtml(c.name)}</div></td>
+          <td>${escapeHtml(c.email)}</td>
           <td>${badge(c.stage)}</td><td>${new Date(c.created_at).toLocaleDateString()}</td>`;
 
         const actions = document.createElement("td");
@@ -96,7 +161,7 @@
         // Row itself navigates to the detail page, so keep the click here.
         del.addEventListener("click", (e) => {
           e.stopPropagation();
-          deleteInvitation(c, del);
+          deleteInvitation(c);
         });
         actions.appendChild(del);
         tr.appendChild(actions);
@@ -105,23 +170,67 @@
       });
     }
 
-    async function deleteInvitation(candidate, btn) {
-      if (!confirm(
-        `Delete the invitation for ${candidate.name} (${candidate.email})?\n\n` +
-        "Their login, submitted forms and uploaded documents will be permanently removed. " +
-        "This cannot be undone."
-      )) return;
-      btn.disabled = true;
-      btn.textContent = "Deleting...";
+    let allCandidates = [];
+
+    function applyFilter() {
+      const q = document.getElementById("searchInput").value.trim().toLowerCase();
+      const filtered = q
+        ? allCandidates.filter(c => c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q))
+        : allCandidates;
+      renderRows(filtered);
+    }
+
+    document.getElementById("searchInput").addEventListener("input", applyFilter);
+
+    async function loadCandidates() {
+      allCandidates = await apiFetch("/hr/candidates");
+      renderStats(allCandidates);
+      applyFilter();
+    }
+
+    // Deleting is destructive (login, forms, documents all gone for good), so
+    // instead of a native confirm() dialog HR must type the candidate's exact
+    // name into this modal before the button becomes clickable.
+    let pendingDelete = null;
+
+    function deleteInvitation(candidate) {
+      pendingDelete = { candidate };
+      document.getElementById("deleteCandName").textContent = candidate.name;
+      document.getElementById("deleteCandNameConfirm").textContent = candidate.name;
+      const input = document.getElementById("deleteConfirmInput");
+      input.value = "";
+      document.getElementById("confirmDeleteBtn").disabled = true;
+      document.getElementById("deleteModal").classList.remove("hidden");
+      input.focus();
+    }
+
+    function closeDeleteModal() {
+      document.getElementById("deleteModal").classList.add("hidden");
+      pendingDelete = null;
+    }
+
+    document.getElementById("deleteConfirmInput").addEventListener("input", (e) => {
+      document.getElementById("confirmDeleteBtn").disabled =
+        !pendingDelete || e.target.value !== pendingDelete.candidate.name;
+    });
+
+    document.getElementById("confirmDeleteBtn").addEventListener("click", async () => {
+      if (!pendingDelete) return;
+      const { candidate } = pendingDelete;
+      const confirmBtn = document.getElementById("confirmDeleteBtn");
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "Deleting...";
       try {
         await apiFetch(`/hr/candidates/${candidate.id}`, { method: "DELETE" });
+        closeDeleteModal();
         await loadCandidates();
       } catch (err) {
         alert(err.message);
-        btn.disabled = false;
-        btn.textContent = "Delete Invitation";
+        confirmBtn.disabled = false;
+      } finally {
+        confirmBtn.textContent = "Delete Candidate";
       }
-    }
+    });
 
     let lastInvite = null;
     // Copies the login link only — that's the one thing HR sends the candidate.
