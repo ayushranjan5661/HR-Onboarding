@@ -1,5 +1,6 @@
 requireAuth();
 document.getElementById("whoami").textContent = getName();
+document.getElementById("whoamiAvatar").textContent = getName().charAt(0).toUpperCase();
 
 const candidateId = new URLSearchParams(window.location.search).get("id");
 let currentData = null;
@@ -260,11 +261,13 @@ function render() {
   // ---- Profile (shared identity fields) ----
   document.getElementById("profileFields").innerHTML = fieldRows("PROFILE", PROFILE_FIELDS, c.profile || {});
 
-  // ---- AI Summary & Flags: only once the candidate has actually submitted a CIF ----
+  // ---- AI Summary & Flags: only once the candidate has actually submitted a CIF.
+  // Generated once per page visit (not on every re-render, e.g. after a field
+  // edit elsewhere) so an unrelated edit doesn't trigger another LLM call.
   document.getElementById("insightsCard").classList.toggle("hidden", !c.cif_details);
-  if (c.cif_details) {
-    document.getElementById("insightsBody").innerHTML =
-      `<p class="insight-empty">Click "Generate Summary" for an AI digest of this candidate's CIF, plus any inconsistencies worth a second look.</p>`;
+  if (c.cif_details && !insightsLoaded) {
+    insightsLoaded = true;
+    loadInsights();
   }
 
   // ---- CIF: flat fields + repeating tables + uploads ----
@@ -291,10 +294,11 @@ function render() {
     if (!sub) return;
     if (sub.status === "LOCKED") {
       const wrap = document.createElement("div");
-      wrap.className = "card section-card";
+      wrap.className = "card section-card collapsed";
       wrap.style.opacity = "0.7";
-      wrap.innerHTML = `<div class="section-title">
-          <h3>${cfg.title} <span class="badge badge-locked">LOCKED</span></h3></div>
+      wrap.innerHTML = `<div class="section-title collapsible" onclick="toggleCollapse(this)">
+          <h3>${cfg.title} <span class="badge badge-locked">LOCKED</span></h3>
+          <span class="chevron">&#9660;</span></div>
         <p style="color:#6b7280;">Unlocks for the candidate once you approve their
         Document Collection form above.</p>`;
       document.getElementById("followupForms").appendChild(wrap);
@@ -302,10 +306,11 @@ function render() {
     }
     const canReview = sub.status === "SUBMITTED" || sub.status === "UNDER_REVIEW";
     const wrap = document.createElement("div");
-    wrap.className = "card section-card";
+    wrap.className = "card section-card collapsed";
     wrap.innerHTML = `
-      <div class="section-title">
+      <div class="section-title collapsible" onclick="toggleCollapse(this)">
         <h3>${cfg.title} <span class="badge badge-${sub.status.toLowerCase()}">${sub.status.replaceAll("_"," ")}</span></h3>
+        <span class="chevron">&#9660;</span>
       </div>
       ${sub.status === "PENDING" ? "<p style='color:#6b7280'>Waiting for candidate to submit.</p>" :
         fieldRows(type, cfg.fields, cfg.data)
@@ -406,15 +411,13 @@ async function deleteRow(tableName, rowId) {
   }
 }
 
-// ---- AI Summary & Flags ----
-
-function toggleInsights() {
-  const body = document.getElementById("insightsBody");
-  const btn = document.getElementById("insightsToggleBtn");
-  const collapsed = body.classList.toggle("hidden");
-  btn.innerHTML = collapsed ? "&plus;" : "&minus;";
-  btn.title = collapsed ? "Expand" : "Minimize";
+// ---- Collapsible section headers (CIF / Document Collection / BGV / AI Summary) ----
+function toggleCollapse(headerEl) {
+  headerEl.closest(".section-card").classList.toggle("collapsed");
 }
+
+// ---- AI Summary & Flags ----
+let insightsLoaded = false;
 
 function renderInsights(data) {
   const flagsHtml = data.flags.length
@@ -439,9 +442,6 @@ function renderInsights(data) {
 }
 
 async function loadInsights() {
-  const btn = document.getElementById("insightsBtn");
-  btn.disabled = true;
-  btn.textContent = "Generating…";
   document.getElementById("insightsBody").innerHTML = `<p class="insight-empty">Reading the CIF and checking for inconsistencies…</p>`;
   try {
     const data = await apiFetch(`/hr/candidates/${candidateId}/insights`);
@@ -449,9 +449,6 @@ async function loadInsights() {
   } catch (err) {
     document.getElementById("insightsBody").innerHTML =
       `<p class="insight-empty" style="color:var(--danger);">Could not generate summary: ${escapeHtml(err.message)}</p>`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Regenerate";
   }
 }
 

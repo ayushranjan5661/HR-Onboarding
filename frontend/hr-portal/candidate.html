@@ -3,64 +3,74 @@
 <head>
 <meta charset="UTF-8">
 <title>HR Portal — Candidate</title>
-<link rel="stylesheet" href="css/style.css?v=20260824c">
+<link rel="stylesheet" href="css/style.css?v=20260824g">
 </head>
 <body>
-  <div class="topbar">
-    <div class="brand">HR Portal — Candidate Onboarding</div>
-    <div class="who">
-      <span id="whoami"></span>
-      <button onclick="hrLogout()">Log out</button>
-    </div>
-  </div>
-
-  <div class="container">
-    <a class="back-link" href="dashboard.html">&larr; Back to all candidates</a>
-    <div class="page-header" style="margin-top:10px;">
-      <h2 id="candName">Loading...</h2>
-      <span id="candStage"></span>
-    </div>
-
-    <div class="card section-card" id="credentialsCard">
-      <div class="section-title">
-        <h3>Candidate Login Credentials</h3>
-      </div>
-      <div id="credentialsBody"></div>
-    </div>
-
-    <div class="card section-card hidden" id="decisionCard">
-      <div class="section-title"><h3>Final Interview Decision</h3></div>
-      <p style="color:#6b7280;font-size:0.88rem;">
-        Review the CIF details below. Approve to unlock the Background Verification
-        and Document Collection forms for this candidate, or reject to close the application.
-      </p>
-      <div class="decision-bar">
-        <button class="btn btn-success" id="approveBtn">Approve</button>
-        <button class="btn btn-danger" id="rejectBtn">Reject</button>
-      </div>
-    </div>
-
-    <div class="card section-card hidden" id="rejectedNotice"></div>
-
-    <div class="card section-card hidden" id="insightsCard">
-      <div class="section-title">
-        <h3>AI Summary &amp; Flags</h3>
-        <div style="display:flex;gap:8px;">
-          <button class="btn btn-outline btn-small" id="insightsBtn" onclick="loadInsights()">Generate Summary</button>
-          <button class="btn btn-outline btn-small" id="insightsToggleBtn" onclick="toggleInsights()">&minus;</button>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-brand"><span class="brand-mark">LS</span><span>HR Portal</span></div>
+      <nav class="sidebar-nav">
+        <a href="dashboard.html" class="nav-item active"><span class="nav-dot"></span> Candidates</a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="user-chip">
+          <span class="avatar" id="whoamiAvatar"></span>
+          <span class="user-name" id="whoami"></span>
         </div>
+        <button class="logout-btn" onclick="hrLogout()">Log out</button>
       </div>
-      <div id="insightsBody"></div>
-    </div>
+    </aside>
 
-    <div class="card section-card" id="cifCard">
-      <div class="section-title"><h3>Candidate Details (CIF)</h3></div>
-      <div id="profileFields"></div>
-      <div id="cifExtraFields"></div>
-      <div id="cifDocs"></div>
-    </div>
+    <div class="main-area">
+      <div class="container">
+        <a class="back-link" href="dashboard.html">&larr; Back to all candidates</a>
+        <div class="page-header" style="margin-top:10px;">
+          <h2 id="candName">Loading...</h2>
+          <span id="candStage"></span>
+        </div>
 
-    <div id="followupForms"></div>
+        <div class="card section-card" id="credentialsCard">
+          <div class="section-title">
+            <h3>Candidate Login Credentials</h3>
+          </div>
+          <div id="credentialsBody"></div>
+        </div>
+
+        <div class="card section-card hidden" id="decisionCard">
+          <div class="section-title"><h3>Final Interview Decision</h3></div>
+          <p style="color:#6b7280;font-size:0.88rem;">
+            Review the CIF details below. Approve to unlock the Background Verification
+            and Document Collection forms for this candidate, or reject to close the application.
+          </p>
+          <div class="decision-bar">
+            <button class="btn btn-success" id="approveBtn">Approve</button>
+            <button class="btn btn-danger" id="rejectBtn">Reject</button>
+          </div>
+        </div>
+
+        <div class="card section-card hidden" id="rejectedNotice"></div>
+
+        <div class="card section-card hidden collapsed" id="insightsCard">
+          <div class="section-title collapsible" onclick="toggleCollapse(this)">
+            <h3>AI Summary &amp; Flags</h3>
+            <span class="chevron">&#9660;</span>
+          </div>
+          <div id="insightsBody"></div>
+        </div>
+
+        <div class="card section-card collapsed" id="cifCard">
+          <div class="section-title collapsible" onclick="toggleCollapse(this)">
+            <h3>Candidate Details (CIF)</h3>
+            <span class="chevron">&#9660;</span>
+          </div>
+          <div id="profileFields"></div>
+          <div id="cifExtraFields"></div>
+          <div id="cifDocs"></div>
+        </div>
+
+        <div id="followupForms"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Reject reason modal -->
@@ -107,9 +117,9 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260824c"></script>
-  <script src="js/api.js?v=20260824c"></script>
-  <script src="js/field-labels.js?v=20260824c"></script>
-  <script src="js/candidate.js?v=20260824c"></script>
+  <script src="../js/config.js?v=20260824g"></script>
+  <script src="js/api.js?v=20260824g"></script>
+  <script src="js/field-labels.js?v=20260824g"></script>
+  <script src="js/candidate.js?v=20260824g"></script>
 </body>
 </html>
