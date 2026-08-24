@@ -294,7 +294,7 @@ function render() {
     if (!sub) return;
     if (sub.status === "LOCKED") {
       const wrap = document.createElement("div");
-      wrap.className = "card section-card";
+      wrap.className = "card section-card collapsed";
       wrap.style.opacity = "0.7";
       wrap.innerHTML = `<div class="section-title collapsible" onclick="toggleCollapse(this)">
           <h3>${cfg.title} <span class="badge badge-locked">LOCKED</span></h3>
@@ -306,7 +306,7 @@ function render() {
     }
     const canReview = sub.status === "SUBMITTED" || sub.status === "UNDER_REVIEW";
     const wrap = document.createElement("div");
-    wrap.className = "card section-card";
+    wrap.className = "card section-card collapsed";
     wrap.innerHTML = `
       <div class="section-title collapsible" onclick="toggleCollapse(this)">
         <h3>${cfg.title} <span class="badge badge-${sub.status.toLowerCase()}">${sub.status.replaceAll("_"," ")}</span></h3>
