@@ -8,10 +8,63 @@ from app.config import settings
 
 _SAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
 
+# Only images, PDFs and Word documents may be uploaded. Enforced here (not
+# just via the frontend's <input accept> hint, which anyone can bypass) by
+# checking BOTH the extension and the browser-declared MIME type, and then
+# sniffing the actual file header — a renamed .exe won't pass the magic-byte
+# check even if its extension and declared type are faked.
+_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf", ".doc", ".docx"}
+_ALLOWED_CONTENT_TYPES = {
+    "image/jpeg", "image/png", "image/gif", "image/webp",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+def _sniff_matches_extension(ext: str, head: bytes) -> bool:
+    """Does the file's actual content match what its extension claims?"""
+    if ext in (".jpg", ".jpeg"):
+        return head.startswith(b"\xff\xd8\xff")
+    if ext == ".png":
+        return head.startswith(b"\x89PNG\r\n\x1a\n")
+    if ext == ".gif":
+        return head.startswith((b"GIF87a", b"GIF89a"))
+    if ext == ".webp":
+        return head.startswith(b"RIFF") and head[8:12] == b"WEBP"
+    if ext == ".pdf":
+        return head.startswith(b"%PDF-")
+    if ext == ".docx":
+        return head.startswith(b"PK\x03\x04")          # .docx is a zip archive
+    if ext == ".doc":
+        return head.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")  # OLE compound file
+    return False
+
 
 def _safe_ext(filename: str) -> str:
     ext = os.path.splitext(filename)[1]
     return _SAFE_CHARS.sub("", ext)[:10]
+
+
+def _validate_file_type(filename: str, content_type: str | None, contents: bytes) -> None:
+    ext = _safe_ext(filename).lower()
+    if ext not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Only images (JPG/PNG/GIF/WEBP), PDF, and Word documents (.doc/.docx) are allowed.",
+        )
+    if content_type and content_type not in _ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{content_type}' is not allowed. "
+                    "Only images, PDF, and Word documents are accepted.",
+        )
+    if not _sniff_matches_extension(ext, contents[:16]):
+        raise HTTPException(
+            status_code=400,
+            detail="This file's content doesn't match its extension — it may be "
+                    "corrupted or mislabeled. Please upload a genuine image, PDF, or Word document.",
+        )
 
 
 def save_upload(file: UploadFile, candidate_id: int, form_type: str, field_key: str) -> tuple[str, str]:
@@ -29,6 +82,7 @@ def save_upload(file: UploadFile, candidate_id: int, form_type: str, field_key: 
     max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
     if len(contents) > max_bytes:
         raise HTTPException(status_code=413, detail=f"File too large (max {settings.MAX_UPLOAD_MB} MB)")
+    _validate_file_type(file.filename or "", file.content_type, contents)
 
     stored_name = f"{candidate_id}_{form_type}_{field_key}_{secrets.token_hex(6)}.dat"
     path = os.path.join(settings.UPLOAD_DIR, stored_name)
