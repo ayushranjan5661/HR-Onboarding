@@ -301,13 +301,20 @@ documents and contact details (those aren't relevant here).
 
 Return ONLY a JSON object with exactly two keys:
 {{
-  "summary": "<4-6 sentence plain-English summary of who this candidate is,
-              their experience, education, and what they're asking for
-              (role, CTC, notice period). Write it the way an HR reviewer
-              would want it, not a restatement of every field. ALWAYS include
-              the marks/CGPA/percentage for every education level present
-              (10th, 12th or Diploma, UG, PG) — e.g. '10th: 85%, 12th: 80%,
-              B.Tech: 75%' — this is something HR specifically checks.>",
+  "summary": "<Plain-English summary of who this candidate is, their
+              education, experience, and what they're asking for (role, CTC,
+              notice period). Write it the way an HR reviewer would want it,
+              not a restatement of every field. Structure it as short lines
+              separated by \\n (NOT one run-on paragraph) — roughly: one line
+              on who/role, one on education, one on experience, one on
+              certifications (if any), one on compensation/notice.
+              ALWAYS include the marks/CGPA/percentage for every education
+              level present (10th, 12th or Diploma, UG, PG) exactly as given
+              — do not add a '%' if the value already has one or already has
+              a unit like 'CGPA'. If technical certifications are listed and
+              they look relevant/strong for the applied role, call that out
+              positively — it's a genuine plus worth an HR reviewer noticing,
+              not just another field to restate.>",
   "flags": [
     {{"field": "<short field name this is about>",
       "issue": "<one sentence, specific, actionable>",
@@ -397,42 +404,72 @@ def _validate_llm_flags(raw: list) -> list[dict]:
 _SECTION_LABEL = {"10TH": "10th", "12TH": "12th/Diploma"}
 
 
+def _format_mark(mark) -> str:
+    """Candidates sometimes type '85', sometimes '85%', sometimes '8.5 CGPA'
+    — never assume it's a bare number. Only append '%' when the value is
+    plain digits; anything that already carries its own unit is left as-is
+    so it never doubles up ('85%%' or '8.5 CGPA%')."""
+    m = str(mark or "").strip()
+    if not m:
+        return ""
+    return m if ("%" in m or any(c.isalpha() for c in m)) else f"{m}%"
+
+
 def _education_breakdown(ctx: dict) -> str:
     """One line per education entry: '10th: 85%, 12th: 80%, B.Tech: 75%'."""
     bits = []
     for e in ctx.get("education", []):
         label = _SECTION_LABEL.get(e["section"], e.get("qualification") or e["section"])
-        mark = e.get("cgpa_percent")
-        bits.append(f"{label}: {mark}%" if mark else label)
+        mark = _format_mark(e.get("cgpa_percent"))
+        bits.append(f"{label}: {mark}" if mark else label)
     return ", ".join(bits)
 
 
 def _fallback_summary(ctx: dict) -> str:
     """Used only when the LLM is unavailable — a plain templated digest so
-    HR always sees something instead of an error."""
+    HR always sees something instead of an error. Built as short lines
+    (joined with newlines, not one run-on paragraph) grouped the way an HR
+    reviewer actually scans a CIF: who/role, education, experience, ask."""
     cif = ctx.get("cif") or {}
-    parts = []
+    lines = []
+
     if ctx.get("candidate_name"):
-        parts.append(f"{ctx['candidate_name']} applied for "
-                     f"{cif.get('position_applied_for') or 'an unspecified role'}.")
-    if ctx.get("highest_qualification"):
-        parts.append(f"Highest qualification: {ctx['highest_qualification']}"
-                      + (f" from {ctx['university_name']}" if ctx.get("university_name") else "")
-                      + (f" ({ctx['graduation_year']})" if ctx.get("graduation_year") else "") + ".")
+        lines.append(f"{ctx['candidate_name']} applied for "
+                      f"{cif.get('position_applied_for') or 'an unspecified role'}.")
+
     education_line = _education_breakdown(ctx)
-    if education_line:
-        parts.append(f"Education: {education_line}.")
+    edu_bit = f"Education: {education_line}." if education_line else ""
+    if ctx.get("highest_qualification"):
+        edu_bit = (f"Highest qualification: {ctx['highest_qualification']}"
+                   + (f" from {ctx['university_name']}" if ctx.get("university_name") else "")
+                   + (f" ({ctx['graduation_year']})" if ctx.get("graduation_year") else "")
+                   + ". " + edu_bit)
+    if edu_bit:
+        lines.append(edu_bit.strip())
+
+    exp_bit = []
     if cif.get("total_experience_yrs"):
-        parts.append(f"Total experience: {cif['total_experience_yrs']} years "
-                      f"({cif.get('relevant_skill_exp_yrs') or '?'} years relevant).")
-    if cif.get("current_ctc_lpa") or cif.get("expected_ctc_lpa"):
-        parts.append(f"CTC: {cif.get('current_ctc_lpa') or '?'} LPA current, "
-                      f"{cif.get('expected_ctc_lpa') or '?'} LPA expected.")
-    if cif.get("notice_period_days"):
-        parts.append(f"Notice period: {cif['notice_period_days']} days.")
+        exp_bit.append(f"Total experience: {cif['total_experience_yrs']} years "
+                        f"({cif.get('relevant_skill_exp_yrs') or '?'} years relevant)")
     if ctx.get("employment"):
-        parts.append(f"{len(ctx['employment'])} employer(s) listed.")
-    return " ".join(parts) or "No CIF data available to summarise yet."
+        exp_bit.append(f"{len(ctx['employment'])} employer(s) listed")
+    if exp_bit:
+        lines.append(". ".join(exp_bit) + ".")
+
+    certs = str(cif.get("technical_certifications") or "").strip()
+    if certs:
+        lines.append(f"Certifications: {certs}.")
+
+    ask_bit = []
+    if cif.get("current_ctc_lpa") or cif.get("expected_ctc_lpa"):
+        ask_bit.append(f"CTC: {cif.get('current_ctc_lpa') or '?'} LPA current, "
+                        f"{cif.get('expected_ctc_lpa') or '?'} LPA expected")
+    if cif.get("notice_period_days"):
+        ask_bit.append(f"notice period {cif['notice_period_days']} days")
+    if ask_bit:
+        lines.append(", ".join(ask_bit) + ".")
+
+    return "\n".join(lines) or "No CIF data available to summarise yet."
 
 
 # ---------------------------------------------------------------------------

@@ -140,7 +140,7 @@ tr { cursor: pointer; }
 .section-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .section-title h3 { margin: 0; font-size: 1rem; }
 
-.insight-summary { line-height: 1.5; color: var(--text); margin: 0 0 14px; }
+.insight-summary { line-height: 1.6; color: var(--text); margin: 0 0 14px; white-space: pre-line; }
 .insight-flags { display: flex; flex-direction: column; gap: 8px; }
 .insight-flag { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); }
 .insight-flag .sev { flex: 0 0 auto; padding: 2px 9px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; }
