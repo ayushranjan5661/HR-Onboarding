@@ -43,6 +43,7 @@ from app.models import (
     FormType,
     ReferenceDetail,
 )
+from app.agents import prefill as prefill_agent
 from app.schemas import MyStatusOut
 from app.utils.file_storage import save_upload, upload_path
 
@@ -134,12 +135,27 @@ def my_submission(form_type: str, db: Session = Depends(get_db),
 
     # Which uploads are already on record, so the form can say "keep or replace".
     out["documents"] = [
-        {"field_key": d.field_key, "original_filename": d.original_filename}
+        {"id": d.id, "field_key": d.field_key,
+         "original_filename": d.original_filename,
+         "content_type": d.content_type,
+         # so the portal can show a preview rather than just a filename
+         "file_available": os.path.isfile(upload_path(d.stored_filename))}
         for d in db.query(Document).filter(
             Document.candidate_id == current.id,
             Document.form_type == FormType(form_type)).all()
     ]
     return out
+
+
+@router.get("/me/prefill/{form_type}")
+def my_prefill(form_type: str, db: Session = Depends(get_db),
+                current: Candidate = Depends(get_current_candidate)):
+    """What this form can inherit from the candidate's earlier submissions —
+    matched by the cross-form mapping agent, including uploads that can be
+    carried over rather than re-uploaded."""
+    if form_type not in ("DOCUMENT_COLLECTION", "BGV"):
+        return {"fields": {}, "documents": [], "company_labels": {}}
+    return prefill_agent.build_prefill(db, current.id, form_type)
 
 
 def _apply_fields(obj, form, field_names: list[str]):
@@ -282,18 +298,31 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
         already = {d.field_key for d in db.query(Document).filter(
             Document.candidate_id == current.id,
             Document.form_type == FormType.DOCUMENT_COLLECTION).all()}
+        # A mandatory upload is also satisfied if it can be carried over from
+        # an earlier form (e.g. the CIF profile picture is the passport photo).
+        carryable = {d["target_field"] for d in prefill_agent.build_prefill(
+            db, current.id, "DOCUMENT_COLLECTION")["documents"]}
         missing = [k for k in required
-                    if k not in already
+                    if k not in already and k not in carryable
                     and not (hasattr(form.get(k), "filename") and form.get(k).filename)]
         if missing:
             raise HTTPException(status_code=400,
                                  detail="Missing required documents: " + ", ".join(missing))
         _save_files(db, form, current, "DOCUMENT_COLLECTION", DOC_FILE_FIELDS)
 
+    # Anything the candidate already gave us on an earlier form and did not
+    # re-upload here is copied across automatically.
+    provided = {k for k in (BGV_FILE_FIELDS if form_type == "BGV" else DOC_FILE_FIELDS)
+                 if hasattr(form.get(k), "filename") and form.get(k).filename}
+    carried = prefill_agent.carry_documents(db, current.id, form_type, provided)
+
     submission.status = FormStatus.SUBMITTED
     submission.submitted_at = datetime.now(timezone.utc)
     db.commit()
-    return {"detail": "Form submitted. HR will review it shortly."}
+    detail = "Form submitted. HR will review it shortly."
+    if carried:
+        detail += f" ({len(carried)} document(s) carried over from your earlier forms.)"
+    return {"detail": detail, "carried_documents": carried}
 
 
 @router.get("/documents/{document_id}/download")

@@ -200,3 +200,9 @@ tr { cursor: pointer; }
 }
 .form-tile .ft-name { font-weight: 600; }
 .form-tile .ft-desc { color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
+
+/* --- Cross-form auto-fill markers --- */
+.auto-filled { background: #f0fdf4; border-color: #86efac; }
+.auto-filled-note { color: #15803d; font-size: 0.76rem; margin-top: 3px; }
+.auto-filled-note.carried-doc { color: #0369a1; }
+.company-tag { color: var(--brand); font-weight: 600; }

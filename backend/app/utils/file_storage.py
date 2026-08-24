@@ -40,3 +40,13 @@ def save_upload(file: UploadFile, candidate_id: int, form_type: str, field_key: 
 
 def upload_path(stored_filename: str) -> str:
     return os.path.join(settings.UPLOAD_DIR, stored_filename)
+
+
+def save_bytes(data: bytes, candidate_id: int, form_type: str, field_key: str) -> str:
+    """Store raw bytes as a new upload and return its stored filename.
+    Used when a document is carried over from an earlier form."""
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    stored_name = f"{candidate_id}_{form_type}_{field_key}_{secrets.token_hex(6)}.dat"
+    with open(os.path.join(settings.UPLOAD_DIR, stored_name), "wb") as f:
+        f.write(data)
+    return stored_name

@@ -137,6 +137,48 @@ locks. A form that is not yet its turn shows as LOCKED in both portals.
   If your BGV vendor has a prescribed layout, adjust
   `backend/app/form_definitions.py` (BGV_* lists) and regenerate the form.
 
+## Cross-form AI mapping agent
+
+The three forms ask for many of the same things under different names — the
+CIF's *"Candidate Profile Picture"* is the Document Collection's *"Passport
+size photo"*. An agent works these equivalences out from the labels the
+candidate sees, so nothing is entered or uploaded twice.
+
+`backend/app/agents/field_mapper.py` decides, in this order:
+
+1. **Curated** — hand-verified pairs that must always hold.
+2. **LLM** — Azure OpenAI (`VITE_AZURE_OPENAI_*` in `.env`) reasons over the
+   label lists and proposes the rest.
+3. **Heuristic** — token-overlap matching, used whenever the LLM is
+   unreachable, so a form never breaks because an API call failed.
+
+Every LLM proposal is validated before use: both keys must exist in the
+catalogue, the kinds must match, the source must be an *earlier* form, and
+low-confidence guesses are dropped (`AI_MAPPING_MIN_CONFIDENCE`, default 0.75).
+A bad model response therefore cannot inject a nonsense mapping.
+
+**Never inherited** (`BLOCKED_TARGETS`): consents, declarations, signature-of-
+agreement checkboxes and dates — these must be given afresh on each form —
+plus BGV-specific evidence (Form 16, bank statement, police clearance).
+
+What the agent does for the candidate:
+- **Pre-fills fields** it matched, highlighted green with *"Filled from your
+  CIF — edit if this is wrong"*. Always editable.
+- **Carries documents forward.** A mapped upload left blank is satisfied by
+  copying the file already on record; the copy is independent, so deleting one
+  form's document never removes another's. A mandatory upload counts as
+  satisfied if it can be carried over.
+- **Names company sections** in the Document Collection form after the actual
+  employers listed on the CIF, instead of "Previous company 1".
+
+Inspect what it decided: `GET /hr/field-mappings` (add `?refresh=true` to
+re-run after changing a form). Resolved mappings are cached in-process, so the
+LLM is not called per request. Set `AI_MAPPING_ENABLED=false` in `.env` to run
+on curated + heuristic rules only.
+
+`backend/app/field_catalog.py` is generated — regenerate it with
+`scratchpad/gen_catalog.py` after changing any form definition.
+
 ## Security notes
 - Passwords are bcrypt-hashed; HR and candidate sessions use separate JWTs
   scoped by role, so an HR token cannot access candidate endpoints or vice

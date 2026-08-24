@@ -41,6 +41,10 @@ function markExistingUploads(formEl, documents) {
     note.style.color = "#15803d";
     note.textContent = `Already uploaded: ${doc.original_filename} — choose a file only if you want to replace it.`;
     input.insertAdjacentElement("afterend", note);
+    // Let them open it, so they can check what is on record.
+    if (typeof attachViewButton === "function") {
+      attachViewButton(input, doc, "View uploaded file");
+    }
   });
 }
 

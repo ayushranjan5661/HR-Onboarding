@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>LevelShift Onboarding — Login</title>
-<link rel="stylesheet" href="hr-portal/css/style.css?v=20260822h">
+<link rel="stylesheet" href="hr-portal/css/style.css?v=20260822j">
 <style>
   .role-tabs { display: flex; gap: 0; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   .role-tab {
@@ -38,7 +38,7 @@
     </div>
   </div>
 
-  <script src="js/config.js?v=20260822h"></script>
+  <script src="js/config.js?v=20260822j"></script>
   <script>
     let role = "hr";
 
@@ -103,8 +103,8 @@
     }
 
     // Which page the candidate should land on: the first form still awaiting
-    // them. CIF first, then BGV, then Document Collection. Falls back to the
-    // status page if nothing is pending (or anything goes wrong).
+    // them, in sequence order (CIF -> Document Collection -> BGV). Falls back
+    // to the status page if nothing is pending (or anything goes wrong).
     const FORM_PAGES = {
       CIF: "candidate-portal/cif-form.html",
       BGV: "candidate-portal/bgv-form.html",

@@ -131,6 +131,21 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
                                     login_url=_candidate_login_url(candidate))
 
 
+@router.get("/field-mappings")
+def field_mappings(refresh: bool = False, current: HRUser = Depends(get_current_hr)):
+    """What the cross-form mapping agent decided, and how. Pass refresh=true to
+    re-run it (e.g. after changing a form's fields)."""
+    from app.agents import prefill as prefill_agent
+    from app.config import settings as cfg
+    data = prefill_agent.mappings(refresh=refresh)
+    return {
+        "ai_enabled": cfg.AI_MAPPING_ENABLED,
+        "model": cfg.AZURE_OPENAI_DEPLOYMENT or None,
+        "min_confidence": cfg.AI_MAPPING_MIN_CONFIDENCE,
+        "mappings": data,
+    }
+
+
 @router.get("/candidates", response_model=list[CandidateListItem])
 def list_candidates(db: Session = Depends(get_db), current: HRUser = Depends(get_current_hr)):
     return db.query(Candidate).order_by(Candidate.created_at.desc()).all()
