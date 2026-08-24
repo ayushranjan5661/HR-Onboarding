@@ -140,6 +140,21 @@ tr { cursor: pointer; }
 .section-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .section-title h3 { margin: 0; font-size: 1rem; }
 
+.insight-summary { line-height: 1.5; color: var(--text); margin: 0 0 14px; }
+.insight-flags { display: flex; flex-direction: column; gap: 8px; }
+.insight-flag { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); }
+.insight-flag .sev { flex: 0 0 auto; padding: 2px 9px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; }
+.insight-flag .body { flex: 1; font-size: 0.88rem; }
+.insight-flag .field { color: var(--muted); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.02em; display: block; margin-bottom: 2px; }
+.insight-flag.sev-high { border-color: #fecaca; background: #fef2f2; }
+.insight-flag.sev-medium { border-color: #fde68a; background: #fffbeb; }
+.insight-flag.sev-low { border-color: var(--border); background: #f9fafb; }
+.insight-flag .sev-high-badge { background: #fee2e2; color: var(--danger); }
+.insight-flag .sev-medium-badge { background: #fef3c7; color: var(--warn); }
+.insight-flag .sev-low-badge { background: #f3f4f6; color: var(--muted); }
+.insight-empty { color: var(--muted); font-size: 0.88rem; }
+.insight-meta { color: var(--muted); font-size: 0.76rem; margin-top: 10px; }
+
 .docs-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
 .doc-chip {
   background: #f9fafb;

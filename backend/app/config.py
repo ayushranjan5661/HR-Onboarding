@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # LLM proposals below this confidence are discarded.
     AI_MAPPING_MIN_CONFIDENCE: float = 0.75
 
+    # --- AI candidate-insight agent (CIF summary + anomaly flags) ---
+    AI_INSIGHTS_ENABLED: bool = True
+    AI_INSIGHTS_TIMEOUT: int = 30
+
     # --- File uploads ---
     UPLOAD_DIR: str = "uploads"
     MAX_UPLOAD_MB: int = 10

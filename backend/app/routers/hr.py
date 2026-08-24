@@ -146,6 +146,22 @@ def field_mappings(refresh: bool = False, current: HRUser = Depends(get_current_
     }
 
 
+@router.get("/candidates/{candidate_id}/insights")
+def candidate_insights(candidate_id: int, db: Session = Depends(get_db),
+                        current: HRUser = Depends(get_current_hr)):
+    """AI summary + anomaly flags for one candidate's CIF submission.
+    Computed live on each call (candidate data changes; unlike the field
+    mapper, there is nothing static here worth caching)."""
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    if not candidate.cif_details:
+        raise HTTPException(status_code=400, detail="Candidate has not submitted the CIF yet")
+
+    from app.agents import insights as insights_agent
+    return insights_agent.generate(db, candidate_id)
+
+
 @router.get("/candidates", response_model=list[CandidateListItem])
 def list_candidates(db: Session = Depends(get_db), current: HRUser = Depends(get_current_hr)):
     return db.query(Candidate).order_by(Candidate.created_at.desc()).all()

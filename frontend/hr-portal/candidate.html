@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>HR Portal — Candidate</title>
-<link rel="stylesheet" href="css/style.css?v=20260822j">
+<link rel="stylesheet" href="css/style.css?v=20260824b">
 </head>
 <body>
   <div class="topbar">
@@ -41,6 +41,17 @@
     </div>
 
     <div class="card section-card hidden" id="rejectedNotice"></div>
+
+    <div class="card section-card hidden" id="insightsCard">
+      <div class="section-title">
+        <h3>AI Summary &amp; Flags</h3>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-outline btn-small" id="insightsBtn" onclick="loadInsights()">Generate Summary</button>
+          <button class="btn btn-outline btn-small" id="insightsToggleBtn" onclick="toggleInsights()">&minus;</button>
+        </div>
+      </div>
+      <div id="insightsBody"></div>
+    </div>
 
     <div class="card section-card" id="cifCard">
       <div class="section-title"><h3>Candidate Details (CIF)</h3></div>
@@ -96,9 +107,9 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260822j"></script>
-  <script src="js/api.js?v=20260822j"></script>
-  <script src="js/field-labels.js?v=20260822j"></script>
-  <script src="js/candidate.js?v=20260822j"></script>
+  <script src="../js/config.js?v=20260824b"></script>
+  <script src="js/api.js?v=20260824b"></script>
+  <script src="js/field-labels.js?v=20260824b"></script>
+  <script src="js/candidate.js?v=20260824b"></script>
 </body>
 </html>
