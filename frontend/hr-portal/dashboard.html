@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>HR Portal — Dashboard</title>
-<link rel="stylesheet" href="css/style.css?v=20260825b">
+<link rel="stylesheet" href="css/style.css?v=20260825c">
 </head>
 <body>
   <div class="app-shell">
@@ -112,8 +112,8 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260825b"></script>
-  <script src="js/api.js?v=20260825b"></script>
+  <script src="../js/config.js?v=20260825c"></script>
+  <script src="js/api.js?v=20260825c"></script>
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
@@ -123,10 +123,14 @@
       return `<span class="badge badge-${stage.toLowerCase()}">${stage.replaceAll("_", " ")}</span>`;
     }
 
+    // Escapes quotes too, so values are safe inside attributes (title=, href=), not just text.
     function escapeHtml(str) {
-      const div = document.createElement("div");
-      div.textContent = str;
-      return div.innerHTML;
+      return String(str ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
     }
 
     function initials(name) {
@@ -233,18 +237,68 @@
     });
 
     let lastInvite = null;
-    // Copies the login link only — that's the one thing HR sends the candidate.
-    async function copyInviteLink(btn) {
+
+    const COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9"
+      width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>`;
+    const TICK_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>`;
+
+    // Copies one credential field and flashes a tick on its own button.
+    async function copyCredential(btn, field) {
       if (!lastInvite) return;
-      const original = btn.textContent;
+      const value = { email: lastInvite.email, password: lastInvite.temp_password,
+                      link: lastInvite.login_url }[field];
+      if (!value) return;
       try {
-        await navigator.clipboard.writeText(lastInvite.login_url);
-        btn.textContent = "Copied!";
+        await navigator.clipboard.writeText(value);
       } catch {
-        window.prompt("Copy the login link:", lastInvite.login_url);
+        window.prompt("Copy this value:", value);
         return;
       }
+      btn.classList.add("copied");
+      btn.innerHTML = TICK_ICON;
+      btn.setAttribute("aria-label", "Copied");
+      setTimeout(() => {
+        btn.classList.remove("copied");
+        btn.innerHTML = COPY_ICON;
+        btn.setAttribute("aria-label", "Copy");
+      }, 1400);
+    }
+
+    // Copies all three lines at once — what HR actually pastes into an email.
+    async function copyAllCredentials(btn) {
+      if (!lastInvite) return;
+      const text = [
+        `Login ID: ${lastInvite.email}`,
+        `Password: ${lastInvite.temp_password}`,
+        `Login link: ${lastInvite.login_url}`,
+      ].join("\n");
+      const original = btn.textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        window.prompt("Copy the login details:", text);
+        return;
+      }
+      btn.textContent = "Copied!";
       setTimeout(() => { btn.textContent = original; }, 1500);
+    }
+
+    function credRow(label, value, field, isLink) {
+      const safe = escapeHtml(value);
+      const cell = isLink
+        ? `<a class="cred-value is-link" href="${safe}" target="_blank"
+             rel="noopener noreferrer" title="${safe}">${safe}</a>`
+        : `<div class="cred-value" title="${safe}">${safe}</div>`;
+      return `
+        <div class="cred-row">
+          <div class="cred-label">${escapeHtml(label)}</div>
+          ${cell}
+          <button type="button" class="cred-copy" aria-label="Copy ${escapeHtml(label)}"
+                  title="Copy ${escapeHtml(label)}"
+                  onclick="copyCredential(this, '${field}')">${COPY_ICON}</button>
+        </div>`;
     }
 
     function closeInviteModal() {
@@ -271,16 +325,28 @@
         document.getElementById("inviteForm").classList.add("hidden");
         const box = document.getElementById("credentialBox");
         box.classList.remove("hidden");
-        box.innerHTML = `
-          <strong>Candidate account created.</strong><br>
-          Send these login details to the candidate (e.g. by email):<br><br>
-          Login ID: <code>${data.email}</code><br>
-          Password: <code>${data.temp_password}</code><br>
-          Login link: <a href="${data.login_url}" target="_blank">${data.login_url}</a><br>
-          <button class="btn btn-outline btn-small" style="margin-top:10px" onclick="copyInviteLink(this)">Copy Link</button>
-          <button class="btn btn-primary btn-small" style="margin-top:10px" onclick="closeInviteModal(); loadCandidates();">Done</button>
-        `;
         lastInvite = data;
+        box.innerHTML = `
+          <div class="cred-head">
+            <span class="cred-check" aria-hidden="true">&#10003;</span>
+            <div class="cred-head-text">
+              <div class="cred-title">Candidate account created</div>
+              <div class="cred-sub">Send these login details to ${escapeHtml(data.email)}.</div>
+            </div>
+          </div>
+          <div class="cred-list">
+            ${credRow("Login ID", data.email, "email", false)}
+            ${credRow("Password", data.temp_password, "password", false)}
+            ${credRow("Login link", data.login_url, "link", true)}
+          </div>
+          <div class="cred-note">
+            The password is temporary and shown only once &mdash; copy it before closing.
+          </div>
+          <div class="cred-actions">
+            <button type="button" class="btn btn-outline" onclick="copyAllCredentials(this)">Copy all details</button>
+            <button type="button" class="btn btn-primary" onclick="closeInviteModal(); loadCandidates();">Done</button>
+          </div>
+        `;
         loadCandidates();
       } catch (err) {
         errorMsg.textContent = err.message;
