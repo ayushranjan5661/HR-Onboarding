@@ -4,47 +4,39 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LevelShift Onboarding — Login</title>
-<link rel="stylesheet" href="hr-portal/css/style.css?v=20260824e">
+<link rel="stylesheet" href="hr-portal/css/style.css?v=20260825j">
 </head>
 <body>
   <div class="login-wrap">
+    <div class="login-mark"><img src="assets/logo-white.svg?v=20260825l" alt="LevelShift" class="mark-logo"></div>
+
     <div class="login-shell">
-      <div class="login-visual">
-        <div class="mark">LS</div>
-        <div class="pitch">
-          <h2>LevelShift Onboarding</h2>
-          <p>One secure workspace for HR to manage candidates end-to-end, and for
-             candidates to complete their forms — from offer to day one.</p>
+      <div class="login-card">
+        <h1>Welcome back</h1>
+        <p class="sub">One login for HR and candidates. Pick your role below.</p>
+
+        <div class="role-tabs" id="roleTabs">
+          <button type="button" class="role-tab active" id="tabHr" onclick="setRole('hr')">HR</button>
+          <button type="button" class="role-tab" id="tabCandidate" onclick="setRole('candidate')">Candidate</button>
         </div>
-        <div class="foot">© LevelShift · Internal Use</div>
-      </div>
 
-      <div class="login-form-panel">
-        <div class="login-card">
-          <h1>Welcome back</h1>
-          <p class="sub">One login for HR and candidates. Pick your role below.</p>
+        <div id="busy" style="color:var(--muted);font-size:0.9rem;padding:8px 0;"></div>
 
-          <div class="role-tabs" id="roleTabs">
-            <button type="button" class="role-tab active" id="tabHr" onclick="setRole('hr')">HR</button>
-            <button type="button" class="role-tab" id="tabCandidate" onclick="setRole('candidate')">Candidate</button>
-          </div>
-
-          <div id="busy" style="color:var(--muted);font-size:0.9rem;padding:8px 0;"></div>
-
-          <form id="loginForm">
-            <label for="email">Email</label>
-            <input type="email" id="email" placeholder="you@example.com" required autocomplete="username">
-            <label for="password">Password</label>
-            <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password">
-            <button class="btn btn-primary btn-block" type="submit" id="loginBtn">Log in as HR</button>
-            <div class="error-msg" id="errorMsg"></div>
-          </form>
-        </div>
+        <form id="loginForm">
+          <label for="email">Email</label>
+          <input type="email" id="email" placeholder="you@example.com" required autocomplete="username">
+          <label for="password">Password</label>
+          <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password">
+          <button class="btn btn-primary btn-block" type="submit" id="loginBtn">Log in as HR</button>
+          <div class="error-msg" id="errorMsg"></div>
+        </form>
       </div>
     </div>
+
+    <div class="login-foot">© LevelShift · Internal Use</div>
   </div>
 
-  <script src="js/config.js?v=20260824e"></script>
+  <script src="js/config.js?v=20260825j"></script>
   <script>
     let role = "hr";
 
