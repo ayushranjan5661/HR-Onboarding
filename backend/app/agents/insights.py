@@ -64,8 +64,23 @@ _VALID_SEVERITIES = set(_SEVERITY_ORDER)
 MAX_LLM_FLAGS = 8
 
 
-def _flag(field: str, issue: str, severity: str, source: str) -> dict:
-    return {"field": field, "issue": issue, "severity": severity, "source": source}
+def _flag(field: str, title: str, detail: str, severity: str, source: str) -> dict:
+    """One anomaly, split so the UI can lead with a scannable headline.
+
+    `title` is the plain-English conclusion ("Date of birth is after the 10th
+    passing year"); `detail` carries the numbers it came from and what to do
+    about it. `issue` keeps the old single-string shape for any consumer that
+    still reads it.
+    """
+    detail = detail.strip()
+    return {
+        "field": field,
+        "title": title.strip(),
+        "detail": detail,
+        "issue": f"{title.strip()} {detail}".strip(),
+        "severity": severity,
+        "source": source,
+    }
 
 
 def _year(value) -> int | None:
@@ -172,43 +187,67 @@ def rule_based_flags(ctx: dict) -> list[dict]:
         gap = y12 - y10
         if gap <= 0:
             flags.append(_flag(
-                "education", f"12th passing year ({y12}) is not after 10th ({y10}) — "
-                "impossible timeline, please verify.", "high", "rule"))
+                "education", "12th was passed before or in the same year as 10th",
+                f"The form says 10th in {y10} and 12th in {y12}. That order is not "
+                f"possible, so one of the two years is wrong. Ask the candidate to "
+                f"confirm both passing years.", "high", "rule"))
         elif gap == 1:
             flags.append(_flag(
-                "education", f"Only 1 year between 10th ({y10}) and 12th ({y12}) — "
-                "normally 2 years. Exceptional case, worth confirming with the candidate.",
-                "medium", "rule"))
+                "education", "Only 1 year between 10th and 12th",
+                f"10th in {y10}, 12th in {y12}. This is normally a 2-year gap, so it "
+                f"is either a genuine exception or a typo in one year. Worth a quick "
+                f"confirmation.", "medium", "rule"))
 
     if y12 and ug_years:
         gap = ug_years[0] - y12
         if gap < 0:
             flags.append(_flag(
-                "education", f"Undergraduate passing year ({ug_years[0]}) is before "
-                f"12th completion ({y12}) — impossible timeline.", "high", "rule"))
+                "education", "Degree was completed before 12th",
+                f"The form says 12th in {y12} and the degree in {ug_years[0]}. A degree "
+                f"cannot finish before 12th, so one of the two years is wrong.",
+                "high", "rule"))
         elif gap < 2:
             flags.append(_flag(
-                "education", f"Undergraduate completed only {gap} year(s) after 12th "
-                f"({y12} → {ug_years[0]}) — a bachelor's degree is normally 3+ years.",
+                "education",
+                f"Degree finished only {gap} year{'' if gap == 1 else 's'} after 12th",
+                f"12th in {y12}, degree in {ug_years[0]}. A bachelor's degree normally "
+                f"takes at least 3 years, so check whether a passing year is mistyped.",
                 "medium", "rule"))
 
     grad_year = _year(ctx.get("graduation_year"))
     if grad_year and ug_years and grad_year not in ug_years:
         flags.append(_flag(
-            "graduation_year",
-            f"Profile graduation year ({grad_year}) doesn't match the education "
-            f"record on the CIF ({', '.join(map(str, ug_years))}).", "low", "rule"))
+            "graduation_year", "Graduation year does not match the education table",
+            f"The profile says {grad_year}, but the CIF education rows say "
+            f"{', '.join(map(str, ug_years))}. Confirm which one is correct.",
+            "low", "rule"))
 
     # -- Date of birth vs. education age plausibility ---------------------
     dob_year = _year(ctx.get("date_of_birth"))
     if dob_year and y10:
         age_at_10 = y10 - dob_year
-        if not (13 <= age_at_10 <= 19):
+        # A non-positive age isn't "unusual", it's impossible — the birth year is
+        # after the exam. Saying "age is -7" makes the reviewer do the arithmetic
+        # to work out what actually went wrong, so name the real problem instead.
+        if age_at_10 <= 0:
             flags.append(_flag(
-                "date_of_birth",
-                f"Age at 10th completion works out to {age_at_10} (DOB year {dob_year}, "
-                f"10th passed {y10}) — typical range is 14–17. Verify DOB or passing year.",
+                "date_of_birth", "Date of birth is later than the 10th passing year",
+                f"The form says born in {dob_year} but 10th passed in {y10} — the "
+                f"candidate would not have been born yet. One of the two years is "
+                f"mistyped; the birth year is the more likely culprit.",
+                "high", "rule"))
+        elif age_at_10 < 13:
+            flags.append(_flag(
+                "date_of_birth", f"Candidate would have been only {age_at_10} at 10th",
+                f"Born {dob_year}, 10th passed {y10}. Students are normally 14–17 when "
+                f"they pass 10th, so check the birth year and the passing year.",
                 "medium", "rule"))
+        elif age_at_10 > 19:
+            flags.append(_flag(
+                "date_of_birth", f"Candidate would have been {age_at_10} at 10th",
+                f"Born {dob_year}, 10th passed {y10}. Students are normally 14–17 when "
+                f"they pass 10th. This can be genuine (a break in schooling), but it is "
+                f"worth confirming.", "medium", "rule"))
 
     # -- Employment: internal validity + overlaps --------------------------
     parsed = []
@@ -216,9 +255,10 @@ def rule_based_flags(ctx: dict) -> list[dict]:
         f, t = _parse_date(e["from_date"]), _parse_date(e["to_date"])
         if f and t and f > t and not _is_yes(e["currently_working"]):
             flags.append(_flag(
-                "employment",
-                f"{e['company_name'] or 'An employer'}: start date ({e['from_date']}) is "
-                f"after end date ({e['to_date']}).", "high", "rule"))
+                "employment", "Job start date is after its end date",
+                f"{e['company_name'] or 'An employer'} is listed as {e['from_date']} to "
+                f"{e['to_date']}, which runs backwards. Ask for the correct dates.",
+                "high", "rule"))
         parsed.append((e, f, t))
 
     for i in range(len(parsed)):
@@ -233,19 +273,21 @@ def rule_based_flags(ctx: dict) -> list[dict]:
             end2 = t2 or date.today()
             if f1 <= end2 and f2 <= end1:
                 flags.append(_flag(
-                    "employment",
-                    f"Overlapping employment: '{e1['company_name'] or '?'}' and "
-                    f"'{e2['company_name'] or '?'}' both claim dates around "
-                    f"{e1['from_date']}–{e1['to_date'] or 'present'}.", "medium", "rule"))
+                    "employment", "Two jobs overlap in time",
+                    f"{e1['company_name'] or 'One employer'} and "
+                    f"{e2['company_name'] or 'another'} both cover "
+                    f"{e1['from_date']} to {e1['to_date'] or 'present'}. Check whether "
+                    f"this was dual employment or a wrong date.", "medium", "rule"))
 
     cif = ctx.get("cif") or {}
     total_exp = _number(cif.get("total_experience_yrs"))
     relevant_exp = _number(cif.get("relevant_skill_exp_yrs"))
     if total_exp is not None and relevant_exp is not None and relevant_exp > total_exp:
         flags.append(_flag(
-            "relevant_skill_exp_yrs",
-            f"Relevant skill experience ({relevant_exp}y) exceeds total experience "
-            f"({total_exp}y).", "medium", "rule"))
+            "relevant_skill_exp_yrs", "Relevant experience is more than total experience",
+            f"Relevant is {relevant_exp} years but total is {total_exp} years. Relevant "
+            f"experience is part of the total, so it cannot be the larger number.",
+            "medium", "rule"))
 
     if total_exp is not None and parsed:
         years_seen = set()
@@ -260,9 +302,11 @@ def rule_based_flags(ctx: dict) -> list[dict]:
         summed_years = round(total_months / 12, 1)
         if summed_years and abs(summed_years - total_exp) > 1.5:
             flags.append(_flag(
-                "total_experience_yrs",
-                f"Declared total experience ({total_exp}y) doesn't line up with the "
-                f"employment history listed (~{summed_years}y).", "low", "rule"))
+                "total_experience_yrs", "Stated experience does not match the jobs listed",
+                f"The candidate declared {total_exp} years, but the employment dates on "
+                f"the form add up to about {summed_years} years — a gap of roughly "
+                f"{abs(round(total_exp - summed_years, 1))} years. A missing job entry is "
+                f"the usual cause.", "low", "rule"))
 
     # -- Compensation ------------------------------------------------------
     current_ctc = _number(cif.get("current_ctc_lpa"))
@@ -270,22 +314,25 @@ def rule_based_flags(ctx: dict) -> list[dict]:
     if current_ctc and expected_ctc:
         if expected_ctc < current_ctc:
             flags.append(_flag(
-                "expected_ctc_lpa",
-                f"Expected CTC ({expected_ctc} LPA) is lower than current CTC "
-                f"({current_ctc} LPA) — confirm this is intentional.", "low", "rule"))
+                "expected_ctc_lpa", "Asking for less than they currently earn",
+                f"Expected {expected_ctc} LPA against a current {current_ctc} LPA. This is "
+                f"unusual — confirm it is deliberate and not a swapped entry.",
+                "low", "rule"))
         elif expected_ctc > current_ctc * 3:
+            multiple = round(expected_ctc / current_ctc, 1)
             flags.append(_flag(
-                "expected_ctc_lpa",
-                f"Expected CTC ({expected_ctc} LPA) is more than 3x current CTC "
-                f"({current_ctc} LPA) — unusually large jump.", "medium", "rule"))
+                "expected_ctc_lpa", f"Expected CTC is {multiple}x their current CTC",
+                f"They earn {current_ctc} LPA and are asking for {expected_ctc} LPA — a "
+                f"jump of {round(expected_ctc - current_ctc, 1)} LPA. Worth checking early, "
+                f"since it may be outside the budget for the role.", "medium", "rule"))
 
     # -- Declaration ---------------------------------------------------------
     if cif and _is_yes(cif.get("declaration_accepted")):
         if not cif.get("declaration_place") or not cif.get("declaration_date"):
             flags.append(_flag(
-                "declaration_accepted",
-                "Declaration marked accepted but place/date wasn't captured.",
-                "low", "rule"))
+                "declaration_accepted", "Declaration accepted but place/date is missing",
+                "The candidate ticked the declaration without filling in the place and "
+                "date. These are needed for the signed record.", "low", "rule"))
 
     return flags
 
@@ -317,7 +364,11 @@ Return ONLY a JSON object with exactly two keys:
               not just another field to restate.>",
   "flags": [
     {{"field": "<short field name this is about>",
-      "issue": "<one sentence, specific, actionable>",
+      "title": "<the problem in plain English, under 60 characters, no numbers
+                 unless essential — this is the headline the reviewer scans>",
+      "detail": "<1-2 sentences: the values it came from, and what the reviewer
+                  should do about it. Never make the reviewer do arithmetic to
+                  understand the problem — state the conclusion, then the numbers.>",
       "severity": "low|medium|high"}}
   ]
 }}
@@ -390,14 +441,19 @@ def _validate_llm_flags(raw: list) -> list[dict]:
     for p in raw[:MAX_LLM_FLAGS]:
         if not isinstance(p, dict):
             continue
-        issue = str(p.get("issue") or "").strip()[:300]
-        if not issue:
+        title = str(p.get("title") or "").strip()[:120]
+        detail = str(p.get("detail") or "").strip()[:300]
+        # Older/looser responses may still send a single "issue" string. Take it
+        # as the detail and let the field name carry the headline.
+        if not (title or detail):
+            detail = str(p.get("issue") or "").strip()[:300]
+        if not (title or detail):
             continue
         severity = str(p.get("severity") or "medium").lower()
         if severity not in _VALID_SEVERITIES:
             severity = "medium"
         field = str(p.get("field") or "general")[:60]
-        valid.append(_flag(field, issue, severity, "llm"))
+        valid.append(_flag(field, title, detail, severity, "llm"))
     return valid
 
 

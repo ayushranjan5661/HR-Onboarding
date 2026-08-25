@@ -457,16 +457,40 @@ function toggleCollapse(headerEl) {
 // ---- AI Summary & Flags ----
 let insightsLoaded = false;
 
+// Flag keys are field names ("date_of_birth") or whole sections ("education").
+// labelFor covers the real CIF fields; the rest get title-cased so the chip
+// never shows a raw DATE_OF_BIRTH-style identifier.
+const FLAG_SECTION_LABELS = {
+  education: "Education", employment: "Employment", general: "General",
+  graduation_year: "Graduation Year",
+};
+
+function flagFieldLabel(key) {
+  if (!key) return "";
+  if (FLAG_SECTION_LABELS[key]) return FLAG_SECTION_LABELS[key];
+  const label = labelFor(key);
+  return label === key
+    ? key.replaceAll("_", " ").replace(/\w/g, ch => ch.toUpperCase())
+    : label;
+}
+
 function renderInsights(data) {
+  // Flags lead with a plain-English headline; the numbers behind it and the
+  // suggested action sit underneath. `issue` is the older single-string shape.
   const flagsHtml = data.flags.length
-    ? data.flags.map(f => `
+    ? data.flags.map(f => {
+        const heading = f.title || f.issue || "";
+        const detail = f.title ? (f.detail || "") : "";
+        return `
         <div class="insight-flag sev-${f.severity}">
-          <span class="sev sev-${f.severity}-badge">${f.severity}</span>
+          <span class="sev sev-${f.severity}-badge">${escapeHtml(f.severity)}</span>
           <div class="body">
-            <span class="field">${escapeHtml(f.field)}</span>
-            ${escapeHtml(f.issue)}
+            <span class="flag-title">${escapeHtml(heading)}</span>
+            ${detail ? `<span class="flag-detail">${escapeHtml(detail)}</span>` : ""}
+            <span class="field">${escapeHtml(flagFieldLabel(f.field))}</span>
           </div>
-        </div>`).join("")
+        </div>`;
+      }).join("")
     : `<p class="insight-empty">No anomalies flagged.</p>`;
 
   const modelNote = data.generated_by === "llm"

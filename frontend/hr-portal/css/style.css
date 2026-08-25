@@ -398,8 +398,12 @@ tbody tr:last-child td { border-bottom: none; }
 .insight-flag { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); transition: box-shadow var(--ease); }
 .insight-flag:hover { box-shadow: var(--shadow-sm); }
 .insight-flag .sev { flex: 0 0 auto; padding: 3px 10px; border-radius: 20px; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; }
-.insight-flag .body { flex: 1; font-size: 0.88rem; }
-.insight-flag .field { color: var(--muted); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.03em; display: block; margin-bottom: 3px; font-weight: 700; }
+.insight-flag .body { flex: 1; min-width: 0; font-size: 0.88rem; }
+/* Headline first, then the numbers behind it, then the field chip — the
+   reviewer should get the problem from the first line alone. */
+.insight-flag .flag-title { display: block; font-weight: 650; color: var(--text); line-height: 1.45; }
+.insight-flag .flag-detail { display: block; margin-top: 3px; color: #4b5163; font-size: 0.84rem; line-height: 1.55; }
+.insight-flag .field { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; display: block; margin-top: 7px; font-weight: 700; }
 .insight-flag.sev-high { border-color: #fecaca; background: var(--danger-bg); }
 .insight-flag.sev-medium { border-color: #fde68a; background: var(--warn-bg); }
 .insight-flag.sev-low { border-color: var(--border); background: #f9fafb; }

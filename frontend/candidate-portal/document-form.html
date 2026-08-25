@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Candidate Document Collection</title>
-<link rel="stylesheet" href="css/style.css?v=20260824l">
+<link rel="stylesheet" href="css/style.css?v=20260825d">
 <style>
   .form-card { max-width: 980px; }
   .doc-group { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 18px; }
@@ -237,12 +237,13 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260824l"></script>
-  <script src="js/api.js?v=20260824l"></script>
-  <script src="js/doc-viewer.js?v=20260824l"></script>
-  <script src="js/prefill.js?v=20260824l"></script>
-  <script src="js/edit-mode.js?v=20260824l"></script>
-  <script src="js/auto-fill.js?v=20260824l"></script>
+  <script src="../js/config.js?v=20260825d"></script>
+  <script src="js/api.js?v=20260825d"></script>
+  <script src="js/dialog.js?v=20260825d"></script>
+  <script src="js/doc-viewer.js?v=20260825d"></script>
+  <script src="js/prefill.js?v=20260825d"></script>
+  <script src="js/edit-mode.js?v=20260825d"></script>
+  <script src="js/auto-fill.js?v=20260825d"></script>
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
@@ -286,11 +287,13 @@
 
       const doc = data.forms.find(f => f.form_type === "DOCUMENT_COLLECTION");
       if (!doc || doc.status === "LOCKED") {
-        alert("This form is not available yet.");
+        await showAlert("This form is not available yet.",
+                        { title: "Not available", tone: "info" });
         window.location.href = "home.html"; return;
       }
       if (!["PENDING", "SUBMITTED"].includes(doc.status)) {
-        alert("This form has already been reviewed and can no longer be edited.");
+        await showAlert("This form has already been reviewed and can no longer be edited.",
+                        { title: "Already reviewed", tone: "info" });
         window.location.href = "home.html"; return;
       }
       // The mapping agent fills what it can from the CIF before we decide
@@ -314,7 +317,8 @@
       try {
         await apiFetch("/candidate/forms/DOCUMENT_COLLECTION/submit",
                         { method: "POST", body: new FormData(e.target) });
-        alert("Documents submitted successfully. HR will review them.");
+        await showAlert("HR will review them.",
+                        { title: "Documents submitted successfully" });
         window.location.href = "home.html";
       } catch (err) {
         errorMsg.textContent = err.message;

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Candidate Information Form (CIF)</title>
-<link rel="stylesheet" href="css/style.css?v=20260824l">
+<link rel="stylesheet" href="css/style.css?v=20260825d">
 <style>
   .form-card { max-width: 980px; }
   .note-red { color: #b91c1c; font-style: italic; font-size: 0.85rem; margin: 10px 0; }
@@ -208,10 +208,11 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260824l"></script>
-  <script src="js/api.js?v=20260824l"></script>
-  <script src="js/doc-viewer.js?v=20260824l"></script>
-  <script src="js/edit-mode.js?v=20260824l"></script>
+  <script src="../js/config.js?v=20260825d"></script>
+  <script src="js/api.js?v=20260825d"></script>
+  <script src="js/dialog.js?v=20260825d"></script>
+  <script src="js/doc-viewer.js?v=20260825d"></script>
+  <script src="js/edit-mode.js?v=20260825d"></script>
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
@@ -295,7 +296,8 @@
       const editing = cif && cif.status === "SUBMITTED";
 
       if (cif && !["PENDING", "SUBMITTED"].includes(cif.status)) {
-        alert("Your CIF has already been reviewed and can no longer be edited.");
+        await showAlert("Your CIF has already been reviewed and can no longer be edited.",
+                        { title: "Already reviewed", tone: "info" });
         window.location.href = "home.html";
         return;
       }
@@ -348,7 +350,8 @@
         formData.set("references_list", JSON.stringify(collectRows("refTable")));
 
         await apiFetch("/candidate/forms/cif", { method: "POST", body: formData });
-        alert("CIF submitted successfully. HR will review your details.");
+        await showAlert("HR will review your details.",
+                        { title: "CIF submitted successfully" });
         window.location.href = "home.html";
       } catch (err) {
         errorMsg.textContent = err.message;
