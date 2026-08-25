@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+	 viewBox="0 0 540 217.4" style="enable-background:new 0 0 540 217.4;" xml:space="preserve">
+<style type="text/css">
+	.st0{fill:#4DD8FF;}
+	.st1{fill:#FFFFFF;}
+</style>
+<g>
+	<path class="st1" d="M2.6,134.3V81.3h9.2V125h35.6v9.2H2.6z"/>
+	<path class="st1" d="M54.1,134.3V81.3h47.2v9.2H63.3V125h38.1v9.2H54.1z M70.1,111.3v-7.8h29.3v7.8H70.1z"/>
+	<path class="st1" d="M186.9,134.3V81.3h47.2v9.2h-38.1V125h38.1v9.2H186.9z M202.9,111.3v-7.8h29.3v7.8H202.9z"/>
+	<path class="st1" d="M242.2,134.3V81.3h9.2V125H287v9.2H242.2z"/>
+	<path class="st0" d="M293.7,134.3V125h39.7c5,0,7.7-2.8,7.7-6.9c0-4.5-2.8-6.8-7.7-6.8H309c-10,0-16.2-6.3-16.2-15.1
+		c0-8.5,5.8-14.9,16.3-14.9h38v9.2h-38c-4.2,0-6.7,2.5-6.7,6.5s2.5,6.4,6.6,6.4h24.2c10.7,0,16.5,5,16.5,15.3
+		c0,8.9-5.4,15.5-16.5,15.5H293.7z"/>
+	<path class="st0" d="M357.7,134.5V81.3h9.2v53.1H357.7z M400.3,134.5v-23h-26.6v-8.2h26.6V81.3h9.2v53.1H400.3z"/>
+	<path class="st0" d="M419.3,134.3V81.3h9.2v52.9H419.3z"/>
+	<path class="st0" d="M438.2,134.3V81.3h44.9v9.2h-35.7v43.7H438.2z M454.1,112.3v-8.1h26.8v8.1H454.1z"/>
+	<path class="st0" d="M509.5,134.3V90.6h-20.1v-9.2h49.4v9.2h-20.1v43.7H509.5z"/>
+	<polygon class="st0" points="119.1,97.5 124.9,107 164.4,107 170.2,97.5 	"/>
+	<polygon class="st0" points="137.2,127.4 152.1,127.4 155.6,121.7 133.8,121.7 	"/>
+	<polygon class="st0" points="179.6,81.9 109.7,81.9 117.2,94.3 172.1,94.3 	"/>
+	<polygon class="st0" points="131.8,118.5 157.5,118.5 162.5,110.2 126.8,110.2 	"/>
+	<path class="st0" d="M140.7,133.1c1.8,3,6.2,3,8,0l1.5-2.5h-11L140.7,133.1z"/>
+</g>
+</svg>

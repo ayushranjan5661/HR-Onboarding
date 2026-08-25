@@ -10,10 +10,14 @@ function badge(stage) {
   return `<span class="badge badge-${stage.toLowerCase()}">${stage.replaceAll("_", " ")}</span>`;
 }
 
+// Escapes quotes too, so values are safe inside attributes (title=, href=), not just text.
 function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+  return String(str ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 // Replaces native confirm() with an in-page modal — native dialogs are
@@ -264,7 +268,9 @@ function render() {
     <div class="field-row"><div class="fname">Login ID</div><div class="fval"><code>${escapeHtml(c.email)}</code></div></div>
     <div class="field-row"><div class="fname">Password</div><div class="fval"><code>${c.temp_password ? escapeHtml(c.temp_password) : "—"}</code></div></div>
     <div class="field-row"><div class="fname">Login Link</div>
-      <div class="fval"><a href="${c.login_url}" target="_blank">${c.login_url}</a></div>
+      <div class="fval"><a class="link-truncate" href="${escapeHtml(c.login_url || "")}"
+        target="_blank" rel="noopener noreferrer"
+        title="${escapeHtml(c.login_url || "")}">${escapeHtml(c.login_url || "—")}</a></div>
       <div class="field-actions">
         <button class="btn btn-outline btn-small" onclick="copyLoginLink(this)">Copy Link</button>
         <button class="btn btn-outline btn-small" onclick="regenerateLink()">New Link</button>

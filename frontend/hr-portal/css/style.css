@@ -45,7 +45,7 @@ h1, h2, h3, h4 { font-family: inherit; letter-spacing: -0.01em; }
 .sidebar {
   width: 240px;
   flex: 0 0 240px;
-  background: linear-gradient(180deg, var(--brand-dark), #1e1b4b);
+  background: linear-gradient(165deg, var(--brand) 0%, var(--brand-dark) 55%, #1e1b4b 100%);
   color: #fff;
   display: flex;
   flex-direction: column;
@@ -137,7 +137,7 @@ h1, h2, h3, h4 { font-family: inherit; letter-spacing: -0.01em; }
    Top bar (legacy — kept for any page not yet on the sidebar shell)
 --------------------------------------------------------------------- */
 .topbar {
-  background: linear-gradient(135deg, var(--brand-dark), #1e1b4b);
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 55%, #1e1b4b 100%);
   color: #fff;
   padding: 16px 28px;
   display: flex;
@@ -179,71 +179,51 @@ h1, h2, h3, h4 { font-family: inherit; letter-spacing: -0.01em; }
 --------------------------------------------------------------------- */
 .login-wrap {
   min-height: 100vh;
-  display: flex;
-  align-items: stretch;
-  justify-content: center;
-  background:
-    radial-gradient(circle at 15% 20%, rgba(79, 70, 229, 0.16), transparent 45%),
-    radial-gradient(circle at 85% 80%, rgba(99, 102, 241, 0.14), transparent 45%),
-    var(--bg);
-}
-
-.login-shell {
-  display: flex;
   width: 100%;
-  max-width: 960px;
-  margin: auto;
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  box-shadow: var(--shadow-lg);
-  background: var(--card);
-}
-
-.login-visual {
-  flex: 1 1 42%;
-  background: linear-gradient(155deg, var(--brand) 0%, var(--brand-dark) 65%, #1e1b4b 100%);
-  color: #fff;
-  padding: 48px 40px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 48px 20px;
+  background: linear-gradient(155deg, var(--brand) 0%, var(--brand-dark) 65%, #1e1b4b 100%);
   position: relative;
   overflow: hidden;
 }
-.login-visual::before {
+.login-wrap::before {
   content: "";
   position: absolute;
-  width: 320px; height: 320px;
+  width: 420px; height: 420px;
   border-radius: 50%;
   background: rgba(255,255,255,0.08);
-  top: -120px; right: -100px;
+  top: -160px; right: -120px;
 }
-.login-visual::after {
+.login-wrap::after {
   content: "";
   position: absolute;
-  width: 220px; height: 220px;
+  width: 300px; height: 300px;
   border-radius: 50%;
   background: rgba(255,255,255,0.06);
-  bottom: -90px; left: -60px;
+  bottom: -120px; left: -90px;
 }
-.login-visual .mark {
-  width: 42px; height: 42px; border-radius: 12px;
-  background: rgba(255,255,255,0.16);
-  display: flex; align-items: center; justify-content: center;
-  font-weight: 800; font-size: 1.1rem;
-  position: relative; z-index: 1;
-}
-.login-visual .pitch { position: relative; z-index: 1; }
-.login-visual .pitch h2 { font-size: 1.5rem; margin: 0 0 10px; font-weight: 700; }
-.login-visual .pitch p { color: rgba(255,255,255,0.82); font-size: 0.92rem; line-height: 1.55; margin: 0; }
-.login-visual .foot { position: relative; z-index: 1; font-size: 0.78rem; color: rgba(255,255,255,0.6); }
 
-.login-form-panel {
-  flex: 1 1 58%;
-  padding: 48px 44px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+.login-mark { position: absolute; top: 32px; left: 36px; z-index: 1; }
+.login-mark .mark-logo { height: 96px; width: auto; display: block; }
+
+.login-shell {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 440px;
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 44px 40px;
+}
+
+.login-foot {
+  position: relative; z-index: 1;
+  font-size: 0.78rem; color: rgba(255,255,255,0.65);
 }
 
 .login-card { width: 100%; max-width: 360px; margin: 0 auto; }
@@ -252,7 +232,7 @@ h1, h2, h3, h4 { font-family: inherit; letter-spacing: -0.01em; }
 
 .role-tabs {
   display: flex; gap: 4px; margin-bottom: 22px;
-  background: #f1f2f8; border-radius: var(--radius-sm); padding: 4px;
+  background: rgba(79, 70, 229, 0.08); border-radius: var(--radius-sm); padding: 4px;
 }
 .role-tab {
   flex: 1; text-align: center; padding: 9px 10px; cursor: pointer;
@@ -379,14 +359,30 @@ tbody tr:last-child td { border-bottom: none; }
 .field-row .fname { color: var(--muted); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.03em; flex: 0 0 200px; font-weight: 600; }
 .field-row .fval { flex: 1; word-break: break-word; }
 .field-row .fval.empty { color: #b0b3c4; font-style: italic; }
+/* Long signed login URLs must not blow the row open — one line, ellipsised. */
+.field-row .fval .link-truncate {
+  display: block; min-width: 0; max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.82rem;
+}
+.field-row .fval { min-width: 0; }
 .field-actions { display: flex; gap: 6px; flex: 0 0 auto; }
 
 .section-card { margin-bottom: 20px; }
 .section-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .section-title h3 { margin: 0; font-size: 1.02rem; font-weight: 700; }
 
-/* Collapsible section headers (CIF / Document Collection / BGV / AI Summary) */
-.section-title.collapsible { cursor: pointer; user-select: none; }
+/* Collapsible section headers (CIF / Document Collection / BGV / AI Summary).
+   The click handler lives on this div, but by default it's only as tall as
+   its text — clicking the surrounding card padding (which visually reads as
+   part of the same header band) would do nothing. Pulling the card's own
+   padding into this element via negative margin + matching padding makes
+   the whole visual header row clickable, edge to edge. */
+.section-title.collapsible {
+  cursor: pointer; user-select: none;
+  margin: -24px -24px 12px;
+  padding: 24px 24px 0;
+}
 .section-title.collapsible .chevron {
   color: var(--muted); font-size: 0.7rem; flex: 0 0 auto; margin-left: 12px;
   transition: transform var(--ease);
@@ -441,10 +437,12 @@ tbody tr:last-child td { border-bottom: none; }
   position: fixed; inset: 0; background: rgba(15, 17, 33, 0.5);
   backdrop-filter: blur(2px);
   display: flex; align-items: center; justify-content: center; z-index: 50;
+  padding: 24px;
   animation: fadeIn 140ms ease;
 }
 .modal {
-  background: #fff; border-radius: var(--radius-md); padding: 26px; width: 400px;
+  background: #fff; border-radius: var(--radius-md); padding: 26px;
+  width: 100%; max-width: 440px; max-height: calc(100vh - 48px); overflow-y: auto;
   box-shadow: var(--shadow-lg);
   animation: modalIn 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -455,35 +453,67 @@ tbody tr:last-child td { border-bottom: none; }
 @keyframes modalIn { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
 .hidden { display: none !important; }
-.credential-box {
-  background: var(--success-bg); border: 1px solid #a7f3d0; border-radius: var(--radius-sm);
-  padding: 18px; margin-top: 16px; font-size: 0.88rem;
+
+/* ---------------------------------------------------------------------
+   Credential hand-off card (shown after a candidate invite succeeds)
+--------------------------------------------------------------------- */
+.credential-box { margin-top: 18px; }
+
+.cred-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 14px; }
+.cred-check {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  background: #10b981; color: #fff; font-size: 0.72rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; margin-top: 1px;
 }
-.credential-box code {
-  background: #fff; padding: 3px 9px; border-radius: 5px; border: 1px solid #d1fae5;
-  word-break: break-all;
+.cred-head-text { min-width: 0; }
+.cred-title { font-weight: 650; font-size: 0.92rem; color: #065f46; }
+.cred-sub { font-size: 0.8rem; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+
+.cred-list {
+  background: var(--success-bg); border: 1px solid #a7f3d0;
+  border-radius: var(--radius-sm); overflow: hidden;
 }
-.credential-box .cred-title { display: block; margin-bottom: 4px; font-size: 0.95rem; }
-.credential-box .cred-sub { color: var(--muted); font-size: 0.84rem; margin: 0 0 14px; }
-.cred-row { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
-.cred-row:last-of-type { margin-bottom: 0; }
-.cred-row .cred-label {
-  flex: 0 0 78px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.03em; color: var(--success);
+.cred-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-bottom: 1px solid #d1fae5;
 }
-.cred-row .cred-link { color: var(--brand); word-break: break-all; font-size: 0.85rem; }
-.cred-row .cred-link:hover { color: var(--brand-dark); }
+.cred-row:last-child { border-bottom: 0; }
+.cred-label {
+  flex: none; width: 74px; font-size: 0.74rem; font-weight: 650;
+  text-transform: uppercase; letter-spacing: 0.03em; color: #047857;
+}
+.cred-value {
+  flex: 1; min-width: 0; background: #fff; border: 1px solid #d1fae5;
+  border-radius: 6px; padding: 5px 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cred-value.is-link { color: var(--brand); text-decoration: none; cursor: pointer; }
+.cred-value.is-link:hover { text-decoration: underline; }
+
+.cred-copy {
+  flex: none; width: 28px; height: 28px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: #fff; border: 1px solid #a7f3d0; border-radius: 6px;
+  color: #047857; cursor: pointer; transition: background 120ms ease, color 120ms ease;
+}
+.cred-copy:hover { background: #d1fae5; }
+.cred-copy.copied { background: #10b981; border-color: #10b981; color: #fff; }
+.cred-copy svg { width: 14px; height: 14px; }
+
+.cred-note {
+  font-size: 0.76rem; color: var(--muted); margin-top: 10px; line-height: 1.5;
+}
+.cred-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 
 .empty-state { text-align: center; color: var(--muted); padding: 48px 0; font-size: 0.92rem; }
 
 /* ---------------------------------------------------------------------
    Responsive
 --------------------------------------------------------------------- */
-@media (max-width: 820px) {
-  .login-shell { flex-direction: column; max-width: 420px; margin: 24px auto; }
-  .login-visual { padding: 32px 28px; }
-  .login-visual .pitch h2 { font-size: 1.25rem; }
-  .login-form-panel { padding: 32px 28px; }
+@media (max-width: 480px) {
+  .login-shell { padding: 32px 26px; }
 }
 
 @media (max-width: 640px) {
@@ -491,4 +521,9 @@ tbody tr:last-child td { border-bottom: none; }
   .field-row { flex-wrap: wrap; }
   .field-row .fname { flex-basis: 100%; }
   .page-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+
+  .cred-row { flex-wrap: wrap; row-gap: 6px; }
+  .cred-label { width: 100%; }
+  .cred-actions { flex-direction: column-reverse; }
+  .cred-actions .btn { width: 100%; justify-content: center; }
 }
