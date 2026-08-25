@@ -73,6 +73,19 @@
     </div>
   </div>
 
+  <!-- Generic confirm modal (replaces native confirm() so dialogs are centered
+       and styled consistently with the rest of the app) -->
+  <div class="modal-backdrop hidden" id="confirmModal">
+    <div class="modal">
+      <h3 id="confirmTitle">Please confirm</h3>
+      <p id="confirmMessage" style="color:var(--muted);font-size:0.9rem;white-space:pre-line;"></p>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="confirmCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="confirmOkBtn">Confirm</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Reject reason modal -->
   <div class="modal-backdrop hidden" id="rejectModal">
     <div class="modal">

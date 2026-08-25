@@ -108,9 +108,12 @@ function makeViewButton(label, onClick) {
   return b;
 }
 
-/** Adds a View button for the document currently attached to a file input. */
+/** Adds a View button for the document currently attached to a file input.
+ * Returns the button element (or undefined if none was created), so callers
+ * that need to show/hide it later — e.g. once the candidate picks a new
+ * file to replace it — have a direct reference. */
 function attachViewButton(input, doc, labelPrefix) {
-  if (!input || !doc || input.dataset.viewBtn) return;
+  if (!input || !doc || input.dataset.viewBtn) return undefined;
   input.dataset.viewBtn = "1";
   if (doc.file_available === false) {
     const warn = document.createElement("div");
@@ -119,26 +122,80 @@ function attachViewButton(input, doc, labelPrefix) {
     warn.textContent = "This file is missing on the server — please upload it again.";
     input.insertAdjacentElement("afterend", warn);
     input.required = true;
-    return;
+    return undefined;
   }
   const btn = makeViewButton(labelPrefix || "View uploaded file",
     () => viewStoredDoc(doc.id, doc.original_filename, doc.content_type));
   input.insertAdjacentElement("afterend", btn);
+  return btn;
+}
+
+// Same whitelist the backend enforces (app/utils/file_storage.py). The OS
+// file picker's "All Files" option can't be removed from the page side, so
+// this is what actually stops a disallowed file from ever sitting in the
+// form: the moment one is picked, it's cleared right back out again.
+const _ALLOWED_UPLOAD_EXTENSIONS = new Set(
+  [".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf", ".doc", ".docx"]);
+
+function _fileExtension(filename) {
+  const m = /\.[^./\\]+$/.exec(filename || "");
+  return m ? m[0].toLowerCase() : "";
+}
+
+/** Clears the input and shows why if the picked file's type isn't allowed.
+ * Returns true when the selection is fine (or empty) and can stand. */
+function rejectDisallowedFile(input) {
+  if (!input._rejectMsgEl) {
+    input._rejectMsgEl = document.createElement("div");
+    input._rejectMsgEl.className = "file-reject-msg";
+    input.insertAdjacentElement("afterend", input._rejectMsgEl);
+  }
+  if (!input.files || !input.files.length) {
+    input._rejectMsgEl.textContent = "";
+    return true;
+  }
+  const file = input.files[0];
+  if (_ALLOWED_UPLOAD_EXTENSIONS.has(_fileExtension(file.name))) {
+    input._rejectMsgEl.textContent = "";
+    return true;
+  }
+  input.value = "";   // clears input.files too — nothing invalid stays attached
+  input._rejectMsgEl.textContent =
+    `"${file.name}" isn't allowed — only images (JPG, PNG, GIF, WEBP), PDF, ` +
+    "and Word documents (.doc/.docx) can be uploaded.";
+  return false;
 }
 
 /**
  * Every file input gets a "Preview" button that appears once the candidate
- * picks a file, so they can confirm they attached the right document.
+ * picks a file, so they can confirm they attached the right document — and a
+ * "Remove" button next to it, so an accidental pick can be undone without
+ * having to find and re-select a different file just to overwrite it.
  */
 function enableLocalPreviews(formEl) {
   formEl.querySelectorAll('input[type="file"]').forEach(input => {
     if (input.dataset.localPreview) return;
     input.dataset.localPreview = "1";
-    const btn = makeViewButton("Preview selected file", () => viewLocalFile(input));
-    btn.classList.add("hidden");
-    input.insertAdjacentElement("afterend", btn);
+
+    const previewBtn = makeViewButton("Preview selected file", () => viewLocalFile(input));
+    previewBtn.classList.add("hidden");
+    input.insertAdjacentElement("afterend", previewBtn);
+
+    const removeBtn = makeViewButton("Remove", () => {
+      input.value = "";
+      // Let every listener on this input (this one, plus the carried-document
+      // reuse toggle if this field has one) react the same way a real
+      // selection change would — one source of truth, not duplicated logic.
+      input.dispatchEvent(new Event("change"));
+    });
+    removeBtn.classList.add("hidden", "btn-remove-file");
+    previewBtn.insertAdjacentElement("afterend", removeBtn);
+
     input.addEventListener("change", () => {
-      btn.classList.toggle("hidden", !(input.files && input.files.length));
+      const ok = rejectDisallowedFile(input);
+      const hasFile = ok && !!(input.files && input.files.length);
+      previewBtn.classList.toggle("hidden", !hasFile);
+      removeBtn.classList.toggle("hidden", !hasFile);
     });
   });
 }
