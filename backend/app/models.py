@@ -9,6 +9,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -312,6 +313,44 @@ class Document(Base):
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
 
     candidate = relationship("Candidate", back_populates="documents")
+
+
+class FormDraft(Base):
+    """A candidate's unsubmitted work on one form.
+
+    Drafts are stored server-side so a candidate can start on one device and
+    finish on another. They are deliberately invisible to HR: nothing here is
+    ever read by the HR routes, and the draft is deleted the moment the form
+    is actually submitted.
+    """
+    __tablename__ = "form_drafts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id"), nullable=False, index=True)
+    form_type = Column(Enum(FormType), nullable=False)
+    payload = Column(Text, nullable=False)   # JSON: {"fields": {...}, "tables": {...}}
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("candidate_id", "form_type", name="uq_draft_candidate_form"),)
+
+
+class FormDraftDocument(Base):
+    """A file attached to a draft. Kept apart from `documents` so a drafted
+    file can never show up in HR's review checklist; on submit the ones the
+    candidate did not replace are promoted into real Document rows."""
+    __tablename__ = "form_draft_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id"), nullable=False, index=True)
+    form_type = Column(Enum(FormType), nullable=False)
+    field_key = Column(String(100), nullable=False)
+    original_filename = Column(String(255), nullable=False)
+    stored_filename = Column(String(255), nullable=False)
+    content_type = Column(String(100), nullable=True)
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("candidate_id", "form_type", "field_key",
+                                        name="uq_draft_doc_candidate_form_field"),)
 
 
 class FieldEditLog(Base):

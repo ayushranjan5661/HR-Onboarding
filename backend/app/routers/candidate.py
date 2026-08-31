@@ -38,6 +38,8 @@ from app.models import (
     Document,
     EducationDetail,
     EmploymentDetail,
+    FormDraft,
+    FormDraftDocument,
     FormStatus,
     FormSubmission,
     FormType,
@@ -45,7 +47,7 @@ from app.models import (
 )
 from app.agents import prefill as prefill_agent
 from app.schemas import MyStatusOut
-from app.utils.file_storage import save_upload, upload_path
+from app.utils.file_storage import save_bytes, save_upload, upload_path
 
 router = APIRouter(prefix="/candidate", tags=["candidate"])
 
@@ -158,6 +160,190 @@ def my_prefill(form_type: str, db: Session = Depends(get_db),
     return prefill_agent.build_prefill(db, current.id, form_type)
 
 
+# ---------------------------------------------------------------------------
+# Drafts: unsubmitted work, saved server-side so it follows the candidate to
+# any device or browser. HR never reads these tables.
+# ---------------------------------------------------------------------------
+
+_DRAFT_FILE_FIELDS = {
+    "CIF": CIF_FILE_FIELDS,
+    "BGV": BGV_FILE_FIELDS,
+    "DOCUMENT_COLLECTION": DOC_FILE_FIELDS,
+}
+
+
+def _draft_form_type(form_type: str) -> FormType:
+    if form_type not in _DRAFT_FILE_FIELDS:
+        raise HTTPException(status_code=404, detail="Unknown form")
+    return FormType(form_type)
+
+
+@router.get("/me/draft/{form_type}")
+def get_draft(form_type: str, db: Session = Depends(get_db),
+               current: Candidate = Depends(get_current_candidate)):
+    """The candidate's saved draft for one form, if any."""
+    ft = _draft_form_type(form_type)
+    draft = db.query(FormDraft).filter(FormDraft.candidate_id == current.id,
+                                        FormDraft.form_type == ft).first()
+    docs = db.query(FormDraftDocument).filter(
+        FormDraftDocument.candidate_id == current.id,
+        FormDraftDocument.form_type == ft).all()
+    if not draft and not docs:
+        return {"exists": False}
+
+    try:
+        payload = json.loads(draft.payload) if draft else {}
+    except ValueError:
+        payload = {}
+    return {
+        "exists": True,
+        "saved_at": draft.updated_at if draft else None,
+        "fields": payload.get("fields") or {},
+        "tables": payload.get("tables") or {},
+        "documents": [
+            {"id": d.id, "field_key": d.field_key,
+             "original_filename": d.original_filename,
+             "content_type": d.content_type,
+             "file_available": os.path.isfile(upload_path(d.stored_filename))}
+            for d in docs
+        ],
+    }
+
+
+@router.post("/me/draft/{form_type}")
+async def save_draft(form_type: str, request: Request, db: Session = Depends(get_db),
+                      current: Candidate = Depends(get_current_candidate)):
+    """Save (or overwrite) the draft for one form. Accepts the same multipart
+    shape as a real submit, so the page can reuse its own FormData: `fields`
+    and `tables` as JSON strings, plus any attached files."""
+    ft = _draft_form_type(form_type)
+    form = await request.form()
+
+    def _json_or_empty(key):
+        try:
+            value = json.loads(form.get(key) or "{}")
+        except (TypeError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    payload = json.dumps({"fields": _json_or_empty("fields"), "tables": _json_or_empty("tables")})
+
+    draft = db.query(FormDraft).filter(FormDraft.candidate_id == current.id,
+                                        FormDraft.form_type == ft).first()
+    if not draft:
+        draft = FormDraft(candidate_id=current.id, form_type=ft, payload=payload)
+        db.add(draft)
+    else:
+        draft.payload = payload
+        draft.updated_at = datetime.now(timezone.utc)
+
+    # Attached files are stored the same way real uploads are (validated,
+    # neutral filename), just in the draft table.
+    replaced_paths: list[str] = []
+    written_paths: list[str] = []
+    try:
+        for field_key in _DRAFT_FILE_FIELDS[form_type]:
+            upload = form.get(field_key)
+            if upload is None or not hasattr(upload, "filename") or not upload.filename:
+                continue
+            original, stored = save_upload(upload, current.id, f"DRAFT_{form_type}", field_key)
+            written_paths.append(upload_path(stored))
+            for old in db.query(FormDraftDocument).filter(
+                    FormDraftDocument.candidate_id == current.id,
+                    FormDraftDocument.form_type == ft,
+                    FormDraftDocument.field_key == field_key).all():
+                replaced_paths.append(upload_path(old.stored_filename))
+                db.delete(old)
+            db.flush()   # release the (candidate, form, field) unique slot
+            db.add(FormDraftDocument(candidate_id=current.id, form_type=ft, field_key=field_key,
+                                      original_filename=original, stored_filename=stored,
+                                      content_type=upload.content_type))
+    except Exception:
+        db.rollback()
+        _remove_files(written_paths)
+        raise
+
+    db.commit()
+    _remove_files(replaced_paths)
+
+    saved_docs = db.query(FormDraftDocument).filter(
+        FormDraftDocument.candidate_id == current.id,
+        FormDraftDocument.form_type == ft).count()
+    return {"detail": "Draft saved", "saved_at": draft.updated_at, "document_count": saved_docs}
+
+
+@router.delete("/me/draft/{form_type}")
+def delete_draft(form_type: str, db: Session = Depends(get_db),
+                  current: Candidate = Depends(get_current_candidate)):
+    ft = _draft_form_type(form_type)
+    paths = _discard_draft(db, current.id, ft)
+    db.commit()
+    _remove_files(paths)   # files go only once the rows are really gone
+    return {"detail": "Draft discarded"}
+
+
+@router.get("/draft-documents/{draft_doc_id}/download")
+def download_draft_document(draft_doc_id: int, db: Session = Depends(get_db),
+                             current: Candidate = Depends(get_current_candidate)):
+    """Let the candidate view a file they attached to a draft."""
+    doc = db.query(FormDraftDocument).filter(
+        FormDraftDocument.id == draft_doc_id,
+        FormDraftDocument.candidate_id == current.id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    path = upload_path(doc.stored_filename)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404,
+                             detail=f"'{doc.original_filename}' is no longer stored on the server. "
+                                     "Please attach it again.")
+    return FileResponse(path, filename=doc.original_filename,
+                         media_type=doc.content_type or "application/octet-stream")
+
+
+def _draft_document_fields(db, candidate_id: int, ft: FormType) -> set[str]:
+    return {d.field_key for d in db.query(FormDraftDocument).filter(
+        FormDraftDocument.candidate_id == candidate_id,
+        FormDraftDocument.form_type == ft).all()}
+
+
+def _promote_draft_documents(db, candidate_id: int, ft: FormType, provided: set[str]) -> list[str]:
+    """On submit, turn drafted files into real Documents for every field the
+    candidate did not upload again in this request. The file is copied, so
+    discarding the draft afterwards cannot remove the submitted evidence."""
+    promoted = []
+    existing = {d.field_key for d in db.query(Document).filter(
+        Document.candidate_id == candidate_id, Document.form_type == ft).all()}
+    for draft_doc in db.query(FormDraftDocument).filter(
+            FormDraftDocument.candidate_id == candidate_id,
+            FormDraftDocument.form_type == ft).all():
+        if draft_doc.field_key in provided or draft_doc.field_key in existing:
+            continue
+        try:
+            with open(upload_path(draft_doc.stored_filename), "rb") as fh:
+                data = fh.read()
+        except OSError:
+            continue   # drafted file vanished; nothing to promote
+        stored = save_bytes(data, candidate_id, ft.value, draft_doc.field_key)
+        db.add(Document(candidate_id=candidate_id, form_type=ft, field_key=draft_doc.field_key,
+                         original_filename=draft_doc.original_filename,
+                         stored_filename=stored, content_type=draft_doc.content_type))
+        promoted.append(draft_doc.field_key)
+    return promoted
+
+
+def _discard_draft(db, candidate_id: int, ft: FormType) -> list[str]:
+    """Delete a draft and its files. Returns paths to unlink after commit."""
+    paths = []
+    for doc in db.query(FormDraftDocument).filter(
+            FormDraftDocument.candidate_id == candidate_id,
+            FormDraftDocument.form_type == ft).all():
+        paths.append(upload_path(doc.stored_filename))
+        db.delete(doc)
+    db.query(FormDraft).filter(FormDraft.candidate_id == candidate_id,
+                                FormDraft.form_type == ft).delete()
+    return paths
+
+
 def _apply_fields(obj, form, field_names: list[str]):
     """Copy each present form value onto the matching model column."""
     for name in field_names:
@@ -260,6 +446,12 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
         db.add(ReferenceDetail(candidate_id=current.id, **row))
 
     replaced = _save_files(db, form, current, "CIF", CIF_FILE_FIELDS)
+    # Files attached to the draft count as this submission's uploads unless
+    # the candidate picked a new file for that field just now.
+    provided_cif = {k for k in CIF_FILE_FIELDS
+                     if hasattr(form.get(k), "filename") and form.get(k).filename}
+    _promote_draft_documents(db, current.id, FormType.CIF, provided_cif)
+    replaced += _discard_draft(db, current.id, FormType.CIF)
 
     submission = db.query(FormSubmission).filter(FormSubmission.candidate_id == current.id,
                                                    FormSubmission.form_type == FormType.CIF).first()
@@ -305,6 +497,9 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
             for row in _rows_from_json(form, form_key, columns):
                 db.add(model(candidate_id=current.id, **row))
         replaced = _save_files(db, form, current, "BGV", BGV_FILE_FIELDS)
+        provided_bgv = {k for k in BGV_FILE_FIELDS
+                         if hasattr(form.get(k), "filename") and form.get(k).filename}
+        _promote_draft_documents(db, current.id, FormType.BGV, provided_bgv)
     else:
         details = db.query(DocCollectionDetails).filter(DocCollectionDetails.candidate_id == current.id).first()
         if not details:
@@ -319,6 +514,8 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
         already = {d.field_key for d in db.query(Document).filter(
             Document.candidate_id == current.id,
             Document.form_type == FormType.DOCUMENT_COLLECTION).all()}
+        # A file attached to the draft counts too — it is promoted below.
+        already |= _draft_document_fields(db, current.id, FormType.DOCUMENT_COLLECTION)
         # A mandatory upload is also satisfied if it can be carried over from
         # an earlier form (e.g. the CIF profile picture is the passport photo) —
         # but only if the source file actually still exists on disk.
@@ -332,6 +529,9 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
             raise HTTPException(status_code=400,
                                  detail="Missing required documents: " + ", ".join(missing))
         replaced = _save_files(db, form, current, "DOCUMENT_COLLECTION", DOC_FILE_FIELDS)
+        provided_doc = {k for k in DOC_FILE_FIELDS
+                         if hasattr(form.get(k), "filename") and form.get(k).filename}
+        _promote_draft_documents(db, current.id, FormType.DOCUMENT_COLLECTION, provided_doc)
 
     # Anything the candidate already gave us on an earlier form and did not
     # re-upload here is copied across automatically.
@@ -341,6 +541,7 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
 
     submission.status = FormStatus.SUBMITTED
     submission.submitted_at = datetime.now(timezone.utc)
+    replaced += _discard_draft(db, current.id, FormType(form_type))
     db.commit()
     _remove_files(replaced)   # replaced uploads go only once the new state is safe
     detail = "Form submitted. HR will review it shortly."

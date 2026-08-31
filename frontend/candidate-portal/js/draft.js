@@ -1,56 +1,14 @@
 // "Save Draft" support for the candidate forms.
 //
-// Drafts live in THIS browser's IndexedDB, keyed per candidate and form:
-// nothing is sent to the server, so HR never sees a half-finished form, and
-// an expired session or closed tab no longer costs the candidate their work.
-// IndexedDB (unlike localStorage) can store File objects, so the documents
-// the candidate attached are saved with the draft and put back into the file
-// inputs on restore.
-
-const _DRAFT_DB = "candidate_form_drafts";
-const _DRAFT_STORE = "drafts";
-
-function _draftCandidateId() {
-  // The JWT payload's `sub` is the candidate id — a stable key even if the
-  // display name changes. Fall back to the name if the token can't be read.
-  try {
-    const payload = JSON.parse(
-      atob(getToken().split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-    return payload.sub || getName();
-  } catch (e) {
-    return getName();
-  }
-}
-
-function _draftKey(formType) {
-  return `draft_${formType}_${_draftCandidateId()}`;
-}
-
-function _openDraftDb() {
-  return new Promise((resolve, reject) => {
-    let req;
-    try {
-      req = indexedDB.open(_DRAFT_DB, 1);
-    } catch (e) {
-      reject(e);
-      return;
-    }
-    req.onupgradeneeded = () => req.result.createObjectStore(_DRAFT_STORE);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error || new Error("IndexedDB unavailable"));
-  });
-}
-
-// One transaction, one operation: fn(store) must return the IDBRequest.
-function _draftDbOp(mode, fn) {
-  return _openDraftDb().then(db => new Promise((resolve, reject) => {
-    const tx = db.transaction(_DRAFT_STORE, mode);
-    const req = fn(tx.objectStore(_DRAFT_STORE));
-    tx.oncomplete = () => { db.close(); resolve(req.result); };
-    tx.onerror = () => { db.close(); reject(tx.error); };
-    tx.onabort = () => { db.close(); reject(tx.error || new Error("aborted")); };
-  }));
-}
+// Drafts are stored on the SERVER, against the candidate's account, so work
+// saved in one browser is offered again in any other browser or device they
+// log in from. HR never sees a draft: it lives in its own tables and is
+// deleted the moment the form is actually submitted.
+//
+// Files attached to a draft are uploaded with it. A browser cannot put a file
+// back into a file input for security reasons, so on restore the page shows
+// "Saved in your draft: <name>" with a View button instead — and the server
+// promotes that file into the real submission when the candidate submits.
 
 // Every named non-file field, as {name: value}. Checkboxes store their value
 // when checked and "" when not, which is exactly what fillFlatFields
@@ -64,72 +22,116 @@ function collectFlatFields(formEl) {
   return fields;
 }
 
-// The File currently attached to each named file input.
-function collectDraftFiles(formEl) {
-  const files = {};
+async function saveFormDraft(formType, formEl, tables) {
+  const fd = new FormData();
+  fd.set("fields", JSON.stringify(collectFlatFields(formEl)));
+  fd.set("tables", JSON.stringify(tables || {}));
+  let fileCount = 0;
   formEl.querySelectorAll('input[type="file"][name]').forEach(el => {
-    if (el.files && el.files[0]) files[el.name] = el.files[0];
+    if (el.files && el.files[0]) { fd.set(el.name, el.files[0]); fileCount++; }
   });
-  return files;
+  const res = await apiFetch(`/candidate/me/draft/${formType}`, { method: "POST", body: fd });
+  return { ...res, uploadedNow: fileCount };
 }
 
-// Put drafted Files back into their inputs. The change event is dispatched so
-// everything listening on the input (preview button, type check, "will reuse"
-// note) reacts exactly as if the candidate had picked the file by hand.
-function restoreDraftFiles(formEl, files) {
-  let count = 0;
-  Object.entries(files || {}).forEach(([name, file]) => {
-    const input = formEl.querySelector(`input[type="file"][name="${name}"]`);
-    if (!input || !(file instanceof File)) return;
-    try {
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      input.files = dt.files;
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-      count++;
-    } catch (e) { /* very old browser without DataTransfer — skip this file */ }
-  });
-  return count;
+async function loadFormDraft(formType) {
+  try {
+    const data = await apiFetch(`/candidate/me/draft/${formType}`);
+    return data && data.exists ? data : null;
+  } catch (err) {
+    return null;   // draft unavailable -> the form still works normally
+  }
 }
 
 async function clearFormDraft(formType) {
-  try { await _draftDbOp("readwrite", s => s.delete(_draftKey(formType))); } catch (e) {}
-  // Also drop any draft saved by the earlier localStorage-based version.
-  try { localStorage.removeItem(_draftKey(formType)); } catch (e) {}
+  try {
+    await apiFetch(`/candidate/me/draft/${formType}`, { method: "DELETE" });
+  } catch (err) { /* already gone, or cleared server-side on submit */ }
 }
 
 /**
  * Hook up the Save Draft button. Call this synchronously at script start —
  * it must not wait on any network call, so the button always works even
- * while the page is still loading (or failed to load).
- * Expects #saveDraftBtn and #draftStatus on the page.
+ * while the page is still loading. Expects #saveDraftBtn and #draftStatus.
  */
 function wireDraftSave({ formType, formEl, collectTables }) {
   const btn = document.getElementById("saveDraftBtn");
   const status = document.getElementById("draftStatus");
   btn.addEventListener("click", async () => {
     btn.disabled = true;
+    status.style.color = "";
     status.textContent = "Saving draft…";
     try {
-      const draft = {
-        savedAt: new Date().toISOString(),
-        fields: collectFlatFields(formEl),
-        tables: collectTables ? collectTables() : {},
-        files: collectDraftFiles(formEl),
-      };
-      await _draftDbOp("readwrite", s => s.put(draft, _draftKey(formType)));
-      const n = Object.keys(draft.files).length;
+      const res = await saveFormDraft(formType, formEl, collectTables ? collectTables() : {});
+      const n = res.document_count || 0;
       status.textContent =
-        `Draft saved on this device at ${new Date(draft.savedAt).toLocaleTimeString()}` +
-        (n ? `, including ${n} attached file${n > 1 ? "s" : ""}.` : ".") +
-        " It is not submitted yet — HR sees nothing until you press Submit.";
-    } catch (e) {
-      status.textContent = "Could not save the draft — this browser is blocking " +
-                            "site storage (private/incognito windows often do).";
+        `Draft saved to your account at ${new Date().toLocaleTimeString()}` +
+        (n ? `, including ${n} file${n > 1 ? "s" : ""}.` : ".") +
+        " You can continue on any device — it is not submitted until you press Submit.";
+    } catch (err) {
+      status.style.color = "#b91c1c";
+      status.textContent = "Could not save the draft: " + err.message;
     } finally {
       btn.disabled = false;
     }
   });
+}
+
+// Show each file held in the draft next to its input, with a View button, and
+// lift "required" — the server already has this file and will use it.
+function _showDraftDocuments(formEl, documents) {
+  let shown = 0;
+  (documents || []).forEach(doc => {
+    const input = formEl.querySelector(`input[type="file"][name="${doc.field_key}"]`);
+    if (!input) return;
+    if (doc.file_available !== false) input.required = false;
+    if (input.dataset.draftDocShown) return;
+    input.dataset.draftDocShown = "1";
+
+    const note = document.createElement("div");
+    note.className = "file-hint";
+    note.style.color = "#15803d";
+    note.textContent = doc.file_available === false
+      ? `Saved in your draft: ${doc.original_filename} — but the file is missing on the server, please attach it again.`
+      : `Saved in your draft: ${doc.original_filename} — choose a file only if you want to replace it.`;
+    input.insertAdjacentElement("afterend", note);
+
+    if (doc.file_available !== false && typeof makeViewButton === "function") {
+      const btn = makeViewButton("View draft file", () => viewDraftDoc(doc));
+      input.insertAdjacentElement("afterend", btn);
+      input.addEventListener("change", () => {
+        const picked = input.files && input.files.length > 0;
+        note.classList.toggle("hidden", picked);
+        btn.classList.toggle("hidden", picked);
+      });
+    }
+    shown++;
+  });
+  return shown;
+}
+
+// Opens a drafted file in the shared document viewer (doc-viewer.js).
+async function viewDraftDoc(doc) {
+  ensureViewer();
+  document.getElementById("docViewer").classList.remove("hidden");
+  const body = document.getElementById("docViewerBody");
+  document.getElementById("docViewerTitle").textContent = doc.original_filename || "Document";
+  body.innerHTML = "<span style='color:#6b7280'>Loading…</span>";
+  try {
+    releaseViewerUrl();
+    const res = await fetch(`${API_BASE}/candidate/draft-documents/${doc.id}/download`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    });
+    if (!res.ok) {
+      body.innerHTML = `<div style="color:#b91c1c;padding:20px;text-align:center;">
+        Could not load this file.</div>`;
+      return;
+    }
+    const blob = await res.blob();
+    renderInViewer(URL.createObjectURL(blob), doc.content_type || blob.type, doc.original_filename);
+  } catch (err) {
+    body.innerHTML = `<div style="color:#b91c1c;padding:20px;">Could not load this file.</div>`;
+  }
 }
 
 /**
@@ -138,27 +140,22 @@ function wireDraftSave({ formType, formEl, collectTables }) {
  * reload / prefill seeding filled in.
  */
 async function offerDraftRestore({ formType, formEl, restoreTables }) {
-  let draft = null;
-  try {
-    draft = await _draftDbOp("readonly", s => s.get(_draftKey(formType)));
-  } catch (e) { /* storage blocked — nothing to offer */ }
-  if (!draft) {
-    // A draft saved by the earlier localStorage-based version (no files).
-    try { draft = JSON.parse(localStorage.getItem(_draftKey(formType))); } catch (e) {}
-  }
-  if (!draft || typeof draft !== "object") return;
+  const draft = await loadFormDraft(formType);
+  if (!draft) return;
 
-  const when = draft.savedAt ? new Date(draft.savedAt).toLocaleString() : "earlier";
+  const when = draft.saved_at ? new Date(draft.saved_at).toLocaleString() : "earlier";
+  const nDocs = (draft.documents || []).length;
   const restore = await showConfirm(
-    `You have an unsubmitted draft of this form, saved on this device (${when}). ` +
-    "Load it into the form?",
+    `You have an unsubmitted draft of this form, saved to your account (${when})` +
+    (nDocs ? ` with ${nDocs} attached file${nDocs > 1 ? "s" : ""}` : "") +
+    ". Load it into the form?",
     { title: "Draft found", okText: "Load draft", cancelText: "Not now" });
-  if (!restore) return;   // draft is kept; the prompt will offer it again next visit
+  if (!restore) return;   // draft is kept; it will be offered again next visit
 
   fillFlatFields(formEl, draft.fields);
   if (restoreTables) restoreTables(draft.tables || {});
-  const nFiles = restoreDraftFiles(formEl, draft.files);
+  const shown = _showDraftDocuments(formEl, draft.documents);
   document.getElementById("draftStatus").textContent =
-    "Draft loaded" + (nFiles ? ` with ${nFiles} attached file${nFiles > 1 ? "s" : ""}` : "") +
-    ". It stays saved on this device until you submit.";
+    "Draft loaded" + (shown ? ` with ${shown} saved file${shown > 1 ? "s" : ""}` : "") +
+    ". It stays on your account until you submit.";
 }
