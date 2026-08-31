@@ -3,8 +3,14 @@ Central app configuration. Reads from the .env file at the project root
 (D:\\HR Onboarding\\.env). Never hardcode secrets here — everything sensitive
 comes from environment variables.
 """
+from pathlib import Path
+
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Anchor the .env lookup to this file, not the process CWD — starting uvicorn
+# from any other directory must not silently drop every configured secret.
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 class Settings(BaseSettings):
@@ -58,7 +64,7 @@ class Settings(BaseSettings):
     SEED_HR_PASSWORD: str = "ChangeMe@123"
 
     model_config = SettingsConfigDict(
-        env_file="../.env",
+        env_file=_ENV_FILE,
         extra="ignore",
     )
 
@@ -68,3 +74,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Tokens signed with the placeholder secret are forgeable by anyone who has
+# read this file, so refuse to start rather than run with it.
+if settings.JWT_SECRET_KEY == "change-me-in-env":
+    raise RuntimeError(
+        f"JWT_SECRET_KEY is still the built-in placeholder. Set a strong random "
+        f"value in {_ENV_FILE} (or the environment) before starting the server."
+    )

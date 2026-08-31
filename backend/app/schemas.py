@@ -135,7 +135,6 @@ class CandidateDetailOut(BaseModel):
     stage: str
     candidate_type: str = "EXPERIENCED"
     rejection_reason: Optional[str] = None
-    temp_password: Optional[str] = None
     login_url: Optional[str] = None
     profile: Optional[CandidateProfileOut] = None
     submissions: list[FormSubmissionOut] = []

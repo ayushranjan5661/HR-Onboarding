@@ -75,9 +75,9 @@ class Candidate(Base):
     name = Column(String(150), nullable=False)
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
-    # Demo-only: plain temp password kept so HR can view/resend credentials.
-    # Candidates cannot change it — HR owns the credential.
-    temp_password = Column(String(50), nullable=True)
+    # The temp password is shown to HR exactly once, in the invite response;
+    # it is never stored. Lost credentials are handled by regenerating the
+    # one-click invite link, not by reading the password back.
     must_reset_password = Column(Boolean, default=False, nullable=False)
 
     # One-click invite link. The token authenticates this candidate on its own,

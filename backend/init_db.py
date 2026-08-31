@@ -55,7 +55,9 @@ def main():
 
     # Lightweight migrations for DBs created on earlier versions.
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS temp_password VARCHAR(50)"))
+        # Plaintext temp passwords are no longer stored (the bcrypt hash is the
+        # only credential kept); drop the column to purge previously saved ones.
+        conn.execute(text("ALTER TABLE candidates DROP COLUMN IF EXISTS temp_password"))
         # Form answers moved from JSONB to relational tables.
         conn.execute(text("ALTER TABLE form_submissions DROP COLUMN IF EXISTS extra_data"))
         # One-click invite links.

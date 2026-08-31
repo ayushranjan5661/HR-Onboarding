@@ -109,7 +109,6 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
         name=payload.name,
         email=payload.email,
         password_hash=hash_password(temp_password),
-        temp_password=temp_password,
         must_reset_password=False,
         stage=CandidateStage.INVITED,
         candidate_type=(CandidateType.FRESHER if payload.candidate_type == "FRESHER"
@@ -196,7 +195,6 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         stage=candidate.stage.value,
         candidate_type=candidate.candidate_type.value,
         rejection_reason=candidate.rejection_reason,
-        temp_password=candidate.temp_password,
         login_url=_candidate_login_url(candidate),
         profile=candidate.profile,
         submissions=candidate.submissions,
@@ -420,10 +418,32 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
     submission = db.query(FormSubmission).filter(FormSubmission.id == submission_id).first()
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
+
+    # A review is a decision, not an arbitrary status write: LOCKED/PENDING/
+    # SUBMITTED must never be reachable through this endpoint.
+    _ALLOWED_DECISIONS = (FormStatus.APPROVED, FormStatus.REJECTED, FormStatus.UNDER_REVIEW)
     try:
-        submission.status = FormStatus(payload.decision)
+        decision = FormStatus(payload.decision)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid decision value")
+        decision = None
+    if decision not in _ALLOWED_DECISIONS:
+        raise HTTPException(status_code=400,
+                             detail="Decision must be APPROVED, REJECTED, or UNDER_REVIEW")
+
+    # The CIF gate lives at /candidates/{id}/approve|reject, which also moves
+    # the candidate's stage; approving a CIF here would leave the stage behind
+    # and let the candidate overwrite an approved form.
+    if submission.form_type == FormType.CIF:
+        raise HTTPException(status_code=400,
+                             detail="CIF is reviewed via the candidate Approve/Reject decision, "
+                                    "not per-submission review")
+
+    # Nothing to review until the candidate has actually submitted.
+    if submission.status in (FormStatus.LOCKED, FormStatus.PENDING):
+        raise HTTPException(status_code=400,
+                             detail="The candidate has not submitted this form yet")
+
+    submission.status = decision
     submission.review_notes = payload.notes
     submission.reviewed_at = datetime.now(timezone.utc)
     submission.reviewed_by_hr_id = current.id

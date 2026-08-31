@@ -7,11 +7,19 @@ const PROFILE_LABELS = {
   permanent_address: "Permanent Address", pan_number: "PAN Number",
 };
 
+// Profile values are candidate-typed free text — they must never reach
+// innerHTML unescaped.
+function escapePrefillValue(value) {
+  return String(value)
+    .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+}
+
 function renderPrefill(profile, targetEl) {
   const rows = Object.entries(PROFILE_LABELS).map(([key, label]) => `
     <div class="field-row">
       <div class="fname">${label}</div>
-      <div class="fval">${profile && profile[key] ? profile[key] : "<em style='color:#b0b3b9'>Not provided</em>"}</div>
+      <div class="fval">${profile && profile[key] ? escapePrefillValue(profile[key]) : "<em style='color:#b0b3b9'>Not provided</em>"}</div>
     </div>`).join("");
   targetEl.innerHTML = rows;
 }

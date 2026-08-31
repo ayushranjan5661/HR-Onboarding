@@ -266,7 +266,9 @@ function render() {
   // Login credentials issued to this candidate (HR-owned; candidate cannot change them)
   document.getElementById("credentialsBody").innerHTML = `
     <div class="field-row"><div class="fname">Login ID</div><div class="fval"><code>${escapeHtml(c.email)}</code></div></div>
-    <div class="field-row"><div class="fname">Password</div><div class="fval"><code>${c.temp_password ? escapeHtml(c.temp_password) : "—"}</code></div></div>
+    <div class="field-row"><div class="fname">Password</div>
+      <div class="fval" style="color:#6b7280;">Shown once when the invite was created — not stored.
+        If the candidate lost it, send them a new login link below.</div></div>
     <div class="field-row"><div class="fname">Login Link</div>
       <div class="fval"><a class="link-truncate" href="${escapeHtml(c.login_url || "")}"
         target="_blank" rel="noopener noreferrer"
