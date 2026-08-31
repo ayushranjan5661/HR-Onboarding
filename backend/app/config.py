@@ -5,7 +5,7 @@ comes from environment variables.
 """
 from pathlib import Path
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Anchor the .env lookup to this file, not the process CWD — starting uvicorn
@@ -57,6 +57,17 @@ class Settings(BaseSettings):
     # --- File uploads ---
     UPLOAD_DIR: str = "uploads"
     MAX_UPLOAD_MB: int = 10
+
+    @field_validator("UPLOAD_DIR")
+    @classmethod
+    def _anchor_upload_dir(cls, v: str) -> str:
+        # A relative UPLOAD_DIR must always mean backend/<dir>, no matter which
+        # directory the server was started from — otherwise a restart from a
+        # different CWD strands every previously uploaded document.
+        path = Path(v)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parents[1] / path
+        return str(path)
 
     # --- Seed HR admin (used by init_db.py, first run only) ---
     SEED_HR_NAME: str = "HR Admin"

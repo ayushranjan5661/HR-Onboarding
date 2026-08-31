@@ -13,6 +13,7 @@ code does, so there is no reason to call the LLM per request.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import time
 
@@ -116,7 +117,10 @@ def build_prefill(db: Session, candidate_id: int, target_form: str) -> dict:
             "source_field": m["source_field"], "source_document_id": doc.id,
             "original_filename": doc.original_filename,
             "content_type": doc.content_type,
-            "available": True, "confidence": m["confidence"],
+            # Promising "will reuse" for a file that vanished from disk would
+            # lift the required flag on a document we can never actually carry.
+            "available": os.path.isfile(upload_path(doc.stored_filename)),
+            "confidence": m["confidence"],
             "decided_by": m["decided_by"],
         })
 

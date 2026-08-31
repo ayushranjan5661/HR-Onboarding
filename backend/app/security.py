@@ -1,7 +1,10 @@
+import base64
+import hashlib
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
 
+from cryptography.fernet import Fernet, InvalidToken
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
@@ -22,6 +25,31 @@ def generate_temp_password(length: int = 10) -> str:
     """Used by HR to auto-generate a candidate's initial login password."""
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+# --- Candidate password kept on record for HR ------------------------------
+# Product decision: HR must always be able to see each candidate's permanent
+# password. It is stored encrypted (key derived from JWT_SECRET_KEY), never as
+# plaintext, so a database dump alone cannot expose the logins — the server
+# secret is also required. Login verification still uses the bcrypt hash.
+
+def _password_cipher() -> Fernet:
+    digest = hashlib.sha256(
+        (settings.JWT_SECRET_KEY + ":candidate-password-encryption").encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def encrypt_password(plain: str) -> str:
+    return _password_cipher().encrypt(plain.encode()).decode()
+
+
+def decrypt_password(token: str | None) -> str | None:
+    if not token:
+        return None
+    try:
+        return _password_cipher().decrypt(token.encode()).decode()
+    except InvalidToken:
+        return None   # encrypted under a different JWT_SECRET_KEY — unrecoverable
 
 
 def generate_invite_token() -> str:

@@ -176,28 +176,48 @@ def _rows_from_json(form, key: str, columns: list[str]) -> list[dict]:
     return [{c: str(row.get(c, "") or "") for c in columns} for row in rows if isinstance(row, dict)]
 
 
-def _save_files(db, form, current, form_type: str, file_fields: list[str]):
+def _remove_files(paths: list[str]) -> None:
+    for path in paths:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> list[str]:
     """Only fields with a newly chosen file are touched — on an edit, anything
-    the candidate leaves blank keeps the file already on record."""
-    for field_key in file_fields:
-        upload = form.get(field_key)
-        if upload is None or not hasattr(upload, "filename") or not upload.filename:
-            continue
-        # Replacing a file: drop the previous one so we don't accumulate
-        # duplicate rows or orphaned files on disk.
-        for old in db.query(Document).filter(
-                Document.candidate_id == current.id,
-                Document.form_type == FormType(form_type),
-                Document.field_key == field_key).all():
-            try:
-                os.remove(upload_path(old.stored_filename))
-            except OSError:
-                pass
-            db.delete(old)
-        original, stored = save_upload(upload, current.id, form_type, field_key)
-        db.add(Document(candidate_id=current.id, form_type=FormType(form_type), field_key=field_key,
-                         original_filename=original, stored_filename=stored,
-                         content_type=upload.content_type))
+    the candidate leaves blank keeps the file already on record.
+
+    Returns the disk paths of replaced files. They are deleted by the caller
+    AFTER the transaction commits: deleting them here would destroy the old
+    upload for good if a later field failed validation and rolled the request
+    back. If anything raises mid-way, files already written for this request
+    are removed so the failed attempt leaves no orphans."""
+    replaced_paths: list[str] = []
+    written_paths: list[str] = []
+    try:
+        for field_key in file_fields:
+            upload = form.get(field_key)
+            if upload is None or not hasattr(upload, "filename") or not upload.filename:
+                continue
+            # Validate and store the new file before touching the old one.
+            original, stored = save_upload(upload, current.id, form_type, field_key)
+            written_paths.append(upload_path(stored))
+            # Replacing a file: drop the previous rows so we don't accumulate
+            # duplicates; the old files on disk go only after commit.
+            for old in db.query(Document).filter(
+                    Document.candidate_id == current.id,
+                    Document.form_type == FormType(form_type),
+                    Document.field_key == field_key).all():
+                replaced_paths.append(upload_path(old.stored_filename))
+                db.delete(old)
+            db.add(Document(candidate_id=current.id, form_type=FormType(form_type), field_key=field_key,
+                             original_filename=original, stored_filename=stored,
+                             content_type=upload.content_type))
+    except Exception:
+        _remove_files(written_paths)
+        raise
+    return replaced_paths
 
 
 @router.post("/forms/cif")
@@ -239,7 +259,7 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
     for row in _rows_from_json(form, "references_list", REFERENCE_COLUMNS):
         db.add(ReferenceDetail(candidate_id=current.id, **row))
 
-    _save_files(db, form, current, "CIF", CIF_FILE_FIELDS)
+    replaced = _save_files(db, form, current, "CIF", CIF_FILE_FIELDS)
 
     submission = db.query(FormSubmission).filter(FormSubmission.candidate_id == current.id,
                                                    FormSubmission.form_type == FormType.CIF).first()
@@ -251,6 +271,7 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
 
     current.stage = CandidateStage.CIF_SUBMITTED   # unchanged on a resubmit
     db.commit()
+    _remove_files(replaced)   # replaced uploads go only once the new state is safe
     return {"detail": "CIF submitted. HR will review your details shortly."}
 
 
@@ -283,7 +304,7 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
             db.query(model).filter(model.candidate_id == current.id).delete()
             for row in _rows_from_json(form, form_key, columns):
                 db.add(model(candidate_id=current.id, **row))
-        _save_files(db, form, current, "BGV", BGV_FILE_FIELDS)
+        replaced = _save_files(db, form, current, "BGV", BGV_FILE_FIELDS)
     else:
         details = db.query(DocCollectionDetails).filter(DocCollectionDetails.candidate_id == current.id).first()
         if not details:
@@ -299,16 +320,18 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
             Document.candidate_id == current.id,
             Document.form_type == FormType.DOCUMENT_COLLECTION).all()}
         # A mandatory upload is also satisfied if it can be carried over from
-        # an earlier form (e.g. the CIF profile picture is the passport photo).
+        # an earlier form (e.g. the CIF profile picture is the passport photo) —
+        # but only if the source file actually still exists on disk.
         carryable = {d["target_field"] for d in prefill_agent.build_prefill(
-            db, current.id, "DOCUMENT_COLLECTION")["documents"]}
+            db, current.id, "DOCUMENT_COLLECTION")["documents"]
+            if d.get("available", True)}
         missing = [k for k in required
                     if k not in already and k not in carryable
                     and not (hasattr(form.get(k), "filename") and form.get(k).filename)]
         if missing:
             raise HTTPException(status_code=400,
                                  detail="Missing required documents: " + ", ".join(missing))
-        _save_files(db, form, current, "DOCUMENT_COLLECTION", DOC_FILE_FIELDS)
+        replaced = _save_files(db, form, current, "DOCUMENT_COLLECTION", DOC_FILE_FIELDS)
 
     # Anything the candidate already gave us on an earlier form and did not
     # re-upload here is copied across automatically.
@@ -319,6 +342,7 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
     submission.status = FormStatus.SUBMITTED
     submission.submitted_at = datetime.now(timezone.utc)
     db.commit()
+    _remove_files(replaced)   # replaced uploads go only once the new state is safe
     detail = "Form submitted. HR will review it shortly."
     if carried:
         detail += f" ({len(carried)} document(s) carried over from your earlier forms.)"

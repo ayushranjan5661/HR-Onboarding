@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Candidate Portal — Home</title>
-<link rel="stylesheet" href="css/style.css?v=20260825d">
+<link rel="stylesheet" href="css/style.css?v=20260831b">
 </head>
 <body>
   <div class="topbar">
@@ -26,8 +26,8 @@
     <div id="formTiles"></div>
   </div>
 
-  <script src="../js/config.js?v=20260825d"></script>
-  <script src="js/api.js?v=20260825d"></script>
+  <script src="../js/config.js?v=20260831b"></script>
+  <script src="js/api.js?v=20260831b"></script>
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
@@ -125,7 +125,15 @@
       if (data.stage !== "REJECTED") renderTiles(data.forms);
     }
 
-    load();
+    load().catch(err => {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.style.color = "#b91c1c";
+      card.textContent = `Could not load your status: ${err.message} — refresh the page to try again.`;
+      const tiles = document.getElementById("formTiles");
+      tiles.innerHTML = "";
+      tiles.appendChild(card);
+    });
   </script>
 </body>
 </html>

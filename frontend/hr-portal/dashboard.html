@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>HR Portal — Dashboard</title>
-<link rel="stylesheet" href="css/style.css?v=20260825e">
+<link rel="stylesheet" href="css/style.css?v=20260831b">
 </head>
 <body>
   <div class="app-shell">
@@ -112,8 +112,8 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260825e"></script>
-  <script src="js/api.js?v=20260825e"></script>
+  <script src="../js/config.js?v=20260831b"></script>
+  <script src="js/api.js?v=20260831b"></script>
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
@@ -154,7 +154,7 @@
       rows.forEach(c => {
         const tr = document.createElement("tr");
         tr.onclick = () => window.location.href = `candidate.html?id=${c.id}`;
-        tr.innerHTML = `<td><div class="name-cell"><span class="row-avatar">${initials(c.name)}</span>${escapeHtml(c.name)}</div></td>
+        tr.innerHTML = `<td><div class="name-cell"><span class="row-avatar">${escapeHtml(initials(c.name))}</span>${escapeHtml(c.name)}</div></td>
           <td>${escapeHtml(c.email)}</td>
           <td>${badge(c.stage)}</td><td>${new Date(c.created_at).toLocaleDateString()}</td>`;
 

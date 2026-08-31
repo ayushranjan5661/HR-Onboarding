@@ -121,7 +121,11 @@ function attachViewButton(input, doc, labelPrefix) {
     warn.style.color = "#b45309";
     warn.textContent = "This file is missing on the server — please upload it again.";
     input.insertAdjacentElement("afterend", warn);
-    input.required = true;
+    // Re-impose "required" only if the field was mandatory to begin with;
+    // an optional upload going missing must not block resubmission.
+    if (input.dataset.origRequired !== undefined) {
+      input.required = input.dataset.origRequired === "1";
+    }
     return undefined;
   }
   const btn = makeViewButton(labelPrefix || "View uploaded file",

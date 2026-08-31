@@ -75,9 +75,10 @@ class Candidate(Base):
     name = Column(String(150), nullable=False)
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
-    # The temp password is shown to HR exactly once, in the invite response;
-    # it is never stored. Lost credentials are handled by regenerating the
-    # one-click invite link, not by reading the password back.
+    # The candidate's permanent password, encrypted with a key derived from
+    # JWT_SECRET_KEY (see security.encrypt_password) so HR can view it at any
+    # time without the DB ever holding it in plaintext.
+    temp_password_enc = Column(Text, nullable=True)
     must_reset_password = Column(Boolean, default=False, nullable=False)
 
     # One-click invite link. The token authenticates this candidate on its own,
@@ -294,7 +295,7 @@ class DocCollectionDetails(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     candidate_id = Column(Integer, ForeignKey("candidates.id"), unique=True, nullable=False)
-    offer_letter_acknowledged = Column(String(10))
+    # The form is uploads-only (DOC_FIELDS is empty); no text columns yet.
 
 
 class Document(Base):

@@ -78,10 +78,15 @@ def save_upload(file: UploadFile, candidate_id: int, form_type: str, field_key: 
     """
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 
-    contents = file.file.read()
+    # Read in chunks and stop at the cap — never buffer an arbitrarily large
+    # body into memory just to find out it is over the limit.
     max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
-    if len(contents) > max_bytes:
-        raise HTTPException(status_code=413, detail=f"File too large (max {settings.MAX_UPLOAD_MB} MB)")
+    buf = bytearray()
+    while chunk := file.file.read(1024 * 1024):
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise HTTPException(status_code=413, detail=f"File too large (max {settings.MAX_UPLOAD_MB} MB)")
+    contents = bytes(buf)
     _validate_file_type(file.filename or "", file.content_type, contents)
 
     stored_name = f"{candidate_id}_{form_type}_{field_key}_{secrets.token_hex(6)}.dat"

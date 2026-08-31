@@ -220,7 +220,9 @@ async function downloadDoc(e, docId) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = doc ? doc.original_filename : `document-${docId}`; a.click();
-    URL.revokeObjectURL(url);
+    // Revoking synchronously can abort the save on large files — the browser
+    // may still be reading from the blob URL when click() returns.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   } catch (err) {
     alert(err.message);
   }
@@ -267,8 +269,9 @@ function render() {
   document.getElementById("credentialsBody").innerHTML = `
     <div class="field-row"><div class="fname">Login ID</div><div class="fval"><code>${escapeHtml(c.email)}</code></div></div>
     <div class="field-row"><div class="fname">Password</div>
-      <div class="fval" style="color:#6b7280;">Shown once when the invite was created — not stored.
-        If the candidate lost it, send them a new login link below.</div></div>
+      <div class="fval" id="pwdCell">${c.temp_password
+        ? `<code>${escapeHtml(c.temp_password)}</code>`
+        : `<span style="color:#6b7280;">Not on record for this candidate.</span>`}</div></div>
     <div class="field-row"><div class="fname">Login Link</div>
       <div class="fval"><a class="link-truncate" href="${escapeHtml(c.login_url || "")}"
         target="_blank" rel="noopener noreferrer"

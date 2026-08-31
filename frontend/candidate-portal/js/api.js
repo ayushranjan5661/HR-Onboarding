@@ -40,9 +40,18 @@ async function apiFetch(path, options = {}) {
   }
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (res.status === 401) {
-    clearSession();
-    window.location.href = "../index.html";
-    throw new Error("Session expired");
+    // Only reads may bounce to the login page. A submit must never hard-
+    // navigate away — that would silently destroy everything typed into the
+    // form. Surface the error instead so the page (and the data) survives.
+    const method = (options.method || "GET").toUpperCase();
+    if (method === "GET") {
+      clearSession();
+      window.location.href = "../index.html";
+      return new Promise(() => {});   // page is navigating; never settle
+    }
+    throw new Error("Your session has expired, so this was not saved. " +
+                     "Your answers are still on this page — copy anything important, " +
+                     "then log in again from the login page.");
   }
   const contentType = res.headers.get("content-type") || "";
   const data = contentType.includes("application/json") ? await res.json() : null;

@@ -33,6 +33,11 @@ function markExistingUploads(formEl, documents) {
   (documents || []).forEach(doc => {
     const input = formEl.querySelector(`input[type="file"][name="${doc.field_key}"]`);
     if (!input) return;
+    // Remember whether the field was mandatory before we lift the flag, so a
+    // missing-on-server file re-imposes it only where it originally applied.
+    if (input.dataset.origRequired === undefined) {
+      input.dataset.origRequired = input.required ? "1" : "0";
+    }
     input.required = false;
     if (input.dataset.existingShown) return;
     input.dataset.existingShown = "1";

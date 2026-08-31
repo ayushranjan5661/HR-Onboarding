@@ -25,7 +25,8 @@ def _sync_columns(conn):
     type_sql = {}
     for table in Base.metadata.sorted_tables:
         existing = {r[0] for r in conn.execute(text(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = :t"
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = :t AND table_schema = current_schema()"
         ), {"t": table.name})}
         if not existing:
             continue  # brand-new table; create_all handles it

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Candidate Document Collection</title>
-<link rel="stylesheet" href="css/style.css?v=20260825d">
+<link rel="stylesheet" href="css/style.css?v=20260831b">
 <style>
   .form-card { max-width: 980px; }
   .doc-group { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 18px; }
@@ -231,25 +231,35 @@
           </div>
         </div>
 
-        <button class="btn btn-primary" type="submit" style="padding:10px 30px;">Submit</button>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <button class="btn btn-primary" type="submit" style="padding:10px 30px;">Submit</button>
+          <button class="btn btn-outline" type="button" id="saveDraftBtn">Save Draft</button>
+        </div>
+        <div class="file-hint" id="draftStatus" style="margin-top:6px;"></div>
         <div class="error-msg" id="errorMsg"></div>
       </form>
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260825d"></script>
-  <script src="js/api.js?v=20260825d"></script>
-  <script src="js/dialog.js?v=20260825d"></script>
-  <script src="js/doc-viewer.js?v=20260825d"></script>
-  <script src="js/prefill.js?v=20260825d"></script>
-  <script src="js/edit-mode.js?v=20260825d"></script>
-  <script src="js/auto-fill.js?v=20260825d"></script>
+  <script src="../js/config.js?v=20260831b"></script>
+  <script src="js/api.js?v=20260831b"></script>
+  <script src="js/dialog.js?v=20260831b"></script>
+  <script src="js/doc-viewer.js?v=20260831b"></script>
+  <script src="js/prefill.js?v=20260831b"></script>
+  <script src="js/edit-mode.js?v=20260831b"></script>
+  <script src="js/auto-fill.js?v=20260831b"></script>
+  <script src="js/draft.js?v=20260831b"></script>
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
 
     // Let the candidate confirm any file they attach.
     enableLocalPreviews(document.getElementById("docForm"));
+
+    // Save Draft must work from the first moment, independent of the page's
+    // network calls — wire it before anything async happens.
+    wireDraftSave({ formType: "DOCUMENT_COLLECTION",
+                     formEl: document.getElementById("docForm") });
 
     // Mandatory uploads differ between the two variants of the real form.
     // Kept in sync with DOC_REQUIRED_BY_TYPE in backend/app/form_definitions.py.
@@ -304,11 +314,27 @@
       if (doc.status === "SUBMITTED") {
         const formEl = document.getElementById("docForm");
         const saved = await loadExistingSubmission("DOCUMENT_COLLECTION");
-        if (saved) markExistingUploads(formEl, saved.documents);
+        if (!saved) {
+          // Without the record of what's already uploaded, every mandatory
+          // field would demand a re-upload — bail out rather than mislead.
+          await showAlert("Could not load your previously submitted documents. " +
+                          "Please check your connection and open the form again.",
+                          { title: "Load failed", tone: "error" });
+          window.location.href = "home.html";
+          return;
+        }
+        markExistingUploads(formEl, saved.documents);
         applyEditModeChrome(formEl.querySelector('button[type="submit"]'),
                              document.querySelector(".form-card"), "Documents");
       }
-    })();
+
+      // Restore goes last so drafted files land on top of the seeded state.
+      await offerDraftRestore({ formType: "DOCUMENT_COLLECTION",
+                                 formEl: document.getElementById("docForm") });
+    })().catch(err => {
+      document.getElementById("errorMsg").textContent =
+        "Could not load the form: " + err.message + " — refresh the page to try again.";
+    });
 
     document.getElementById("docForm").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -317,6 +343,7 @@
       try {
         await apiFetch("/candidate/forms/DOCUMENT_COLLECTION/submit",
                         { method: "POST", body: new FormData(e.target) });
+        await clearFormDraft("DOCUMENT_COLLECTION");   // submitted — draft is obsolete
         await showAlert("HR will review them.",
                         { title: "Documents submitted successfully" });
         window.location.href = "home.html";

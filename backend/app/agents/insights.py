@@ -271,7 +271,9 @@ def rule_based_flags(ctx: dict) -> list[dict]:
             if not f2:
                 continue
             end2 = t2 or date.today()
-            if f1 <= end2 and f2 <= end1:
+            # Strict comparison: ending one job and starting the next on the
+            # same day is a normal transition, not dual employment.
+            if f1 < end2 and f2 < end1:
                 flags.append(_flag(
                     "employment", "Two jobs overlap in time",
                     f"{e1['company_name'] or 'One employer'} and "

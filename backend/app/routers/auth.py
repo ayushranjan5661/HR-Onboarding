@@ -27,7 +27,8 @@ def candidate_login(payload: LoginRequest, db: Session = Depends(get_db)):
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     token = create_access_token(subject=str(user.id), role="candidate")
-    return TokenResponse(access_token=token, role="candidate", name=user.name)
+    return TokenResponse(access_token=token, role="candidate", name=user.name,
+                          must_reset_password=user.must_reset_password)
 
 
 @router.post("/candidate/invite-token", response_model=TokenResponse)
@@ -53,7 +54,8 @@ def candidate_invite_token_login(payload: InviteTokenLoginRequest, db: Session =
                                  detail="This invite link has expired. Please ask HR to send you a new one.")
 
     token = create_access_token(subject=str(user.id), role="candidate")
-    return TokenResponse(access_token=token, role="candidate", name=user.name)
+    return TokenResponse(access_token=token, role="candidate", name=user.name,
+                          must_reset_password=user.must_reset_password)
 
 
 @router.post("/hr/logout")

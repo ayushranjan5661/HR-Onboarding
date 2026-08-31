@@ -4,6 +4,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
@@ -44,7 +45,8 @@ from app.schemas import (
     InviteCandidateResponse,
     ReviewSubmissionRequest,
 )
-from app.security import generate_invite_token, generate_temp_password, hash_password
+from app.security import (decrypt_password, encrypt_password, generate_invite_token,
+                            generate_temp_password, hash_password)
 from app.utils.file_storage import upload_path
 
 router = APIRouter(prefix="/hr", tags=["hr"])
@@ -109,6 +111,7 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
         name=payload.name,
         email=payload.email,
         password_hash=hash_password(temp_password),
+        temp_password_enc=encrypt_password(temp_password),
         must_reset_password=False,
         stage=CandidateStage.INVITED,
         candidate_type=(CandidateType.FRESHER if payload.candidate_type == "FRESHER"
@@ -121,7 +124,13 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
 
     db.add(CandidateProfile(candidate_id=candidate.id, full_name=payload.name, email=payload.email))
     db.add(FormSubmission(candidate_id=candidate.id, form_type=FormType.CIF, status=FormStatus.PENDING))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two invites for the same email racing past the check above: the
+        # unique constraint wins — report it as the duplicate it is, not a 500.
+        db.rollback()
+        raise HTTPException(status_code=400, detail="A candidate with this email already exists")
 
     # Demo note: credentials are handed back to HR to send manually.
     # Wire up SMTP in .env and send here for a live flow.
@@ -195,6 +204,7 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         stage=candidate.stage.value,
         candidate_type=candidate.candidate_type.value,
         rejection_reason=candidate.rejection_reason,
+        temp_password=decrypt_password(candidate.temp_password_enc),
         login_url=_candidate_login_url(candidate),
         profile=candidate.profile,
         submissions=candidate.submissions,
@@ -230,6 +240,26 @@ def regenerate_invite_link(candidate_id: int, db: Session = Depends(get_db),
     db.commit()
     return {"detail": "New link issued. The previous link no longer works.",
             "login_url": _candidate_login_url(candidate)}
+
+
+@router.post("/candidates/{candidate_id}/reset-password")
+def reset_candidate_password(candidate_id: int, db: Session = Depends(get_db),
+                              current: HRUser = Depends(get_current_hr)):
+    """Issue a fresh temporary password for a candidate who lost theirs.
+    Only the bcrypt hash is stored, so the new password appears exactly once —
+    in this response. The previous password stops working immediately."""
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    temp_password = generate_temp_password()
+    candidate.password_hash = hash_password(temp_password)
+    candidate.temp_password_enc = encrypt_password(temp_password)
+    db.add(FieldEditLog(candidate_id=candidate_id, form_type="ACCOUNT", field_name="password",
+                         old_value="(previous password revoked)", new_value="(new password issued)",
+                         action="EDIT", edited_by_hr_id=current.id))
+    db.commit()
+    return {"detail": "New password issued. The previous one no longer works.",
+            "temp_password": temp_password}
 
 
 @router.delete("/candidates/{candidate_id}")
@@ -403,6 +433,17 @@ def mark_onboarding_complete(candidate_id: int, db: Session = Depends(get_db),
         raise HTTPException(status_code=404, detail="Candidate not found")
     if candidate.stage != CandidateStage.APPROVED_FOR_BGV:
         raise HTTPException(status_code=400, detail="Candidate is not in the BGV/Document stage")
+    # "Complete" must mean both follow-up forms were actually reviewed and
+    # approved — not merely that the stage was reached.
+    approved = {s.form_type for s in db.query(FormSubmission).filter(
+        FormSubmission.candidate_id == candidate_id,
+        FormSubmission.status == FormStatus.APPROVED).all()}
+    pending = [ft.value for ft in (FormType.DOCUMENT_COLLECTION, FormType.BGV)
+                if ft not in approved]
+    if pending:
+        raise HTTPException(status_code=400,
+                             detail="Cannot mark complete: these forms are not approved yet: "
+                                    + ", ".join(pending))
     candidate.stage = CandidateStage.ONBOARDING_COMPLETE
     db.commit()
     return {"detail": "Onboarding marked complete"}

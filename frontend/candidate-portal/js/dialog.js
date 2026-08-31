@@ -33,6 +33,7 @@ function dialogEl() {
       <h3 id="dialogTitle"></h3>
       <p class="dialog-message" id="dialogMessage"></p>
       <div class="modal-actions">
+        <button type="button" class="btn btn-outline hidden" id="dialogCancelBtn">Cancel</button>
         <button type="button" class="btn btn-primary" id="dialogOkBtn">OK</button>
       </div>
     </div>`;
@@ -43,6 +44,7 @@ function dialogEl() {
 function showAlert(message, { title = "", okText = "OK", tone = "success" } = {}) {
   const el = dialogEl();
   const okBtn = el.querySelector("#dialogOkBtn");
+  el.querySelector("#dialogCancelBtn").classList.add("hidden");
   const icon = el.querySelector("#dialogIcon");
 
   icon.className = `dialog-icon tone-${tone}`;
@@ -69,6 +71,46 @@ function showAlert(message, { title = "", okText = "OK", tone = "success" } = {}
       if (e.key === "Escape" || e.key === "Enter") { e.preventDefault(); done(); }
     }
     okBtn.addEventListener("click", done);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+// Two-choice variant of showAlert. Resolves true for OK, false for Cancel
+// (Escape also cancels; Enter confirms).
+function showConfirm(message, { title = "Please confirm", okText = "OK",
+                                 cancelText = "Cancel", tone = "info" } = {}) {
+  const el = dialogEl();
+  const okBtn = el.querySelector("#dialogOkBtn");
+  const cancelBtn = el.querySelector("#dialogCancelBtn");
+  const icon = el.querySelector("#dialogIcon");
+
+  icon.className = `dialog-icon tone-${tone}`;
+  icon.innerHTML = DIALOG_ICONS[tone] || DIALOG_ICONS.info;
+  el.querySelector("#dialogTitle").textContent = title;
+  el.querySelector("#dialogMessage").textContent = message;
+  okBtn.textContent = okText;
+  cancelBtn.textContent = cancelText;
+  cancelBtn.classList.remove("hidden");
+  el.classList.remove("hidden");
+  okBtn.focus();
+
+  return new Promise((resolve) => {
+    function done(answer) {
+      el.classList.add("hidden");
+      cancelBtn.classList.add("hidden");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      document.removeEventListener("keydown", onKey);
+      resolve(answer);
+    }
+    function onOk() { done(true); }
+    function onCancel() { done(false); }
+    function onKey(e) {
+      if (e.key === "Escape") { e.preventDefault(); done(false); }
+      if (e.key === "Enter") { e.preventDefault(); done(true); }
+    }
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
     document.addEventListener("keydown", onKey);
   });
 }

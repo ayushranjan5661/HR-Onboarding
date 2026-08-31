@@ -57,7 +57,12 @@ function applyCarriedDocuments(formEl, documents) {
   (documents || []).forEach(doc => {
     const input = formEl.querySelector(`input[type="file"][name="${doc.target_field}"]`);
     if (!input) return;
-    input.required = false;            // already satisfied by the earlier upload
+    if (input.dataset.origRequired === undefined) {
+      input.dataset.origRequired = input.required ? "1" : "0";
+    }
+    // Satisfied by the earlier upload — but only if that file still exists;
+    // a vanished source can't be carried, so the field stays mandatory.
+    if (doc.available !== false) input.required = false;
     if (input.dataset.carriedShown) return;
     input.dataset.carriedShown = "1";
     const note = autoFillBadge(

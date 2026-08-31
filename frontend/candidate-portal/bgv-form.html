@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Background Verification Form</title>
-<link rel="stylesheet" href="css/style.css?v=20260825d">
+<link rel="stylesheet" href="css/style.css?v=20260831b">
 <style>
   .form-card { max-width: 1000px; }
   .tbl-wrap { overflow-x: auto; margin-top: 6px; }
@@ -205,25 +205,42 @@
           </div>
         </div>
 
-        <button class="btn btn-primary" type="submit" style="padding:10px 30px;">Submit BGV Form</button>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <button class="btn btn-primary" type="submit" style="padding:10px 30px;">Submit BGV Form</button>
+          <button class="btn btn-outline" type="button" id="saveDraftBtn">Save Draft</button>
+        </div>
+        <div class="file-hint" id="draftStatus" style="margin-top:6px;"></div>
         <div class="error-msg" id="errorMsg"></div>
       </form>
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260825d"></script>
-  <script src="js/api.js?v=20260825d"></script>
-  <script src="js/dialog.js?v=20260825d"></script>
-  <script src="js/doc-viewer.js?v=20260825d"></script>
-  <script src="js/prefill.js?v=20260825d"></script>
-  <script src="js/edit-mode.js?v=20260825d"></script>
-  <script src="js/auto-fill.js?v=20260825d"></script>
+  <script src="../js/config.js?v=20260831b"></script>
+  <script src="js/api.js?v=20260831b"></script>
+  <script src="js/dialog.js?v=20260831b"></script>
+  <script src="js/doc-viewer.js?v=20260831b"></script>
+  <script src="js/prefill.js?v=20260831b"></script>
+  <script src="js/edit-mode.js?v=20260831b"></script>
+  <script src="js/auto-fill.js?v=20260831b"></script>
+  <script src="js/draft.js?v=20260831b"></script>
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
 
     // Let the candidate confirm any file they attach.
     enableLocalPreviews(document.getElementById("bgvForm"));
+
+    // Save Draft must work from the first moment, independent of the page's
+    // network calls — wire it before anything async happens.
+    wireDraftSave({
+      formType: "BGV",
+      formEl: document.getElementById("bgvForm"),
+      collectTables: () => ({
+        addrTable: collectRows("addrTable"), eduTable: collectRows("eduTable"),
+        empTable: collectRows("empTable"), refTable: collectRows("refTable"),
+        gapTable: collectRows("gapTable"),
+      }),
+    });
 
     const ROW_TEMPLATES = {
       addrTable: "<td><select data-k=\"address_type\"><option value=\"\">Select</option><option>Current</option><option>Permanent</option><option>Previous</option></select></td><td><input data-k=\"full_address\"></td><td><input data-k=\"city\"></td><td><input data-k=\"state\"></td><td><input data-k=\"pin_code\"></td><td><input type=\"date\" data-k=\"from_date\"></td><td><input type=\"date\" data-k=\"to_date\"></td><td><select data-k=\"residence_type\"><option value=\"\">Select</option><option>Owned</option><option>Rented</option><option>Family</option><option>PG / Hostel</option></select></td><td><input data-k=\"verifier_name\"></td><td><input data-k=\"verifier_contact\"></td><td><input data-k=\"nearest_police_station\"></td>",
@@ -278,6 +295,23 @@
     }
     gapSel.addEventListener("change", syncGapTable);
 
+    // Draft restore — called at the end of both load paths (edit and fresh)
+    // so a restored draft lands on top of whatever was seeded.
+    async function initBgvDraft() {
+      await offerDraftRestore({
+        formType: "BGV",
+        formEl: document.getElementById("bgvForm"),
+        restoreTables: t => {
+          fillTable("addrTable", t.addrTable, addRow);
+          fillTable("eduTable", t.eduTable, addRow);
+          fillTable("empTable", t.empTable, addRow);
+          fillTable("refTable", t.refTable, addRow);
+          fillTable("gapTable", t.gapTable, addRow);
+          syncGapTable();
+        },
+      });
+    }
+
     (async () => {
       const data = await apiFetch("/candidate/me/status");
       renderPrefill(data.profile, document.getElementById("prefill"));
@@ -301,19 +335,26 @@
       if (bgv.status === "SUBMITTED") {
         const formEl = document.getElementById("bgvForm");
         const saved = await loadExistingSubmission("BGV");
-        if (saved) {
-          fillFlatFields(formEl, saved.fields);
-          markExistingUploads(formEl, saved.documents);
-          const t = saved.tables || {};
-          fillTable("addrTable", t.bgv_address_history, addRow);
-          fillTable("eduTable", t.bgv_education_checks, addRow);
-          fillTable("empTable", t.bgv_employment_checks, addRow);
-          fillTable("refTable", t.bgv_reference_checks, addRow);
-          fillTable("gapTable", t.bgv_gaps, addRow);
+        if (!saved) {
+          // Updating from an empty form would wipe the saved answers — bail out.
+          await showAlert("Could not load your previously submitted answers. " +
+                          "Please check your connection and open the form again.",
+                          { title: "Load failed", tone: "error" });
+          window.location.href = "home.html";
+          return;
         }
+        fillFlatFields(formEl, saved.fields);
+        markExistingUploads(formEl, saved.documents);
+        const t = saved.tables || {};
+        fillTable("addrTable", t.bgv_address_history, addRow);
+        fillTable("eduTable", t.bgv_education_checks, addRow);
+        fillTable("empTable", t.bgv_employment_checks, addRow);
+        fillTable("refTable", t.bgv_reference_checks, addRow);
+        fillTable("gapTable", t.bgv_gaps, addRow);
         applyEditModeChrome(formEl.querySelector('button[type="submit"]'),
                              document.querySelector(".form-card"), "BGV Form");
         syncGapTable();
+        await initBgvDraft();
         return;   // skip the fresh-form seeding below
       }
 
@@ -335,7 +376,11 @@
       if (!seeded.employment) addRow("empTable");
       addRow("refTable"); addRow("refTable");
       syncGapTable();
-    })();
+      await initBgvDraft();
+    })().catch(err => {
+      document.getElementById("errorMsg").textContent =
+        "Could not load the form: " + err.message + " — refresh the page to try again.";
+    });
 
     // Pull the candidate's own CIF education/employment rows into this form.
     async function seedFromCIF() {
@@ -373,6 +418,7 @@
         fd.set("bgv_reference_checks", JSON.stringify(collectRows("refTable")));
         fd.set("bgv_gaps", JSON.stringify(gapSel.value === "Yes" ? collectRows("gapTable") : []));
         await apiFetch("/candidate/forms/BGV/submit", { method: "POST", body: fd });
+        await clearFormDraft("BGV");   // submitted for real — the local draft is obsolete
         await showAlert("HR will review it.",
                         { title: "BGV form submitted successfully" });
         window.location.href = "home.html";
