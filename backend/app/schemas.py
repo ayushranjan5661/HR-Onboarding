@@ -58,6 +58,11 @@ class FieldEditRequest(BaseModel):
     new_value: Optional[str] = None
 
 
+class RowEditRequest(BaseModel):
+    """Column -> new value for one entry of a repeating section."""
+    values: dict[str, Optional[str]]
+
+
 class DecisionRequest(BaseModel):
     reason: Optional[str] = None
 

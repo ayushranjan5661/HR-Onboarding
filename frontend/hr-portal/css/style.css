@@ -390,6 +390,13 @@ tbody tr:last-child td { border-bottom: none; }
 .section-card.collapsed .section-title.collapsible .chevron { transform: rotate(-90deg); }
 .section-card.collapsed > *:not(.section-title) { display: none; }
 
+/* Whole-form edit controls that sit in a section header, next to the chevron. */
+.section-title-actions { display: flex; gap: 8px; margin-left: auto; }
+
+/* Inputs rendered in place of values while a section is in edit mode. */
+.field-row .fval .edit-input { width: 100%; margin: 0; }
+table .edit-input { min-width: 120px; margin: 0; padding: 6px 8px; font-size: 0.85rem; }
+
 /* ---------------------------------------------------------------------
    AI Summary & Flags
 --------------------------------------------------------------------- */

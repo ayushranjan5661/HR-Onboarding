@@ -4,7 +4,25 @@ document.getElementById("whoamiAvatar").textContent = getName().charAt(0).toUppe
 
 const candidateId = new URLSearchParams(window.location.search).get("id");
 let currentData = null;
-let editTarget = null; // { form: 'PROFILE'|'CIF'|'BGV'|'DOCUMENT_COLLECTION', field }
+// Whole-form edit mode, tracked per card and limited to one card at a time.
+// PROFILE fields are shown inside the CIF card, so they follow CIF's mode.
+const editModes = { CIF: false, DOCUMENT_COLLECTION: false, BGV: false };
+
+const FORM_TITLES = {
+  CIF: "Candidate Details (CIF)",
+  DOCUMENT_COLLECTION: "Document Collection Form",
+  BGV: "Background Verification Form",
+};
+// The CIF card is static markup; the follow-up cards are built by render().
+const FORM_CARD_ID = { CIF: "cifCard", DOCUMENT_COLLECTION: "card-DOCUMENT_COLLECTION", BGV: "card-BGV" };
+const FORM_DOCS_ID = { CIF: "cifDocs", DOCUMENT_COLLECTION: "docs-DOCUMENT_COLLECTION", BGV: "docs-BGV" };
+
+// Values long enough that a single-line input is unusable.
+const LONG_TEXT_FIELDS = new Set([
+  "current_address", "permanent_address", "skills_technologies",
+  "technical_certifications", "understanding_of_levelshift", "aspirations",
+  "other_offers", "declaration_place",
+]);
 
 function badge(stage) {
   return `<span class="badge badge-${stage.toLowerCase()}">${stage.replaceAll("_", " ")}</span>`;
@@ -49,52 +67,63 @@ function showConfirm(message, { title = "Please confirm", confirmText = "Confirm
   });
 }
 
-// One editable field row: value stored in a relational column, edited/deleted
-// through /hr/candidates/{id}/details/{form}/field. The current value is
-// looked up from currentData at click time — never inlined into onclick,
-// where quotes in the value would break the attribute.
-function fieldRow(form, field, value) {
+// One field row: value stored in a relational column. Every form is edited as
+// a whole (one Edit button in the card header) rather than field by field, so
+// a row is either read-only text or — with `opts.editing` — an input.
+function fieldRow(form, field, value, opts = {}) {
+  const { editing = false } = opts;
   const hasValue = value !== null && value !== undefined && value !== "";
+  if (editing) {
+    const v = escapeHtml(String(value ?? ""));
+    const attrs = `class="edit-input" data-edit-form="${form}" data-edit-field="${field}" data-orig="${v}"`;
+    return `
+      <div class="field-row">
+        <div class="fname">${labelFor(field)}</div>
+        <div class="fval">${LONG_TEXT_FIELDS.has(field)
+          ? `<textarea rows="2" ${attrs}>${v}</textarea>`
+          : `<input type="text" ${attrs} value="${v}">`}</div>
+      </div>`;
+  }
   return `
     <div class="field-row">
       <div class="fname">${labelFor(field)}</div>
       <div class="fval ${hasValue ? "" : "empty"}">${hasValue ? escapeHtml(String(value)) : "Not provided"}</div>
-      <div class="field-actions">
-        <button class="btn btn-outline btn-small" onclick="openEditModal('${form}', '${field}')">Edit</button>
-        <button class="btn btn-outline btn-small" onclick="deleteField('${form}', '${field}')">Delete</button>
-      </div>
     </div>`;
 }
 
-function currentFieldValue(form, field) {
-  const source = {
-    PROFILE: currentData.profile,
-    CIF: currentData.cif_details,
-    BGV: currentData.bgv_details,
-    DOCUMENT_COLLECTION: currentData.doc_details,
-  }[form];
-  return source ? source[field] : null;
-}
-
-function fieldRows(form, fieldList, data) {
+function fieldRows(form, fieldList, data, opts = {}) {
+  if (!fieldList.length) return "";   // e.g. Document Collection — uploads only
   if (!data) return "<p style='color:#6b7280'>Not submitted yet.</p>";
-  return fieldList.map(f => fieldRow(form, f, data[f])).join("");
+  return fieldList.map(f => fieldRow(form, f, data[f], opts)).join("");
 }
 
-// Repeating-row table (education / employment / references) with per-row delete
-function rowTable(title, tableName, columns, rows) {
+// Repeating-row table (education / employment / references). In edit mode every
+// cell becomes an input; the per-row Delete button is shown only when
+// `opts.showDelete` is set, so the read-only CIF view stays free of buttons.
+function rowTable(title, tableName, columns, rows, opts = {}) {
+  const { editing = false, showDelete = false } = opts;
   const header = `<h4 style="margin:16px 0 4px;font-size:0.85rem;color:#6b7280;">${title.toUpperCase()}</h4>`;
   if (!rows || !rows.length) {
     return `${header}<div class="fval empty" style="padding:4px 0 8px;">No entries provided</div>`;
   }
+  const cell = (r, c) => {
+    const v = escapeHtml(String(r[c] ?? ""));
+    return editing
+      ? `<input type="text" class="edit-input" data-row-table="${tableName}" data-row-id="${r.id}"
+          data-row-col="${c}" data-orig="${v}" value="${v}">`
+      : v;
+  };
+  const hasActionCol = editing || showDelete;
   return `${header}
     <div style="overflow-x:auto;margin-bottom:8px;">
       <table>
-        <thead><tr>${columns.map(c => `<th>${labelFor(c)}</th>`).join("")}<th></th></tr></thead>
+        <thead><tr>${columns.map(c => `<th>${labelFor(c)}</th>`).join("")}${hasActionCol ? "<th></th>" : ""}</tr></thead>
         <tbody>${rows.map(r => `
           <tr style="cursor:default;">
-            ${columns.map(c => `<td>${escapeHtml(String(r[c] ?? ""))}</td>`).join("")}
-            <td><button class="btn btn-outline btn-small" onclick="deleteRow('${tableName}', ${r.id})">Delete</button></td>
+            ${columns.map(c => `<td>${cell(r, c)}</td>`).join("")}
+            ${hasActionCol ? `<td>${showDelete
+              ? `<button class="btn btn-outline btn-small" onclick="deleteRow('${tableName}', ${r.id})">Delete</button>`
+              : ""}</td>` : ""}
           </tr>`).join("")}
         </tbody>
       </table>
@@ -103,16 +132,45 @@ function rowTable(title, tableName, columns, rows) {
 
 
 // The five BGV verification sections, each a repeating table with per-row delete.
-function bgvTables(c) {
+function bgvTables(c, opts = {}) {
   const tables = c.bgv_tables || {};
   return Object.keys(BGV_TABLE_TITLES).map(key =>
-    rowTable(BGV_TABLE_TITLES[key], key, BGV_TABLE_COLUMNS[key], tables[key])
+    rowTable(BGV_TABLE_TITLES[key], key, BGV_TABLE_COLUMNS[key], tables[key], opts)
   ).join("");
 }
 
 // Checklist: for every expected upload on this form, show whether the
-// candidate submitted it — with a download button when they did.
-function renderDocs(allDocs, formType) {
+// candidate submitted it — with a download button when they did. In edit mode
+// each row also gets a file picker (replace / attach) and a Remove button;
+// files upload immediately, since a <input type=file> selection can't be held
+// across the re-render that Save triggers.
+function docActions(formType, fieldKey, doc, editing, fileAvailable = true) {
+  const buttons = [];
+  if (doc && fileAvailable) {
+    buttons.push(`<button class="btn btn-outline btn-small" onclick="viewDoc(event, ${doc.id})">View</button>`);
+    // Download is a read-mode action — edit mode is for changing the file, not
+    // taking a copy of it, so the row stays down to View / Replace / Remove.
+    if (!editing) {
+      buttons.push(`<button class="btn btn-outline btn-small" onclick="downloadDoc(event, ${doc.id})">Download</button>`);
+    }
+  }
+  if (editing) {
+    const inputId = `docUpload_${formType}_${fieldKey}`;
+    buttons.push(`
+      <input type="file" id="${inputId}" class="hidden"
+        accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,.doc,.docx"
+        onchange="uploadDoc('${formType}', '${fieldKey}', this)">
+      <button class="btn btn-outline btn-small"
+        onclick="document.getElementById('${inputId}').click()">${doc ? "Replace" : "Attach"}</button>`);
+    if (doc) {
+      buttons.push(`<button class="btn btn-outline btn-small" onclick="removeDoc('${formType}', ${doc.id})">Remove</button>`);
+    }
+  }
+  return buttons.length ? `<div class="field-actions">${buttons.join("")}</div>` : "";
+}
+
+function renderDocs(allDocs, formType, opts = {}) {
+  const { editing = false } = opts;
   const expected = FORM_FILE_FIELDS[formType] || [];
   if (!expected.length) return "";
   const docs = allDocs.filter(d => d.form_type === formType);
@@ -126,6 +184,7 @@ function renderDocs(allDocs, formType) {
           <div class="fval" style="color:#b45309;">⚠️ File missing on server — ${escapeHtml(doc.original_filename)}
             <div style="color:#6b7280;font-size:0.8rem;">Ask the candidate to upload this again.</div>
           </div>
+          ${docActions(formType, fieldKey, doc, editing, false)}
         </div>`;
     }
     if (doc) {
@@ -133,16 +192,14 @@ function renderDocs(allDocs, formType) {
         <div class="field-row">
           <div class="fname">${labelFor(fieldKey)}</div>
           <div class="fval">✅ Submitted — ${escapeHtml(doc.original_filename)}</div>
-          <div class="field-actions">
-            <button class="btn btn-outline btn-small" onclick="viewDoc(event, ${doc.id})">View</button>
-            <button class="btn btn-outline btn-small" onclick="downloadDoc(event, ${doc.id})">Download</button>
-          </div>
+          ${docActions(formType, fieldKey, doc, editing)}
         </div>`;
     }
     return `
       <div class="field-row">
         <div class="fname">${labelFor(fieldKey)}</div>
         <div class="fval empty">❌ Not submitted</div>
+        ${docActions(formType, fieldKey, null, editing)}
       </div>`;
   }).join("");
   return `<h4 style="margin:16px 0 4px;font-size:0.85rem;color:#6b7280;">UPLOADED DOCUMENTS</h4>${rows}`;
@@ -206,7 +263,11 @@ async function viewDoc(e, docId) {
     }
 
     document.getElementById("viewNewTabBtn").onclick = () => window.open(currentPreviewUrl, "_blank");
-    document.getElementById("viewDownloadBtn").onclick = (ev) => downloadDoc(ev, docId);
+    // Same rule as the row buttons: no download offered while the form the
+    // document belongs to is being edited.
+    const dlBtn = document.getElementById("viewDownloadBtn");
+    dlBtn.classList.toggle("hidden", !!(doc && editModes[doc.form_type]));
+    dlBtn.onclick = (ev) => downloadDoc(ev, docId);
   } catch (err) {
     body.innerHTML = `<div style="color:#b91c1c;padding:20px;">${escapeHtml(err.message)}</div>`;
   }
@@ -298,8 +359,11 @@ function render() {
     notice.classList.add("hidden");
   }
 
-  // ---- Profile (shared identity fields) ----
-  document.getElementById("profileFields").innerHTML = fieldRows("PROFILE", PROFILE_FIELDS, c.profile || {});
+  // ---- Profile (shared identity fields; shown inside the CIF card) ----
+  // No per-field buttons here — the CIF card has one Edit button for the whole form.
+  const cifOpts = { editing: editModes.CIF };
+  document.getElementById("profileFields").innerHTML = fieldRows("PROFILE", PROFILE_FIELDS, c.profile || {}, cifOpts);
+  document.getElementById("actions-CIF").innerHTML = formEditControls("CIF");
 
   // ---- AI Summary & Flags: only once the candidate has actually submitted a CIF.
   // Generated once per page visit (not on every re-render, e.g. after a field
@@ -311,23 +375,24 @@ function render() {
   }
 
   // ---- CIF: flat fields + repeating tables + uploads ----
-  let cifHtml = fieldRows("CIF", CIF_FIELDS, c.cif_details);
+  const cifRowOpts = { editing: editModes.CIF, showDelete: editModes.CIF };
+  let cifHtml = fieldRows("CIF", CIF_FIELDS, c.cif_details, cifOpts);
   if (c.cif_details) {
     for (const [section, label] of Object.entries(EDUCATION_SECTION_LABELS)) {
-      cifHtml += rowTable(label, "education", EDUCATION_COLUMNS, (c.education || {})[section]);
+      cifHtml += rowTable(label, "education", EDUCATION_COLUMNS, (c.education || {})[section], cifRowOpts);
     }
-    cifHtml += rowTable("Employment Details", "employment", EMPLOYMENT_COLUMNS, c.employment);
-    cifHtml += rowTable("References", "references", REFERENCE_COLUMNS, c.references);
+    cifHtml += rowTable("Employment Details", "employment", EMPLOYMENT_COLUMNS, c.employment, cifRowOpts);
+    cifHtml += rowTable("References", "references", REFERENCE_COLUMNS, c.references, cifRowOpts);
   }
   document.getElementById("cifExtraFields").innerHTML = cifHtml;
-  document.getElementById("cifDocs").innerHTML = renderDocs(c.documents, "CIF");
+  document.getElementById("cifDocs").innerHTML = renderDocs(c.documents, "CIF", cifOpts);
 
   // ---- Follow-up forms (BGV / Document Collection) ----
   document.getElementById("followupForms").innerHTML = "";
   // Sequential order: Document Collection is reviewed first, then BGV.
   const followupConfig = {
-    DOCUMENT_COLLECTION: { title: "Document Collection Form", fields: DOC_FIELDS, data: c.doc_details },
-    BGV: { title: "Background Verification Form", fields: BGV_FIELDS, data: c.bgv_details },
+    DOCUMENT_COLLECTION: { title: FORM_TITLES.DOCUMENT_COLLECTION, fields: DOC_FIELDS, data: c.doc_details },
+    BGV: { title: FORM_TITLES.BGV, fields: BGV_FIELDS, data: c.bgv_details },
   };
   Object.entries(followupConfig).forEach(([type, cfg]) => {
     const sub = c.submissions.find(s => s.form_type === type);
@@ -345,24 +410,38 @@ function render() {
       return;
     }
     const canReview = sub.status === "SUBMITTED" || sub.status === "UNDER_REVIEW";
+    const submitted = sub.status !== "PENDING";
+    const editing = editModes[type];
     const wrap = document.createElement("div");
+    wrap.id = FORM_CARD_ID[type];
     wrap.className = "card section-card collapsed";
     wrap.innerHTML = `
       <div class="section-title collapsible" onclick="toggleCollapse(this)">
         <h3>${cfg.title} <span class="badge badge-${sub.status.toLowerCase()}">${sub.status.replaceAll("_"," ")}</span></h3>
+        <div class="section-title-actions" onclick="event.stopPropagation()">
+          ${submitted ? formEditControls(type) : ""}
+        </div>
         <span class="chevron">&#9660;</span>
       </div>
-      ${sub.status === "PENDING" ? "<p style='color:#6b7280'>Waiting for candidate to submit.</p>" :
-        fieldRows(type, cfg.fields, cfg.data)
-          + (type === "BGV" ? bgvTables(c) : "")
-          + renderDocs(c.documents, type)}
-      ${canReview ? `
+      ${!submitted ? "<p style='color:#6b7280'>Waiting for candidate to submit.</p>" :
+        fieldRows(type, cfg.fields, cfg.data, { editing })
+          + (type === "BGV" ? bgvTables(c, { editing, showDelete: editing }) : "")
+          + `<div id="${FORM_DOCS_ID[type]}">${renderDocs(c.documents, type, { editing })}</div>`}
+      ${canReview && !editing ? `
         <div class="decision-bar">
           <button class="btn btn-success btn-small" onclick="reviewSubmission(${sub.id}, 'APPROVED')">Approve</button>
           <button class="btn btn-danger btn-small" onclick="reviewSubmission(${sub.id}, 'REJECTED')">Reject</button>
         </div>` : ""}
     `;
     document.getElementById("followupForms").appendChild(wrap);
+  });
+
+  // A card under edit must stay open: render() rebuilds the follow-up cards
+  // collapsed, and collapsing the form someone is typing in would hide it.
+  Object.keys(editModes).forEach(form => {
+    if (!editModes[form]) return;
+    const card = document.getElementById(FORM_CARD_ID[form]);
+    if (card) card.classList.remove("collapsed");
   });
 
   // ---- Mark onboarding complete once both follow-ups are approved ----
@@ -408,43 +487,147 @@ async function copyLoginLink(btn) {
   setTimeout(() => { btn.textContent = original; }, 1500);
 }
 
-// ---- Edit / delete field values ----
+// ---- Whole-form edit ----
+// Each form (CIF, Document Collection, BGV) is reviewed as one document, so
+// instead of Edit/Delete on every row its card carries a single Edit button
+// that turns every value — flat fields, repeating-table cells, attached
+// documents — into something editable. Save then PATCHes only what actually
+// changed, keeping the field_edit_log meaningful.
 
-function openEditModal(form, field) {
-  editTarget = { form, field };
-  document.getElementById("editModalTitle").textContent = `Edit: ${labelFor(field)}`;
-  document.getElementById("editModalLabel").textContent = labelFor(field);
-  document.getElementById("editModalValue").value = currentFieldValue(form, field) ?? "";
-  document.getElementById("editModal").classList.remove("hidden");
+function formEditControls(form) {
+  return editModes[form]
+    ? `<button class="btn btn-primary btn-small" onclick="saveFormEdits('${form}', this)">Save Changes</button>
+       <button class="btn btn-outline btn-small" onclick="cancelFormEdit('${form}')">Cancel</button>`
+    : `<button class="btn btn-outline btn-small" onclick="startFormEdit('${form}')">Edit</button>`;
 }
 
-document.getElementById("saveEditBtn").addEventListener("click", async () => {
-  const value = document.getElementById("editModalValue").value;
+// What the inputs inside one card currently differ from, keyed the way each
+// PATCH endpoint wants it. Elements carry their loaded value in data-orig, so
+// an untouched field is never sent.
+function collectEdits(form) {
+  const card = document.getElementById(FORM_CARD_ID[form]);
+  const fieldEdits = [];
+  const rowEdits = new Map();
+  if (!card) return { fieldEdits, rowEdits };
+
+  card.querySelectorAll("[data-edit-field]").forEach(el => {
+    if (el.value === el.dataset.orig) return;
+    fieldEdits.push({ form: el.dataset.editForm, field: el.dataset.editField, value: el.value });
+  });
+
+  // One PATCH per repeating-table row, carrying just that row's changed columns.
+  card.querySelectorAll("[data-row-col]").forEach(el => {
+    if (el.value === el.dataset.orig) return;
+    const key = `${el.dataset.rowTable}:${el.dataset.rowId}`;
+    if (!rowEdits.has(key)) {
+      rowEdits.set(key, { table: el.dataset.rowTable, id: el.dataset.rowId, values: {} });
+    }
+    rowEdits.get(key).values[el.dataset.rowCol] = el.value === "" ? null : el.value;
+  });
+
+  return { fieldEdits, rowEdits };
+}
+
+async function startFormEdit(form) {
+  // Only one card is editable at a time — render() redraws every card from
+  // currentData, so leaving a second one open would silently drop its typing.
+  const other = Object.keys(editModes).find(f => f !== form && editModes[f]);
+  if (other) {
+    const { fieldEdits, rowEdits } = collectEdits(other);
+    if ((fieldEdits.length || rowEdits.size) &&
+        !await showConfirm(`Your unsaved changes to the ${FORM_TITLES[other]} will be lost.`,
+          { title: "Discard unsaved changes?", confirmText: "Discard", danger: true })) return;
+  }
+  Object.keys(editModes).forEach(f => { editModes[f] = f === form; });
+  render();   // render() re-opens whichever card is under edit
+}
+
+function cancelFormEdit(form) {
+  editModes[form] = false;
+  render();
+  const card = document.getElementById(FORM_CARD_ID[form]);
+  if (card) card.classList.remove("collapsed");
+}
+
+async function saveFormEdits(form, btn) {
+  const { fieldEdits, rowEdits } = collectEdits(form);
+  if (!fieldEdits.length && !rowEdits.size) {
+    cancelFormEdit(form);   // nothing changed — just leave edit mode
+    return;
+  }
+
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Saving…";
   try {
-    await apiFetch(`/hr/candidates/${candidateId}/details/${editTarget.form}/field`, {
-      method: "PATCH",
-      body: JSON.stringify({ field_name: editTarget.field, new_value: value }),
-    });
-    document.getElementById("editModal").classList.add("hidden");
-    await load();
+    for (const e of fieldEdits) {
+      await apiFetch(`/hr/candidates/${candidateId}/details/${e.form}/field`, {
+        method: "PATCH",
+        body: JSON.stringify({ field_name: e.field, new_value: e.value === "" ? null : e.value }),
+      });
+    }
+    for (const r of rowEdits.values()) {
+      await apiFetch(`/hr/rows/${r.table}/${r.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ values: r.values }),
+      });
+    }
+    editModes[form] = false;
+    await load();   // render() restores the read-only view and the Edit button
+  } catch (err) {
+    alert(err.message);
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+
+// Uploads happen the moment a file is chosen — a file input's selection can't
+// survive the re-render that Save triggers. Only that form's document list is
+// redrawn afterwards, so text edits typed elsewhere in the card aren't lost.
+async function refreshFormDocs(form) {
+  const fresh = await apiFetch(`/hr/candidates/${candidateId}`);
+  currentData.documents = fresh.documents;
+  const container = document.getElementById(FORM_DOCS_ID[form]);
+  if (container) {
+    container.innerHTML = renderDocs(currentData.documents, form, { editing: editModes[form] });
+  }
+}
+
+async function uploadDoc(formType, fieldKey, input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  input.value = "";   // let the same file be re-picked if the upload fails
+  const body = new FormData();
+  body.append("file", file);
+  try {
+    await apiFetch(`/hr/candidates/${candidateId}/documents/${formType}/${fieldKey}`,
+                    { method: "POST", body });
+    await refreshFormDocs(formType);
   } catch (err) {
     alert(err.message);
   }
-});
+}
 
-async function deleteField(form, field) {
-  if (!await showConfirm("This cannot be undone.",
-      { title: `Delete "${labelFor(field)}"?`, confirmText: "Delete", danger: true })) return;
+async function removeDoc(formType, docId) {
+  const doc = currentData.documents.find(d => d.id === docId);
+  if (!await showConfirm("The file is deleted from the server and this document goes back to \"Not submitted\".",
+      { title: `Remove "${doc ? doc.original_filename : "this document"}"?`,
+        confirmText: "Remove", danger: true })) return;
   try {
-    await apiFetch(`/hr/candidates/${candidateId}/details/${form}/field/${field}`, { method: "DELETE" });
-    await load();
+    await apiFetch(`/hr/documents/${docId}`, { method: "DELETE" });
+    await refreshFormDocs(formType);
   } catch (err) {
     alert(err.message);
   }
 }
+
+
+// ---- Delete one entry from a repeating section (edit mode only) ----
 
 async function deleteRow(tableName, rowId) {
-  if (!await showConfirm("This cannot be undone.",
+  if (!await showConfirm("This cannot be undone, and the form is reloaded — any other "
+      + "unsaved changes in it are discarded.",
       { title: "Delete this entry?", confirmText: "Delete", danger: true })) return;
   try {
     await apiFetch(`/hr/rows/${tableName}/${rowId}`, { method: "DELETE" });

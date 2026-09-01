@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_hr
-from app.form_definitions import (BGV_FIELDS, BGV_TABLE_SECTIONS, CIF_FIELDS,
-                                    DOC_FIELDS, PROFILE_FIELDS)
+from app.form_definitions import (BGV_FIELDS, BGV_FILE_FIELDS, BGV_TABLE_SECTIONS,
+                                    CIF_FIELDS, CIF_FILE_FIELDS, DOC_FIELDS,
+                                    DOC_FILE_FIELDS, PROFILE_FIELDS)
 from app.models import (
     BGVAddressHistory,
     BGVDetails,
@@ -44,10 +45,11 @@ from app.schemas import (
     InviteCandidateRequest,
     InviteCandidateResponse,
     ReviewSubmissionRequest,
+    RowEditRequest,
 )
 from app.security import (decrypt_password, encrypt_password, generate_invite_token,
                             generate_temp_password, hash_password)
-from app.utils.file_storage import upload_path
+from app.utils.file_storage import save_upload, upload_path
 
 router = APIRouter(prefix="/hr", tags=["hr"])
 
@@ -346,6 +348,36 @@ _ROW_TABLES = {
 }
 
 
+def _row_form_type(table: str) -> str:
+    return "BGV" if table.startswith("bgv_") else "CIF"
+
+
+@router.patch("/rows/{table}/{row_id}")
+def edit_table_row(table: str, row_id: int, payload: RowEditRequest, db: Session = Depends(get_db),
+                    current: HRUser = Depends(get_current_hr)):
+    """Update one entry of a repeating section. Only that section's own data
+    columns are writable — id / candidate_id / section stay off-limits."""
+    model = _ROW_TABLES.get(table)
+    if not model:
+        raise HTTPException(status_code=400, detail="Unknown table")
+    row = db.query(model).filter(model.id == row_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Row not found")
+    editable = {c.name for c in model.__table__.columns} - {"id", "candidate_id", "section"}
+    unknown = set(payload.values) - editable
+    if unknown:
+        raise HTTPException(status_code=400,
+                            detail=f"Unknown or non-editable field(s): {', '.join(sorted(unknown))}")
+    for name, value in payload.values.items():
+        old_value = getattr(row, name)
+        setattr(row, name, value)
+        db.add(FieldEditLog(candidate_id=row.candidate_id, form_type=_row_form_type(table),
+                             field_name=f"{table}.{name}", old_value=old_value, new_value=value,
+                             action="EDIT", edited_by_hr_id=current.id))
+    db.commit()
+    return {"detail": "Row updated"}
+
+
 @router.delete("/rows/{table}/{row_id}")
 def delete_table_row(table: str, row_id: int, db: Session = Depends(get_db),
                       current: HRUser = Depends(get_current_hr)):
@@ -531,3 +563,86 @@ def download_document(document_id: int, db: Session = Depends(get_db), current: 
         )
     return FileResponse(path, filename=doc.original_filename,
                          media_type=doc.content_type or "application/octet-stream")
+
+
+# Which uploads each form expects — HR may only replace a file the form
+# actually asks for, so an arbitrary field_key can't be injected.
+_FORM_FILE_FIELDS = {
+    FormType.CIF: set(CIF_FILE_FIELDS),
+    FormType.BGV: set(BGV_FILE_FIELDS),
+    FormType.DOCUMENT_COLLECTION: set(DOC_FILE_FIELDS),
+}
+
+
+@router.post("/candidates/{candidate_id}/documents/{form}/{field_key}")
+def upload_document(candidate_id: int, form: str, field_key: str,
+                     file: UploadFile = File(...), db: Session = Depends(get_db),
+                     current: HRUser = Depends(get_current_hr)):
+    """Attach (or replace) one uploaded file on a candidate's form.
+
+    Mirrors the candidate-side upload path: the new file is written and
+    validated first, the old row is dropped, and the old file is removed from
+    disk only after the transaction commits — a mid-request failure must not
+    destroy the document already on record.
+    """
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    try:
+        form_type = FormType(form)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Unknown form")
+    if field_key not in _FORM_FILE_FIELDS.get(form_type, set()):
+        raise HTTPException(status_code=400, detail="This form does not collect that document")
+
+    original, stored = save_upload(file, candidate_id, form, field_key)
+    replaced_paths = []
+    try:
+        for old in db.query(Document).filter(Document.candidate_id == candidate_id,
+                                              Document.form_type == form_type,
+                                              Document.field_key == field_key).all():
+            replaced_paths.append(upload_path(old.stored_filename))
+            db.add(FieldEditLog(candidate_id=candidate_id, form_type=form, field_name=field_key,
+                                 old_value=old.original_filename, new_value=original,
+                                 action="EDIT", edited_by_hr_id=current.id))
+            db.delete(old)
+        if not replaced_paths:
+            db.add(FieldEditLog(candidate_id=candidate_id, form_type=form, field_name=field_key,
+                                 old_value=None, new_value=original, action="EDIT",
+                                 edited_by_hr_id=current.id))
+        db.add(Document(candidate_id=candidate_id, form_type=form_type, field_key=field_key,
+                         original_filename=original, stored_filename=stored,
+                         content_type=file.content_type))
+        db.commit()
+    except Exception:
+        try:
+            os.remove(upload_path(stored))
+        except OSError:
+            pass
+        raise
+    for path in replaced_paths:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    return {"detail": "Document uploaded"}
+
+
+@router.delete("/documents/{document_id}")
+def delete_document(document_id: int, db: Session = Depends(get_db),
+                     current: HRUser = Depends(get_current_hr)):
+    """Remove one uploaded file. The form then shows it as not submitted."""
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    path = upload_path(doc.stored_filename)
+    db.add(FieldEditLog(candidate_id=doc.candidate_id, form_type=doc.form_type.value,
+                         field_name=doc.field_key, old_value=doc.original_filename,
+                         new_value=None, action="DELETE", edited_by_hr_id=current.id))
+    db.delete(doc)
+    db.commit()
+    try:
+        os.remove(path)
+    except OSError:
+        pass  # file already gone; the row is what mattered
+    return {"detail": "Document deleted"}

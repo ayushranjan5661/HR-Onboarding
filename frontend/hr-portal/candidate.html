@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>HR Portal — Candidate</title>
-<link rel="stylesheet" href="css/style.css?v=20260831d">
+<link rel="stylesheet" href="css/style.css?v=20260831f">
 </head>
 <body>
   <div class="app-shell">
@@ -61,6 +61,9 @@
         <div class="card section-card collapsed" id="cifCard">
           <div class="section-title collapsible" onclick="toggleCollapse(this)">
             <h3>Candidate Details (CIF)</h3>
+            <!-- One Edit button for the whole form, filled in by render();
+                 stopPropagation so clicking it doesn't also collapse the card. -->
+            <div class="section-title-actions" id="actions-CIF" onclick="event.stopPropagation()"></div>
             <span class="chevron">&#9660;</span>
           </div>
           <div id="profileFields"></div>
@@ -99,20 +102,6 @@
     </div>
   </div>
 
-  <!-- Edit field modal -->
-  <div class="modal-backdrop hidden" id="editModal">
-    <div class="modal">
-      <h3 id="editModalTitle">Edit Field</h3>
-      <label id="editModalLabel">Value</label>
-      <textarea id="editModalValue" rows="2"></textarea>
-      <div class="modal-actions">
-        <button class="btn btn-outline" onclick="document.getElementById('editModal').classList.add('hidden')">Cancel</button>
-        <button class="btn btn-primary" id="saveEditBtn">Save</button>
-      </div>
-    </div>
-  </div>
-
-
   <!-- Document preview -->
   <div class="modal-backdrop hidden" id="viewModal">
     <div class="modal" style="width:90vw;max-width:1000px;">
@@ -130,9 +119,9 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260831d"></script>
-  <script src="js/api.js?v=20260831d"></script>
-  <script src="js/field-labels.js?v=20260831d"></script>
-  <script src="js/candidate.js?v=20260831d"></script>
+  <script src="../js/config.js?v=20260831f"></script>
+  <script src="js/api.js?v=20260831f"></script>
+  <script src="js/field-labels.js?v=20260831f"></script>
+  <script src="js/candidate.js?v=20260831f"></script>
 </body>
 </html>
