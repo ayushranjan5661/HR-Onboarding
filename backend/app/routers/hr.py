@@ -1,8 +1,9 @@
 import os
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_hr
+from app import edit_access
 from app.form_definitions import (BGV_FIELDS, BGV_FILE_FIELDS, BGV_TABLE_SECTIONS,
                                     CIF_FIELDS, CIF_FILE_FIELDS, DOC_FIELDS,
                                     DOC_FILE_FIELDS, PROFILE_FIELDS)
@@ -27,9 +29,14 @@ from app.models import (
     CIFDetails,
     DocCollectionDetails,
     Document,
+    DocumentSnapshot,
+    EditPermissionStatus,
     EducationDetail,
     EmploymentDetail,
     FieldEditLog,
+    FieldEditPermission,
+    FormDraft,
+    FormDraftDocument,
     FormStatus,
     FormSubmission,
     FormType,
@@ -37,19 +44,23 @@ from app.models import (
     ReferenceDetail,
 )
 from app.schemas import (
+    AuditEntryOut,
+    AuditFileOut,
     CandidateDetailOut,
+    ChangeSetRequest,
     DocumentOut,
     CandidateListItem,
     DecisionRequest,
-    FieldEditRequest,
+    EditPermissionOut,
+    GrantEditAccessRequest,
     InviteCandidateRequest,
     InviteCandidateResponse,
     ReviewSubmissionRequest,
-    RowEditRequest,
+    RevokeEditAccessRequest,
 )
 from app.security import (decrypt_password, encrypt_password, generate_invite_token,
                             generate_temp_password, hash_password)
-from app.utils.file_storage import save_upload, upload_path
+from app.utils.file_storage import save_upload, snapshot_document, upload_path
 
 router = APIRouter(prefix="/hr", tags=["hr"])
 
@@ -89,6 +100,12 @@ def _document_out(doc: Document) -> DocumentOut:
         file_available=os.path.isfile(upload_path(doc.stored_filename)),
         uploaded_at=doc.uploaded_at,
     )
+
+
+def _clean_reason(reason: str | None) -> str | None:
+    """Blank-only reasons are noise in an audit trail — store nothing instead."""
+    reason = (reason or "").strip()
+    return reason or None
 
 
 def _row_dict(obj, columns: list[str], include_id: bool = True) -> dict:
@@ -272,13 +289,26 @@ def delete_candidate(candidate_id: int, db: Session = Depends(get_db),
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
-    for doc in candidate.documents:
+    # Snapshots keep replaced files alive for the audit trail, so they have to
+    # be swept up here too — the live documents alone no longer cover them.
+    snapshots = db.query(DocumentSnapshot).filter(
+        DocumentSnapshot.candidate_id == candidate_id).all()
+    for stored in {d.stored_filename for d in candidate.documents} | {
+            s.stored_filename for s in snapshots}:
         try:
-            os.remove(upload_path(doc.stored_filename))
+            os.remove(upload_path(stored))
         except OSError:
             pass  # file already gone; still remove the DB rows
 
+    # Tables that reference the candidate without a cascading relationship —
+    # the log first, since its rows point at the permissions.
     db.query(FieldEditLog).filter(FieldEditLog.candidate_id == candidate_id).delete()
+    db.query(DocumentSnapshot).filter(
+        DocumentSnapshot.candidate_id == candidate_id).delete()
+    db.query(FieldEditPermission).filter(
+        FieldEditPermission.candidate_id == candidate_id).delete()
+    db.query(FormDraftDocument).filter(FormDraftDocument.candidate_id == candidate_id).delete()
+    db.query(FormDraft).filter(FormDraft.candidate_id == candidate_id).delete()
     db.delete(candidate)  # cascades to profile, submissions, documents, detail tables
     db.commit()
     return {"detail": "Invitation deleted. The candidate can no longer log in."}
@@ -309,30 +339,64 @@ def _get_detail_row(db: Session, form: str, candidate_id: int, field_name: str):
     return row
 
 
-@router.patch("/candidates/{candidate_id}/details/{form}/field")
-def edit_detail_field(candidate_id: int, form: str, payload: FieldEditRequest,
-                       db: Session = Depends(get_db), current: HRUser = Depends(get_current_hr)):
-    row = _get_detail_row(db, form, candidate_id, payload.field_name)
-    old_value = getattr(row, payload.field_name)
-    setattr(row, payload.field_name, payload.new_value)
-    db.add(FieldEditLog(candidate_id=candidate_id, form_type=form, field_name=payload.field_name,
-                         old_value=old_value, new_value=payload.new_value, action="EDIT",
-                         edited_by_hr_id=current.id))
-    db.commit()
-    return {"detail": "Field updated"}
+@router.post("/candidates/{candidate_id}/changes")
+def apply_changes(candidate_id: int, payload: ChangeSetRequest, db: Session = Depends(get_db),
+                   current: HRUser = Depends(get_current_hr)):
+    """Apply everything one HR save touched — flat fields and repeating-section
+    cells alike — as a single audited action.
 
+    All of it lands in one transaction under one change-set id, so a partial
+    failure changes nothing and the audit trail shows the save as one entry
+    rather than a run of unrelated ones."""
+    edit_access.require_candidate(db, candidate_id)
+    if not payload.fields and not payload.rows:
+        raise HTTPException(status_code=400, detail="Nothing to change")
 
-@router.delete("/candidates/{candidate_id}/details/{form}/field/{field_name}")
-def delete_detail_field(candidate_id: int, form: str, field_name: str,
-                         db: Session = Depends(get_db), current: HRUser = Depends(get_current_hr)):
-    row = _get_detail_row(db, form, candidate_id, field_name)
-    old_value = getattr(row, field_name)
-    setattr(row, field_name, None)
-    db.add(FieldEditLog(candidate_id=candidate_id, form_type=form, field_name=field_name,
-                         old_value=old_value, new_value=None, action="DELETE",
-                         edited_by_hr_id=current.id))
+    reason = _clean_reason(payload.reason)
+    change_set_id = uuid4().hex
+    applied = 0
+
+    def log(form_type: str, field_name: str, old_value, new_value, action="EDIT"):
+        db.add(FieldEditLog(
+            candidate_id=candidate_id, form_type=form_type, field_name=field_name,
+            old_value=old_value, new_value=new_value, action=action, reason=reason,
+            actor_role="HR", edited_by_hr_id=current.id, change_set_id=change_set_id))
+
+    for edit in payload.fields:
+        row = _get_detail_row(db, edit.form, candidate_id, edit.field_name)
+        old_value = getattr(row, edit.field_name)
+        if (old_value or "") == (edit.new_value or ""):
+            continue   # unchanged: nothing to record
+        setattr(row, edit.field_name, edit.new_value)
+        log(edit.form, edit.field_name, old_value, edit.new_value,
+            "DELETE" if edit.new_value in (None, "") else "EDIT")
+        applied += 1
+
+    for row_edit in payload.rows:
+        model = _ROW_TABLES.get(row_edit.table)
+        if not model:
+            raise HTTPException(status_code=400, detail="Unknown table")
+        # Scoped to this candidate: a row id alone must not reach another's data.
+        row = db.query(model).filter(model.id == row_edit.row_id,
+                                      model.candidate_id == candidate_id).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Row not found")
+        editable = {c.name for c in model.__table__.columns} - {"id", "candidate_id", "section"}
+        unknown = set(row_edit.values) - editable
+        if unknown:
+            raise HTTPException(status_code=400,
+                                 detail=f"Unknown or non-editable field(s): {', '.join(sorted(unknown))}")
+        for name, value in row_edit.values.items():
+            old_value = getattr(row, name)
+            if (old_value or "") == (value or ""):
+                continue
+            setattr(row, name, value)
+            log(_row_form_type(row_edit.table), f"{row_edit.table}.{name}", old_value, value)
+            applied += 1
+
     db.commit()
-    return {"detail": "Field deleted"}
+    return {"detail": f"{applied} change(s) saved", "changed": applied,
+            "change_set_id": change_set_id}
 
 
 _ROW_TABLES = {
@@ -352,32 +416,6 @@ def _row_form_type(table: str) -> str:
     return "BGV" if table.startswith("bgv_") else "CIF"
 
 
-@router.patch("/rows/{table}/{row_id}")
-def edit_table_row(table: str, row_id: int, payload: RowEditRequest, db: Session = Depends(get_db),
-                    current: HRUser = Depends(get_current_hr)):
-    """Update one entry of a repeating section. Only that section's own data
-    columns are writable — id / candidate_id / section stay off-limits."""
-    model = _ROW_TABLES.get(table)
-    if not model:
-        raise HTTPException(status_code=400, detail="Unknown table")
-    row = db.query(model).filter(model.id == row_id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail="Row not found")
-    editable = {c.name for c in model.__table__.columns} - {"id", "candidate_id", "section"}
-    unknown = set(payload.values) - editable
-    if unknown:
-        raise HTTPException(status_code=400,
-                            detail=f"Unknown or non-editable field(s): {', '.join(sorted(unknown))}")
-    for name, value in payload.values.items():
-        old_value = getattr(row, name)
-        setattr(row, name, value)
-        db.add(FieldEditLog(candidate_id=row.candidate_id, form_type=_row_form_type(table),
-                             field_name=f"{table}.{name}", old_value=old_value, new_value=value,
-                             action="EDIT", edited_by_hr_id=current.id))
-    db.commit()
-    return {"detail": "Row updated"}
-
-
 @router.delete("/rows/{table}/{row_id}")
 def delete_table_row(table: str, row_id: int, db: Session = Depends(get_db),
                       current: HRUser = Depends(get_current_hr)):
@@ -394,6 +432,197 @@ def delete_table_row(table: str, row_id: int, db: Session = Depends(get_db),
     db.delete(row)
     db.commit()
     return {"detail": "Row deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Field-level edit access on a submitted form
+#
+# The CIF is read-only to the candidate once submitted. When something needs
+# correcting later, HR opens the individual field rather than the whole form;
+# the candidate's change then has to carry a reason and lands in the audit log.
+# ---------------------------------------------------------------------------
+
+def _permission_out(db: Session, perm: FieldEditPermission,
+                     hr_names: dict[int, str]) -> EditPermissionOut:
+    return EditPermissionOut(
+        id=perm.id, form=edit_access.owning_form(perm.form_type),
+        form_type=perm.form_type, field_kind=perm.field_kind,
+        field_name=perm.field_name, row_table=perm.row_table, row_id=perm.row_id,
+        row_label=edit_access.row_label_for(db, perm.candidate_id, perm),
+        status=perm.status, hr_note=perm.hr_note,
+        granted_by=hr_names.get(perm.granted_by_hr_id),
+        granted_at=perm.granted_at, resolved_at=perm.resolved_at,
+        current_value=_as_text(edit_access.current_value(db, perm.candidate_id, perm)),
+    )
+
+
+def _as_text(value) -> str | None:
+    return None if value is None else str(value)
+
+
+def _hr_names(db: Session) -> dict[int, str]:
+    return {u.id: u.name for u in db.query(HRUser).all()}
+
+
+@router.get("/candidates/{candidate_id}/edit-access")
+def list_edit_access(candidate_id: int, db: Session = Depends(get_db),
+                      current: HRUser = Depends(get_current_hr)):
+    """What HR may open for this candidate, and what is already open.
+
+    The grantable set covers every column of every form: the one-row detail
+    fields, the uploads, and one entry at a time of each repeating section."""
+    edit_access.require_candidate(db, candidate_id)
+    hr_names = _hr_names(db)
+    permissions = (db.query(FieldEditPermission)
+                     .filter(FieldEditPermission.candidate_id == candidate_id)
+                     .order_by(FieldEditPermission.granted_at.desc()).all())
+    return {
+        "submitted": edit_access.submitted_forms(db, candidate_id),
+        "grantable": edit_access.grantable_items(db, candidate_id),
+        "permissions": [_permission_out(db, p, hr_names) for p in permissions],
+    }
+
+
+@router.post("/candidates/{candidate_id}/edit-access")
+def grant_edit_access(candidate_id: int, payload: GrantEditAccessRequest,
+                       db: Session = Depends(get_db), current: HRUser = Depends(get_current_hr)):
+    """Open one or more individual values for the candidate to correct."""
+    edit_access.require_candidate(db, candidate_id)
+    if not payload.grants:
+        raise HTTPException(status_code=400, detail="Select at least one field to open")
+
+    submitted = edit_access.submitted_forms(db, candidate_id)
+    note = _clean_reason(payload.hr_note)
+    already_open = {(p.form_type, p.field_kind, p.field_name, p.row_table, p.row_id)
+                     for p in edit_access.active_permissions(db, candidate_id)}
+    opened = 0
+    for grant in payload.grants:
+        edit_access.validate_target(db, candidate_id, grant.form_type, grant.field_kind,
+                                     grant.field_name, grant.row_table, grant.row_id)
+        form = edit_access.owning_form(grant.form_type)
+        if not submitted.get(form):
+            raise HTTPException(
+                status_code=400,
+                detail=f"The candidate has not submitted their "
+                        f"{edit_access.form_title(form)} form yet — "
+                        "it is still theirs to fill in.")
+        key = (grant.form_type, grant.field_kind, grant.field_name,
+                grant.row_table, grant.row_id)
+        if key in already_open:
+            continue   # re-granting an open value would just duplicate the row
+        db.add(FieldEditPermission(
+            candidate_id=candidate_id, form_type=grant.form_type,
+            field_kind=grant.field_kind, field_name=grant.field_name,
+            row_table=grant.row_table, row_id=grant.row_id,
+            status=EditPermissionStatus.ACTIVE.value, hr_note=note,
+            granted_by_hr_id=current.id))
+        already_open.add(key)
+        opened += 1
+    db.commit()
+    if not opened:
+        return {"detail": "Those fields are already open for the candidate.", "granted": 0}
+    return {"detail": f"{opened} field(s) opened for the candidate to edit.", "granted": opened}
+
+
+@router.post("/candidates/{candidate_id}/edit-access/revoke")
+def revoke_edit_access(candidate_id: int, payload: RevokeEditAccessRequest,
+                        db: Session = Depends(get_db),
+                        current: HRUser = Depends(get_current_hr)):
+    """Withdraw access before the candidate has used it — one grant, several,
+    or (with no `permission_ids`) everything still open.
+
+    Taking access away is a decision worth explaining, so the reason goes to
+    the audit log; the candidate may already have seen the field open, and this
+    is what says why it closed again. One call is one audited action, so
+    closing five fields at once reads as one entry, not five."""
+    edit_access.require_candidate(db, candidate_id)
+    active = edit_access.active_permissions(db, candidate_id)
+
+    if payload.permission_ids:
+        wanted = set(payload.permission_ids)
+        perms = [p for p in active if p.id in wanted]
+        if len(perms) != len(wanted):
+            raise HTTPException(
+                status_code=400,
+                detail="Some of those are already used or revoked. Reload the page.")
+    else:
+        perms = active
+    if not perms:
+        raise HTTPException(status_code=400,
+                             detail="Nothing is open for this candidate to edit.")
+
+    reason = _clean_reason(payload.reason)
+    change_set_id = uuid4().hex
+    now = datetime.now(timezone.utc)
+    for perm in perms:
+        perm.status = EditPermissionStatus.REVOKED.value
+        perm.resolved_at = now
+        # No value changed — this records the access event itself, so the trail
+        # explains a field that was opened and then closed without an edit.
+        db.add(FieldEditLog(
+            candidate_id=perm.candidate_id, form_type=edit_access.owning_form(perm.form_type),
+            field_name=edit_access.audit_field_name(perm), old_value=None, new_value=None,
+            action="REVOKE", reason=reason, actor_role="HR", edited_by_hr_id=current.id,
+            permission_id=perm.id, change_set_id=change_set_id))
+    db.commit()
+    return {"detail": f"Edit access revoked for {len(perms)} field(s). "
+                       "The candidate can no longer change them.",
+            "revoked": len(perms)}
+
+
+@router.get("/candidates/{candidate_id}/audit", response_model=list[AuditEntryOut])
+def candidate_audit_trail(candidate_id: int, db: Session = Depends(get_db),
+                           current: HRUser = Depends(get_current_hr)):
+    """Every change made to this candidate's submitted data, newest first."""
+    candidate = edit_access.require_candidate(db, candidate_id)
+    hr_names = _hr_names(db)
+    entries = (db.query(FieldEditLog)
+                 .filter(FieldEditLog.candidate_id == candidate_id)
+                 .order_by(FieldEditLog.edited_at.desc(), FieldEditLog.id.desc()).all())
+    # One lookup for every file either side of every entry references.
+    file_ids = {i for e in entries for i in (e.old_file_id, e.new_file_id) if i}
+    snapshots = {s.id: s for s in db.query(DocumentSnapshot).filter(
+        DocumentSnapshot.id.in_(file_ids)).all()} if file_ids else {}
+
+    def as_file(snapshot_id):
+        snap = snapshots.get(snapshot_id)
+        if not snap:
+            return None
+        return AuditFileOut(
+            id=snap.id, filename=snap.original_filename, content_type=snap.content_type,
+            available=os.path.isfile(upload_path(snap.stored_filename)))
+
+    out = []
+    for e in entries:
+        # Rows written before the log grew an actor column were all HR edits.
+        role = e.actor_role or "HR"
+        actor = (candidate.name if role == "CANDIDATE"
+                  else hr_names.get(e.edited_by_hr_id))
+        out.append(AuditEntryOut(
+            id=e.id, form_type=e.form_type, field_name=e.field_name,
+            old_value=e.old_value, new_value=e.new_value, action=e.action,
+            reason=e.reason, actor_role=role, actor_name=actor, edited_at=e.edited_at,
+            change_set_id=e.change_set_id,
+            old_file=as_file(e.old_file_id), new_file=as_file(e.new_file_id)))
+    return out
+
+
+@router.get("/document-snapshots/{snapshot_id}/download")
+def download_snapshot(snapshot_id: int, db: Session = Depends(get_db),
+                       current: HRUser = Depends(get_current_hr)):
+    """Open either side of a document change straight from the audit trail —
+    the file that was replaced as well as the one that replaced it."""
+    snap = db.query(DocumentSnapshot).filter(DocumentSnapshot.id == snapshot_id).first()
+    if not snap:
+        raise HTTPException(status_code=404, detail="That version is not on record")
+    path = upload_path(snap.stored_filename)
+    if not os.path.isfile(path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"'{snap.original_filename}' is recorded but its file is missing from "
+                    "the server's uploads folder.")
+    return FileResponse(path, filename=snap.original_filename,
+                         media_type=snap.content_type or "application/octet-stream")
 
 
 # ---------------------------------------------------------------------------
@@ -576,7 +805,8 @@ _FORM_FILE_FIELDS = {
 
 @router.post("/candidates/{candidate_id}/documents/{form}/{field_key}")
 def upload_document(candidate_id: int, form: str, field_key: str,
-                     file: UploadFile = File(...), db: Session = Depends(get_db),
+                     file: UploadFile = File(...), reason: str | None = Form(None),
+                     db: Session = Depends(get_db),
                      current: HRUser = Depends(get_current_hr)):
     """Attach (or replace) one uploaded file on a candidate's form.
 
@@ -596,23 +826,31 @@ def upload_document(candidate_id: int, form: str, field_key: str,
         raise HTTPException(status_code=400, detail="This form does not collect that document")
 
     original, stored = save_upload(file, candidate_id, form, field_key)
-    replaced_paths = []
     try:
-        for old in db.query(Document).filter(Document.candidate_id == candidate_id,
+        replaced = db.query(Document).filter(Document.candidate_id == candidate_id,
                                               Document.form_type == form_type,
-                                              Document.field_key == field_key).all():
-            replaced_paths.append(upload_path(old.stored_filename))
-            db.add(FieldEditLog(candidate_id=candidate_id, form_type=form, field_name=field_key,
-                                 old_value=old.original_filename, new_value=original,
-                                 action="EDIT", edited_by_hr_id=current.id))
-            db.delete(old)
-        if not replaced_paths:
-            db.add(FieldEditLog(candidate_id=candidate_id, form_type=form, field_name=field_key,
-                                 old_value=None, new_value=original, action="EDIT",
-                                 edited_by_hr_id=current.id))
-        db.add(Document(candidate_id=candidate_id, form_type=form_type, field_key=field_key,
-                         original_filename=original, stored_filename=stored,
-                         content_type=file.content_type))
+                                              Document.field_key == field_key).all()
+        # The file being replaced is kept on disk and pinned by a snapshot, so
+        # the audit trail can still open what the document used to contain.
+        old_snapshot = snapshot_document(db, replaced[0]) if replaced else None
+        old_name = replaced[0].original_filename if replaced else None
+        for doc in replaced:
+            db.delete(doc)
+        db.flush()
+
+        new_doc = Document(candidate_id=candidate_id, form_type=form_type, field_key=field_key,
+                            original_filename=original, stored_filename=stored,
+                            content_type=file.content_type)
+        db.add(new_doc)
+        db.flush()
+        new_snapshot = snapshot_document(db, new_doc)
+
+        db.add(FieldEditLog(candidate_id=candidate_id, form_type=form, field_name=field_key,
+                             old_value=old_name, new_value=original, action="EDIT",
+                             reason=_clean_reason(reason), actor_role="HR",
+                             edited_by_hr_id=current.id,
+                             old_file_id=old_snapshot.id if old_snapshot else None,
+                             new_file_id=new_snapshot.id))
         db.commit()
     except Exception:
         try:
@@ -620,29 +858,25 @@ def upload_document(candidate_id: int, form: str, field_key: str,
         except OSError:
             pass
         raise
-    for path in replaced_paths:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
     return {"detail": "Document uploaded"}
 
 
 @router.delete("/documents/{document_id}")
-def delete_document(document_id: int, db: Session = Depends(get_db),
+def delete_document(document_id: int, reason: str | None = None,
+                     db: Session = Depends(get_db),
                      current: HRUser = Depends(get_current_hr)):
     """Remove one uploaded file. The form then shows it as not submitted."""
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    path = upload_path(doc.stored_filename)
+    # Pinned before deleting the row: the file stays on disk so the trail can
+    # still show what was removed.
+    snapshot = snapshot_document(db, doc)
     db.add(FieldEditLog(candidate_id=doc.candidate_id, form_type=doc.form_type.value,
                          field_name=doc.field_key, old_value=doc.original_filename,
-                         new_value=None, action="DELETE", edited_by_hr_id=current.id))
+                         new_value=None, action="DELETE", reason=_clean_reason(reason),
+                         actor_role="HR", edited_by_hr_id=current.id,
+                         old_file_id=snapshot.id))
     db.delete(doc)
     db.commit()
-    try:
-        os.remove(path)
-    except OSError:
-        pass  # file already gone; the row is what mattered
     return {"detail": "Document deleted"}

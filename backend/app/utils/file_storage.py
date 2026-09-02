@@ -109,3 +109,30 @@ def save_bytes(data: bytes, candidate_id: int, form_type: str, field_key: str) -
     with open(os.path.join(settings.UPLOAD_DIR, stored_name), "wb") as f:
         f.write(data)
     return stored_name
+
+
+def snapshot_document(db, doc) -> "DocumentSnapshot":
+    """Pin a stored file so the audit trail can still open it after the
+    document it belongs to has been replaced or removed.
+
+    One row per stored file: the file that is the "new" side of one change is
+    the same row referenced as the "old" side of the next, so a chain of
+    replacements does not accumulate duplicate rows.
+    """
+    from app.models import DocumentSnapshot
+
+    existing = db.query(DocumentSnapshot).filter(
+        DocumentSnapshot.stored_filename == doc.stored_filename).first()
+    if existing:
+        return existing
+    snapshot = DocumentSnapshot(
+        candidate_id=doc.candidate_id,
+        form_type=doc.form_type.value if hasattr(doc.form_type, "value") else doc.form_type,
+        field_key=doc.field_key,
+        original_filename=doc.original_filename,
+        stored_filename=doc.stored_filename,
+        content_type=doc.content_type,
+    )
+    db.add(snapshot)
+    db.flush()   # the caller needs its id for the audit entry
+    return snapshot

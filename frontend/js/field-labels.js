@@ -7,6 +7,14 @@ const PROFILE_FIELDS = [
   "gender", "current_address", "permanent_address", "pan_number", "aadhaar_number",
 ];
 
+// The rest of candidate_profiles. Not shown on the CIF card (the CIF never
+// asks for them), but HR can open them for editing, so they need labels.
+const PROFILE_EXTRA_FIELDS = [
+  "highest_qualification", "university_name", "graduation_year",
+  "bank_account_number", "bank_ifsc_code",
+  "emergency_contact_name", "emergency_contact_number",
+];
+
 // Flat (one-value) fields per form — each is a column in its detail table.
 const CIF_FIELDS = [
   "position_applied_for", "skills_technologies",
@@ -112,6 +120,19 @@ const BGV_TABLE_TITLES = {
   bgv_gaps: "Gaps in Education / Employment",
 };
 
+// Repeating sections, keyed the way the audit log names them
+// ("education.course_college") and the grant list identifies them.
+const ROW_TABLE_TITLES = {
+  education: "Education",
+  employment: "Employment",
+  references: "References",
+  bgv_address_history: "Address History",
+  bgv_education_checks: "Education Verification",
+  bgv_employment_checks: "Employment Verification",
+  bgv_reference_checks: "Professional References",
+  bgv_gaps: "Gaps",
+};
+
 const EDUCATION_SECTION_LABELS = {
   UG_PG: "UG and PG Education Details",
   "12TH": "12th / Diploma Education Details",
@@ -123,6 +144,10 @@ const FIELD_LABELS = {
   alternate_number: "Alternate Contact", date_of_birth: "Date of Birth", gender: "Gender",
   current_address: "Present/Communication Address", permanent_address: "Permanent Address",
   aadhaar_number: "Aadhaar Number", pan_number: "PAN Number",
+  highest_qualification: "Highest Qualification", university_name: "University Name",
+  graduation_year: "Graduation Year", bank_account_number: "Bank Account Number",
+  bank_ifsc_code: "Bank IFSC Code", emergency_contact_name: "Emergency Contact Name",
+  emergency_contact_number: "Emergency Contact Number",
   marital_status: "Marital Status", blood_group: "Blood Group",
   position_applied_for: "Position Applied For", skills_technologies: "Skill/Technologies Worked",
   alternate_email: "Alternate E-Mail ID", linkedin_link: "LinkedIn Page Link",

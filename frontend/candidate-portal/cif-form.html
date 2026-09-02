@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Candidate Information Form (CIF)</title>
-<link rel="stylesheet" href="css/style.css?v=20260831b">
+<link rel="stylesheet" href="css/style.css?v=20260901b">
 <style>
   .form-card { max-width: 980px; }
   .note-red { color: #b91c1c; font-style: italic; font-size: 0.85rem; margin: 10px 0; }
@@ -212,12 +212,12 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260831b"></script>
-  <script src="js/api.js?v=20260831b"></script>
-  <script src="js/dialog.js?v=20260831b"></script>
-  <script src="js/doc-viewer.js?v=20260831b"></script>
-  <script src="js/edit-mode.js?v=20260831b"></script>
-  <script src="js/draft.js?v=20260831f"></script>
+  <script src="../js/config.js?v=20260901b"></script>
+  <script src="js/api.js?v=20260901b"></script>
+  <script src="js/dialog.js?v=20260901b"></script>
+  <script src="js/doc-viewer.js?v=20260901b"></script>
+  <script src="js/edit-mode.js?v=20260901b"></script>
+  <script src="js/draft.js?v=20260901b"></script>
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
@@ -304,47 +304,31 @@
       }
     });
 
-    // ---- Load: fresh form, or reload a submission that is still editable ----
+    // ---- Load: a fresh form, or nothing at all once it has been submitted ----
     (async () => {
       const data = await apiFetch("/candidate/me/status");
       const cif = data.forms.find(f => f.form_type === "CIF");
-      const editing = cif && cif.status === "SUBMITTED";
 
-      if (cif && !["PENDING", "SUBMITTED"].includes(cif.status)) {
-        await showAlert("Your CIF has already been reviewed and can no longer be edited.",
-                        { title: "Already reviewed", tone: "info" });
+      // The CIF is a one-shot form: once submitted it is frozen. Anything that
+      // needs correcting afterwards goes through a field HR opens for you.
+      if (cif && cif.status !== "PENDING") {
+        await showAlert("You have already submitted your CIF, so it can no longer be "
+                        + "edited here. If something needs correcting, ask HR to open "
+                        + "that field for you — it will then appear under "
+                        + '"Corrections requested by HR" on your home page.',
+                        { title: "Already submitted", tone: "info" });
         window.location.href = "home.html";
         return;
       }
 
       const formEl = document.getElementById("cifForm");
-      if (editing) {
-        const saved = await loadExistingSubmission("CIF");
-        if (!saved) {
-          // Updating from an empty form would wipe the saved answers — bail out.
-          await showAlert("Could not load your previously submitted answers. " +
-                          "Please check your connection and open the form again.",
-                          { title: "Load failed", tone: "error" });
-          window.location.href = "home.html";
-          return;
-        }
-        fillFlatFields(formEl, saved.fields);
-        markExistingUploads(formEl, saved.documents);
-        const t = saved.tables || {};
-        fillTable("eduUgPg", t.education_ug_pg, addEduRowWith);
-        fillTable("edu12th", t.education_12th, addEduRowWith);
-        fillTable("edu10th", t.education_10th, addEduRowWith);
-        fillTable("empTable", t.employment_details, addEmpRowWith);
-        fillTable("refTable", t.references_list, addRefRowWith);
-        applyEditModeChrome(formEl.querySelector('button[type="submit"]'),
-                             document.querySelector(".form-card"), "CIF");
-      } else if (data.profile) {
+      if (data.profile) {
         if (data.profile.email) document.querySelector('input[name="email"]').value = data.profile.email;
         if (data.profile.full_name) document.querySelector('input[name="full_name"]').value = data.profile.full_name;
       }
 
       // Restore goes last so a restored draft lands on top of whatever the
-      // edit reload / profile seeding just filled in.
+      // profile seeding just filled in.
       await offerDraftRestore({
         formType: "CIF",
         formEl,

@@ -14,22 +14,80 @@ HR reviews those and closes out onboarding.
 
 ## Project layout
 ```
-backend/
-  app/
-    main.py            FastAPI app + CORS
-    models.py           Candidate, HRUser, CandidateProfile, FormSubmission, Document, FieldEditLog
-    form_definitions.py  which fields belong to CIF vs BGV vs Document Collection
-    routers/auth.py     HR + candidate login/logout/change-password
-    routers/hr.py       invite, review, edit/delete fields, approve/reject
-    routers/candidate.py  status, submit CIF/BGV/Document forms
-  init_db.py            creates tables + seeds first HR login
-  requirements.txt
-frontend/
-  hr-portal/            login.html, dashboard.html, candidate.html
-  candidate-portal/      login.html, change-password.html, home.html,
-                          cif-form.html, bgv-form.html, document-form.html
-.env                     secrets (DB url, JWT key, seed HR login) — not committed
+HR-Onboarding/
+├─ backend/
+│  ├─ app/
+│  │  ├─ main.py               FastAPI app, CORS, router wiring
+│  │  ├─ config.py             settings read from ../.env (DB, JWT, uploads, Azure OpenAI)
+│  │  ├─ database.py           SQLAlchemy engine + session factory
+│  │  ├─ deps.py               auth guards — get_current_hr / get_current_candidate
+│  │  ├─ security.py           password hashing, JWT issue/decode, invite tokens
+│  │  ├─ models.py             every table (see Data model below)
+│  │  ├─ schemas.py            Pydantic request / response models
+│  │  ├─ form_definitions.py   which field belongs to which form and which table
+│  │  ├─ field_catalog.py      canonical field list + human labels, read by the AI agents
+│  │  ├─ edit_access.py        what HR may unlock on a submitted form, and where it lives
+│  │  ├─ routers/
+│  │  │  ├─ auth.py            HR + candidate login / logout / change-password
+│  │  │  ├─ hr.py              invite, review, edit, grant/revoke access, audit, decisions
+│  │  │  └─ candidate.py       status, drafts, form submission, applying granted edits
+│  │  ├─ agents/
+│  │  │  ├─ field_mapper.py    LLM — which fields mean the same thing across forms
+│  │  │  ├─ prefill.py         turns those mappings into pre-filled values + carried documents
+│  │  │  └─ insights.py        LLM — CIF summary and anomaly flags for HR
+│  │  └─ utils/
+│  │     └─ file_storage.py    upload validation, safe storage, document snapshots
+│  ├─ uploads/                 candidate files + retained versions (gitignored)
+│  ├─ init_db.py               creates tables, runs light migrations, seeds the first HR login
+│  ├─ requirements.txt
+│  └─ .env.example
+├─ frontend/                   static — no build step; serve this folder as ONE site
+│  ├─ index.html               the only login page; HR / Candidate role toggle
+│  ├─ js/
+│  │  ├─ config.js             API_BASE — the single place the backend URL is set
+│  │  └─ field-labels.js       field labels + section titles, shared by both portals
+│  ├─ assets/
+│  │  └─ logo-white.svg
+│  ├─ hr-portal/
+│  │  ├─ dashboard.html        candidate list, invite, delete
+│  │  ├─ candidate.html        one candidate: forms, decisions, edit access, change history
+│  │  ├─ js/api.js             fetch wrapper + HR session
+│  │  ├─ js/candidate.js       everything on the candidate page
+│  │  └─ css/style.css
+│  └─ candidate-portal/
+│     ├─ home.html             application status + the forms assigned to them
+│     ├─ cif-form.html         Candidate Information Form
+│     ├─ document-form.html    Document Collection (uploads only)
+│     ├─ bgv-form.html         Background Verification
+│     ├─ my-corrections.html   the fields HR has unlocked, with one reason per submission
+│     ├─ js/api.js             fetch wrapper + candidate session
+│     ├─ js/draft.js           save / restore an unsubmitted form
+│     ├─ js/auto-fill.js       applies what the prefill agent returned
+│     ├─ js/prefill.js         shows which values were carried from an earlier form
+│     ├─ js/doc-viewer.js      in-page preview for uploaded files
+│     ├─ js/dialog.js          styled replacements for alert() / confirm()
+│     ├─ js/edit-mode.js       shared helpers for reloading a saved submission
+│     └─ css/style.css
+├─ .env                        secrets: DB url, JWT key, seed HR login (NOT committed)
+├─ .gitignore
+└─ README.md
 ```
+
+### Data model
+| Table | What it holds |
+| --- | --- |
+| `hr_users` | HR logins |
+| `candidates` | candidate login, stage, type, invite token |
+| `candidate_profiles` | identity fields shared by every form |
+| `form_submissions` | one row per form: status, submitted/reviewed timestamps |
+| `cif_details` / `bgv_details` / `doc_collection_details` | each form's own flat fields |
+| `education_details` / `employment_details` / `reference_details` | CIF repeating sections |
+| `bgv_address_history` / `bgv_education_checks` / `bgv_employment_checks` / `bgv_reference_checks` / `bgv_gaps` | BGV repeating sections |
+| `documents` | the file currently on record for each upload field |
+| `document_snapshots` | superseded files, kept so old versions stay openable |
+| `form_drafts` / `form_draft_documents` | unsubmitted work; invisible to HR, deleted on submit |
+| `field_edit_permissions` | one row per field HR has unlocked for a candidate |
+| `field_edit_log` | the audit trail: before, after, reason, when, who |
 
 ## One-time setup
 1. Create the Postgres database referenced by `DATABASE_URL` in `.env`
@@ -113,10 +171,69 @@ The link looks like `index.html?token=<43 random chars>&next=form`.
 ```
 CIF  ──HR approves──▶  Document Collection  ──HR approves──▶  BGV  ──HR approves──▶  Complete
 ```
-Each form is editable by the candidate until HR reviews it; after review it
-locks. A form that is not yet its turn shows as LOCKED in both portals.
+**Every form locks the moment it is submitted** — see below. A form that is
+not yet its turn shows as LOCKED in both portals.
+
 7. **Reject** at any gate stops the flow — the candidate portal shows the
    application as closed and no further form can be submitted.
+
+### Correcting a submitted form
+A submitted form is the record HR reviews, so the candidate cannot go back and
+rewrite it. When something does turn out to be wrong — a mistyped Aadhaar
+number, say — HR opens that **one value**, not the form:
+
+1. HR portal → candidate → each submitted form card has **Allow Candidate
+   Edit** → tick what needs correcting, optionally add a note explaining why.
+2. The candidate sees *Corrections requested by HR* on their home page and
+   changes only those values, in `my-corrections.html`, grouped by form. They
+   fill in as many as they want, give **one reason for the submission** (HR
+   opened the fields together, so they are not asked field by field), and
+   submit once. Anything left blank stays open for later.
+3. Each grant is single-use: submitting the change closes it again. HR can
+   withdraw unused ones with **Revoke** on a single field or **Revoke all** in
+   the banner header. Either asks for a reason and is itself recorded, so a
+   field that was opened and then closed without an edit still has an
+   explanation on file.
+4. Every change — by HR or by the candidate — is written to `field_edit_log`
+   with the value before, the value after, the reason, the timestamp and who
+   made it. It is **HR-only**: they read it in the **Change History** card, and
+   there is no candidate-facing endpoint for it. The log records internal
+   actions too (invite links reissued, passwords reset), so it is not something
+   to show the person it is about.
+
+Everything saved in one action shares a `change_set_id` and shows as **one
+entry** in the Change History: one HR *Save Changes* covering four fields is one
+box with four lines, not four boxes, and *Revoke all* over three fields is one
+box reading "Edit access withdrawn — 3 fields". Every batch applies in a single
+transaction, so a partial failure changes nothing.
+
+### Document versions
+When a document is replaced or removed — by HR or by the candidate — the old
+file is **no longer deleted**. A `document_snapshots` row pins it on disk and
+the audit entry points at both sides, so HR can open **Previous file** and
+**New file** straight from the Change History and compare them. A file that is
+the "new" side of one change is the same snapshot row referenced as the "old"
+side of the next, so a chain of replacements does not duplicate rows.
+
+The trade-off is deliberate: superseded uploads accumulate in
+`backend/uploads/` rather than being cleaned up, because you cannot show what a
+document used to contain after deleting it. Deleting a candidate still removes
+every file they own, archived versions included.
+
+This covers every column of every form. Three kinds of value can be opened:
+
+| Kind | What it is | Example |
+| --- | --- | --- |
+| `FIELD` | a column on a one-row detail table | Aadhaar Number, Passport Number |
+| `DOCUMENT` | one uploaded file | Aadhar Card, Signed BGV Consent Form |
+| `ROW_FIELD` | one column of one entry in a repeating section | *Employment #1 — Acme Ltd → Reason for Leaving* |
+
+Repeating entries are listed individually, so HR opens one cell of one entry
+rather than a whole table. The guard rails: a value can only be opened once
+its form is submitted, the HR-only columns (`hr_candidate_id`,
+`hr_candidate_email`) are never grantable, a column that does not belong to
+the named section is rejected, and a row belonging to another candidate is
+rejected.
 
 ## Notes on the two source forms you shared
 - The **CIF** (`cif-form.html`) and **Document Collection** form

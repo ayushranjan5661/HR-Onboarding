@@ -4,6 +4,9 @@ document.getElementById("whoamiAvatar").textContent = getName().charAt(0).toUppe
 
 const candidateId = new URLSearchParams(window.location.search).get("id");
 let currentData = null;
+// What HR has opened for the candidate to correct, plus what may be opened.
+// Populated by loadEditAccess(); render() reads it, so it is fetched first.
+let editAccess = { submitted: {}, grantable: {}, permissions: [] };
 // Whole-form edit mode, tracked per card and limited to one card at a time.
 // PROFILE fields are shown inside the CIF card, so they follow CIF's mode.
 const editModes = { CIF: false, DOCUMENT_COLLECTION: false, BGV: false };
@@ -210,6 +213,19 @@ function renderDocs(allDocs, formType, opts = {}) {
 // or <a href> can't reach it. Fetch the bytes once and render from a blob URL.
 let currentPreviewUrl = null;
 
+// Images and PDFs render inline; anything else can only be opened or saved.
+function renderPreview(body, type, url) {
+  if (type.startsWith("image/")) {
+    body.innerHTML = `<img src="${url}" alt="" style="max-width:100%;max-height:100%;object-fit:contain;">`;
+  } else if (type === "application/pdf") {
+    body.innerHTML = `<iframe src="${url}" style="width:100%;height:100%;border:0;"></iframe>`;
+  } else {
+    body.innerHTML = `<div style="text-align:center;color:#6b7280;padding:20px;">
+      This file type can't be previewed in the browser${type ? " (" + escapeHtml(type) + ")" : ""}.<br>
+      Use <strong>Open in new tab</strong> instead.</div>`;
+  }
+}
+
 async function fetchDocBlob(docId) {
   const res = await fetch(`${API_BASE}/hr/documents/${docId}/download`, {
     headers: { Authorization: `Bearer ${getToken()}` },
@@ -251,16 +267,7 @@ async function viewDoc(e, docId) {
     const type = (doc && doc.content_type) || blob.type || "";
     currentPreviewUrl = URL.createObjectURL(blob);
 
-    if (type.startsWith("image/")) {
-      body.innerHTML = `<img src="${currentPreviewUrl}" alt="" style="max-width:100%;max-height:100%;object-fit:contain;">`;
-    } else if (type === "application/pdf") {
-      body.innerHTML = `<iframe src="${currentPreviewUrl}" style="width:100%;height:100%;border:0;"></iframe>`;
-    } else {
-      // Office docs etc. can't render in-browser — offer the alternatives.
-      body.innerHTML = `<div style="text-align:center;color:#6b7280;padding:20px;">
-        This file type can't be previewed in the browser${type ? " (" + escapeHtml(type) + ")" : ""}.<br>
-        Use <strong>Download</strong> or <strong>Open in new tab</strong> instead.</div>`;
-    }
+    renderPreview(body, type, currentPreviewUrl);
 
     document.getElementById("viewNewTabBtn").onclick = () => window.open(currentPreviewUrl, "_blank");
     // Same rule as the row buttons: no download offered while the form the
@@ -298,10 +305,18 @@ async function load() {
   }
   try {
     currentData = await apiFetch(`/hr/candidates/${candidateId}`);
-    render();
   } catch (err) {
     showLoadError(err.message);
+    return;
   }
+  // Which cards get an "Allow Candidate Edit" button comes from edit-access,
+  // so it has to be in hand before the first render. A failure here must not
+  // blank out the candidate record — just draw it without the grant controls.
+  try {
+    editAccess = await apiFetch(`/hr/candidates/${candidateId}/edit-access`);
+  } catch (err) { /* leave editAccess as-is */ }
+  render();
+  loadAudit().catch(() => {});
 }
 
 function showLoadError(message) {
@@ -310,6 +325,8 @@ function showLoadError(message) {
   document.getElementById("credentialsCard").classList.add("hidden");
   document.getElementById("decisionCard").classList.add("hidden");
   document.getElementById("cifCard").classList.add("hidden");
+  document.getElementById("auditCard").classList.add("hidden");
+  document.getElementById("openAccessBanner").innerHTML = "";
   document.getElementById("followupForms").innerHTML = "";
   const notice = document.getElementById("rejectedNotice");
   notice.classList.remove("hidden");
@@ -364,6 +381,7 @@ function render() {
   const cifOpts = { editing: editModes.CIF };
   document.getElementById("profileFields").innerHTML = fieldRows("PROFILE", PROFILE_FIELDS, c.profile || {}, cifOpts);
   document.getElementById("actions-CIF").innerHTML = formEditControls("CIF");
+  renderOpenAccess();
 
   // ---- AI Summary & Flags: only once the candidate has actually submitted a CIF.
   // Generated once per page visit (not on every re-render, e.g. after a field
@@ -495,10 +513,16 @@ async function copyLoginLink(btn) {
 // changed, keeping the field_edit_log meaningful.
 
 function formEditControls(form) {
-  return editModes[form]
-    ? `<button class="btn btn-primary btn-small" onclick="saveFormEdits('${form}', this)">Save Changes</button>
-       <button class="btn btn-outline btn-small" onclick="cancelFormEdit('${form}')">Cancel</button>`
-    : `<button class="btn btn-outline btn-small" onclick="startFormEdit('${form}')">Edit</button>`;
+  if (editModes[form]) {
+    return `<button class="btn btn-primary btn-small" onclick="saveFormEdits('${form}', this)">Save Changes</button>
+            <button class="btn btn-outline btn-small" onclick="cancelFormEdit('${form}')">Cancel</button>`;
+  }
+  // Every form freezes for the candidate on submission, so each one needs a
+  // way to hand a single value back to them.
+  const grant = (editAccess.submitted || {})[form]
+    ? `<button class="btn btn-outline btn-small" onclick="openGrantModal('${form}')">Allow Candidate Edit</button>`
+    : "";
+  return `${grant}<button class="btn btn-outline btn-small" onclick="startFormEdit('${form}')">Edit</button>`;
 }
 
 // What the inputs inside one card currently differ from, keyed the way each
@@ -556,22 +580,32 @@ async function saveFormEdits(form, btn) {
     return;
   }
 
+  // Every change to submitted data is audited, and an audit entry without a
+  // reason is close to useless — so the reason is collected before saving.
+  const count = fieldEdits.length + rowEdits.size;
+  const reason = await askReason({
+    title: "Why are you changing this?",
+    subtitle: `${count} change(s) to ${FORM_TITLES[form]}. This is stored in the `
+              + `candidate's Change History next to the old and new values.`,
+  });
+  if (reason === null) return;   // cancelled — stay in edit mode, nothing lost
+
   const original = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Saving…";
   try {
-    for (const e of fieldEdits) {
-      await apiFetch(`/hr/candidates/${candidateId}/details/${e.form}/field`, {
-        method: "PATCH",
-        body: JSON.stringify({ field_name: e.field, new_value: e.value === "" ? null : e.value }),
-      });
-    }
-    for (const r of rowEdits.values()) {
-      await apiFetch(`/hr/rows/${r.table}/${r.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ values: r.values }),
-      });
-    }
+    // One request for the whole save: it applies in a single transaction, so a
+    // failure changes nothing, and the audit trail shows it as one entry.
+    await apiFetch(`/hr/candidates/${candidateId}/changes`, {
+      method: "POST",
+      body: JSON.stringify({
+        fields: fieldEdits.map(e => ({
+          form: e.form, field_name: e.field, new_value: e.value === "" ? null : e.value })),
+        rows: [...rowEdits.values()].map(r => ({
+          table: r.table, row_id: Number(r.id), values: r.values })),
+        reason,
+      }),
+    });
     editModes[form] = false;
     await load();   // render() restores the read-only view and the Edit button
   } catch (err) {
@@ -579,6 +613,50 @@ async function saveFormEdits(form, btn) {
     btn.disabled = false;
     btn.textContent = original;
   }
+}
+
+
+// Modal prompt for the mandatory reason on any HR action that touches the
+// audit trail. Resolves the text, or null if HR backed out — a cancel must
+// leave their typing on the page untouched.
+function askReason({ title = "Reason for this change", subtitle = "",
+                      okText = "Save Changes", danger = false,
+                      placeholder = "Why is this being changed?" } = {}) {
+  const modal = document.getElementById("reasonModal");
+  const text = document.getElementById("reasonText");
+  const error = document.getElementById("reasonError");
+  const okBtn = document.getElementById("reasonOkBtn");
+  const cancelBtn = document.getElementById("reasonCancelBtn");
+
+  document.getElementById("reasonTitle").textContent = title;
+  document.getElementById("reasonSubtitle").textContent = subtitle;
+  text.value = "";
+  text.placeholder = placeholder;
+  error.textContent = "";
+  okBtn.textContent = okText;
+  okBtn.className = `btn ${danger ? "btn-danger" : "btn-primary"}`;
+  modal.classList.remove("hidden");
+  text.focus();
+
+  return new Promise((resolve) => {
+    function done(result) {
+      modal.classList.add("hidden");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      resolve(result);
+    }
+    function onOk() {
+      const value = text.value.trim();
+      if (value.length < 5) {
+        error.textContent = "Please write at least a few words.";
+        return;
+      }
+      done(value);
+    }
+    function onCancel() { done(null); }
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+  });
 }
 
 
@@ -598,12 +676,30 @@ async function uploadDoc(formType, fieldKey, input) {
   const file = input.files && input.files[0];
   if (!file) return;
   input.value = "";   // let the same file be re-picked if the upload fails
+
+  // Replacing a candidate's document is a change to submitted data like any
+  // other, so it is explained and audited the same way.
+  const existing = currentData.documents.find(
+    d => d.form_type === formType && d.field_key === fieldKey);
+  const reason = await askReason({
+    title: existing ? "Replace this document?" : "Attach this document?",
+    subtitle: `${labelFor(fieldKey)} — ${file.name}. `
+              + (existing ? "The file it replaces is kept, so both versions stay openable "
+                            + "from the Change History. " : "")
+              + "Say why you are doing this.",
+    placeholder: "e.g. Candidate emailed a clearer scan.",
+    okText: existing ? "Replace" : "Attach",
+  });
+  if (reason === null) return;
+
   const body = new FormData();
   body.append("file", file);
+  body.append("reason", reason);
   try {
     await apiFetch(`/hr/candidates/${candidateId}/documents/${formType}/${fieldKey}`,
                     { method: "POST", body });
     await refreshFormDocs(formType);
+    await loadAudit();
   } catch (err) {
     alert(err.message);
   }
@@ -611,12 +707,20 @@ async function uploadDoc(formType, fieldKey, input) {
 
 async function removeDoc(formType, docId) {
   const doc = currentData.documents.find(d => d.id === docId);
-  if (!await showConfirm("The file is deleted from the server and this document goes back to \"Not submitted\".",
-      { title: `Remove "${doc ? doc.original_filename : "this document"}"?`,
-        confirmText: "Remove", danger: true })) return;
+  const reason = await askReason({
+    title: `Remove "${doc ? doc.original_filename : "this document"}"?`,
+    subtitle: "The document goes back to \"Not submitted\". The file itself is kept, so it "
+              + "stays openable from the Change History. Say why you are removing it.",
+    placeholder: "e.g. Wrong document uploaded for this field.",
+    okText: "Remove",
+    danger: true,
+  });
+  if (reason === null) return;
   try {
-    await apiFetch(`/hr/documents/${docId}`, { method: "DELETE" });
+    await apiFetch(`/hr/documents/${docId}?reason=${encodeURIComponent(reason)}`,
+                    { method: "DELETE" });
     await refreshFormDocs(formType);
+    await loadAudit();
   } catch (err) {
     alert(err.message);
   }
@@ -636,6 +740,382 @@ async function deleteRow(tableName, rowId) {
     alert(err.message);
   }
 }
+
+// ---- Field-level edit access ----
+// Every submitted form is read-only to the candidate. When something turns
+// out to be wrong, HR opens that one value — a field, an upload, or a single
+// cell of one repeating entry — rather than the whole form; the candidate
+// then has to say why they are changing it, and the change is audited.
+
+function fmtWhen(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  return isNaN(d) ? String(value) : d.toLocaleString();
+}
+
+// Identifies one grantable value, and matches the key the checkbox carries.
+function accessKey(item) {
+  return [item.form_type, item.field_kind, item.field_name,
+          item.row_table || "", item.row_id || ""].join("|");
+}
+
+// "Employment #2 — Acme Ltd → Reason for Leaving", or just the field label.
+function accessLabel(item) {
+  const field = labelFor(item.field_name);
+  if (item.field_kind === "ROW_FIELD") return `${item.row_label} → ${field}`;
+  if (item.field_kind === "DOCUMENT") return `${field} (document)`;
+  return field;
+}
+
+async function loadEditAccess() {
+  editAccess = await apiFetch(`/hr/candidates/${candidateId}/edit-access`);
+  render();   // the grant buttons and the open-access banner both come from it
+}
+
+function renderOpenAccess() {
+  const host = document.getElementById("openAccessBanner");
+  if (!host) return;
+  const open = (editAccess.permissions || []).filter(p => p.status === "ACTIVE");
+  if (!open.length) { host.innerHTML = ""; return; }
+  host.innerHTML = `
+    <div class="access-banner">
+      <div class="access-banner-head">
+        <span>Open for the candidate to edit — everything else stays locked.</span>
+        ${open.length > 1
+          ? `<button class="btn btn-outline btn-small" onclick="revokeAccess()">Revoke all</button>`
+          : ""}
+      </div>
+      ${open.map(p => `
+        <div class="access-row">
+          <div class="access-text">
+            <span class="access-field">${escapeHtml(accessLabel(p))}</span>
+            <span class="access-meta">${escapeHtml(FORM_TITLES[p.form] || p.form)}
+              &nbsp;·&nbsp; currently: ${p.current_value
+                ? escapeHtml(String(p.current_value)) : "<em>not provided</em>"}
+              &nbsp;·&nbsp; opened ${escapeHtml(fmtWhen(p.granted_at))}${p.granted_by
+                ? " by " + escapeHtml(p.granted_by) : ""}</span>
+            ${p.hr_note ? `<span class="access-meta">Note: ${escapeHtml(p.hr_note)}</span>` : ""}
+          </div>
+          <button class="btn btn-outline btn-small" onclick="revokeAccess(${p.id})">Revoke</button>
+        </div>`).join("")}
+    </div>`;
+}
+
+let grantModalForm = "CIF";
+
+function openGrantModal(form) {
+  grantModalForm = form;
+  const openKeys = new Set((editAccess.permissions || [])
+    .filter(p => p.status === "ACTIVE").map(accessKey));
+  const items = (editAccess.grantable || {})[form] || [];
+
+  document.getElementById("grantModalTitle").textContent =
+    `Allow the candidate to edit specific values — ${FORM_TITLES[form]}`;
+  document.getElementById("grantList").innerHTML = items.length
+    ? items.map(item => {
+        const key = accessKey(item);
+        const isOpen = openKeys.has(key);
+        const label = accessLabel(item);
+        return `
+          <label class="grant-option" data-search="${escapeHtml(label.toLowerCase())} ${escapeHtml(item.field_name)}">
+            <input type="checkbox" value="${escapeHtml(key)}" ${isOpen ? "disabled" : ""}>
+            <span class="grant-label">${escapeHtml(label)}</span>
+            ${isOpen ? `<span class="grant-open-tag">already open</span>` : ""}
+          </label>`;
+      }).join("")
+    : `<p style="color:var(--muted);margin:8px 4px;">This form has no editable values on record.</p>`;
+
+  document.getElementById("grantSearch").value = "";
+  document.getElementById("grantNote").value = "";
+  document.getElementById("grantError").textContent = "";
+  document.getElementById("grantModal").classList.remove("hidden");
+  document.getElementById("grantSearch").focus();
+}
+
+function closeGrantModal() {
+  document.getElementById("grantModal").classList.add("hidden");
+}
+
+document.getElementById("grantSearch").addEventListener("input", (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  document.querySelectorAll("#grantList .grant-option").forEach(el => {
+    el.classList.toggle("hidden", !!q && !el.dataset.search.includes(q));
+  });
+});
+
+document.getElementById("grantModal").addEventListener("click", (e) => {
+  if (e.target.id === "grantModal") closeGrantModal();
+});
+
+async function submitGrants(btn) {
+  const checked = Array.from(
+    document.querySelectorAll("#grantList input[type=checkbox]:checked"));
+  const error = document.getElementById("grantError");
+  if (!checked.length) {
+    error.textContent = "Tick at least one value.";
+    return;
+  }
+  const grants = checked.map(cb => {
+    const [form_type, field_kind, field_name, row_table, row_id] = cb.value.split("|");
+    return { form_type, field_kind, field_name,
+             row_table: row_table || null, row_id: row_id ? Number(row_id) : null };
+  });
+
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Opening…";
+  try {
+    const res = await apiFetch(`/hr/candidates/${candidateId}/edit-access`, {
+      method: "POST",
+      body: JSON.stringify({ grants, hr_note: document.getElementById("grantNote").value }),
+    });
+    closeGrantModal();
+    await loadEditAccess();
+    alert(res.detail);
+  } catch (err) {
+    error.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+// Called with a permission id for one field, or with nothing to close every
+// field still open. Either way it is one audited action.
+async function revokeAccess(permissionId) {
+  const open = (editAccess.permissions || []).filter(p => p.status === "ACTIVE");
+  const targets = permissionId ? open.filter(p => p.id === permissionId) : open;
+  if (!targets.length) return;
+
+  const what = targets.length === 1
+    ? accessLabel(targets[0])
+    : `all ${targets.length} fields currently open`;
+  const reason = await askReason({
+    title: targets.length === 1 ? "Withdraw edit access?" : "Withdraw all edit access?",
+    subtitle: `The candidate will no longer be able to change ${what}. This is `
+              + `recorded in the Change History, so say why you are closing it again.`,
+    placeholder: "e.g. Sent to the wrong candidate / no longer needs correcting.",
+    okText: targets.length === 1 ? "Revoke" : `Revoke all ${targets.length}`,
+    danger: true,
+  });
+  if (reason === null) return;
+  try {
+    await apiFetch(`/hr/candidates/${candidateId}/edit-access/revoke`, {
+      method: "POST",
+      body: JSON.stringify({ permission_ids: targets.map(p => p.id), reason }),
+    });
+    await loadEditAccess();
+    await loadAudit();   // a revoke is itself an audit entry
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+
+// ---- Change history (audit trail) ----
+// One row per change to submitted data: the value before, the value after,
+// the reason given, when it happened, and who made it.
+
+async function loadAudit() {
+  const body = document.getElementById("auditBody");
+  body.innerHTML = `<p style="color:#6b7280;">Loading…</p>`;
+  try {
+    renderAudit(await apiFetch(`/hr/candidates/${candidateId}/audit`));
+  } catch (err) {
+    body.innerHTML = `<p style="color:var(--danger);">Could not load the change history: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+// Field names from repeating sections arrive as "education.course_college".
+function auditFieldLabel(name) {
+  if (!name) return "";
+  const dot = name.indexOf(".");
+  if (dot === -1) return labelFor(name);
+  const table = name.slice(0, dot);
+  return `${labelFor(name.slice(dot + 1))} (${ROW_TABLE_TITLES[table] || table.replaceAll("_", " ")})`;
+}
+
+function auditValue(value) {
+  return (value === null || value === undefined || value === "")
+    ? `<span class="audit-empty">empty</span>`
+    : escapeHtml(String(value));
+}
+
+// Everything saved in one action shares a change_set_id, so it reads as one
+// entry. Rows predating change sets have none — each of those stands alone.
+function groupChangeSets(entries) {
+  const groups = [];
+  const byId = new Map();
+  entries.forEach(e => {
+    const key = e.change_set_id || `single-${e.id}`;
+    let group = byId.get(key);
+    if (!group) {
+      group = { key, changes: [], actor_role: e.actor_role, actor_name: e.actor_name,
+                edited_at: e.edited_at };
+      byId.set(key, group);
+      groups.push(group);
+    }
+    group.changes.push(e);
+  });
+  return groups;
+}
+
+const AUDIT_DAY = { weekday: "short", day: "numeric", month: "long", year: "numeric" };
+
+function auditDayLabel(value) {
+  const d = new Date(value);
+  if (isNaN(d)) return "";
+  const today = new Date();
+  const days = Math.round((new Date(today.getFullYear(), today.getMonth(), today.getDate())
+                            - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return d.toLocaleDateString(undefined, AUDIT_DAY);
+}
+
+function auditTimeLabel(value) {
+  const d = new Date(value);
+  return isNaN(d) ? String(value || "")
+                   : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+// A replaced file is kept on disk, so both sides of a document change can be
+// opened straight from the trail.
+function fileButton(file, label) {
+  if (!file) return "";
+  if (!file.available) {
+    return `<span class="audit-file is-gone" title="${escapeHtml(file.filename)}">${label}: missing on server</span>`;
+  }
+  return `<button class="audit-file" title="${escapeHtml(file.filename)}"
+    onclick="viewSnapshot(event, ${file.id}, '${escapeHtml(label).replaceAll("'", "&#39;")}')"
+    >${label}</button>`;
+}
+
+function auditFileBar(e) {
+  if (!e.old_file && !e.new_file) return "";
+  return `<div class="audit-files">
+    ${fileButton(e.old_file, "Previous file")}
+    ${fileButton(e.new_file, "New file")}
+  </div>`;
+}
+
+// One line per change inside a set.
+function auditChangeLine(e, showReason, inRevokeSet = false) {
+  const body = e.action === "REVOKE"
+    // In a set of revokes the heading already says it — repeating the sentence
+    // on every line would drown out which fields were closed.
+    ? (inRevokeSet ? ""
+        : `<span class="audit-access">Edit access withdrawn — the value itself was not changed.</span>`)
+    : `<span class="audit-old">${auditValue(e.old_value)}</span>
+       <span class="audit-arrow" aria-hidden="true">&rarr;</span>
+       <span class="audit-new">${auditValue(e.new_value)}</span>`;
+  return `
+    <div class="audit-change">
+      <div class="audit-change-name">${escapeHtml(auditFieldLabel(e.field_name))}${
+        e.action === "DELETE" ? ` <span class="audit-action">cleared</span>` : ""}</div>
+      ${body ? `<div class="audit-diff">${body}</div>` : ""}
+      ${auditFileBar(e)}
+      ${showReason && e.reason
+        ? `<div class="audit-reason"><span>Reason</span> ${escapeHtml(e.reason)}</div>`
+        : ""}
+    </div>`;
+}
+
+function renderAudit(entries) {
+  const groups = groupChangeSets(entries);
+  document.getElementById("auditCount").textContent = groups.length;
+  const body = document.getElementById("auditBody");
+  if (!groups.length) {
+    body.innerHTML = `<div class="audit-empty-state">
+      <strong>No changes yet.</strong>
+      <span>Every edit to submitted data — by you or by the candidate — is recorded here.</span>
+    </div>`;
+    return;
+  }
+
+  let lastDay = null;
+  body.innerHTML = `<div class="audit-timeline">` + groups.map(g => {
+    const reasons = [...new Set(g.changes.map(c => c.reason || ""))];
+    // One reason for the whole save is stated once; differing ones sit with
+    // the change they belong to.
+    const sharedReason = reasons.length === 1 ? reasons[0] : null;
+    const forms = [...new Set(g.changes.map(c => c.form_type).filter(Boolean))];
+    const isCandidate = g.actor_role === "CANDIDATE";
+    const allRevokes = g.changes.every(c => c.action === "REVOKE");
+    const heading = g.changes.length === 1
+      ? auditFieldLabel(g.changes[0].field_name)
+      : allRevokes
+        ? `Edit access withdrawn — ${g.changes.length} fields`
+        : `${g.changes.length} changes`;
+    const actor = g.actor_name || (isCandidate ? "the candidate" : "HR");
+
+    const day = auditDayLabel(g.edited_at);
+    const separator = day && day !== lastDay
+      ? `<div class="audit-day">${escapeHtml(day)}</div>` : "";
+    lastDay = day || lastDay;
+
+    return separator + `
+      <div class="audit-entry${allRevokes ? " is-revoke" : ""}${isCandidate ? " is-candidate" : ""}">
+        <span class="audit-dot" aria-hidden="true"></span>
+        <div class="audit-head">
+          <span class="audit-field">${escapeHtml(heading)}</span>
+          <span class="audit-when" title="${escapeHtml(fmtWhen(g.edited_at))}">
+            ${escapeHtml(auditTimeLabel(g.edited_at))}</span>
+        </div>
+        <div class="audit-byline">
+          <span class="audit-avatar">${escapeHtml((actor[0] || "?").toUpperCase())}</span>
+          <strong>${escapeHtml(actor)}</strong>
+          <span class="audit-role ${isCandidate ? "is-candidate" : "is-hr"}">${
+            isCandidate ? "Candidate" : "HR"}</span>
+          ${forms.length
+            ? `<span class="audit-forms">${escapeHtml(
+                 forms.map(f => f.replaceAll("_", " ")).join(" · "))}</span>`
+            : ""}
+        </div>
+        <div class="audit-changes${g.changes.length > 1 ? " is-set" : ""}">
+          ${g.changes.map(c => auditChangeLine(c, sharedReason === null,
+                                                allRevokes && g.changes.length > 1)).join("")}
+        </div>
+        ${sharedReason
+          ? `<div class="audit-reason"><span>Reason</span> ${escapeHtml(sharedReason)}</div>`
+          : sharedReason === ""
+            ? `<div class="audit-reason is-missing"><span>Reason</span> not recorded</div>`
+            : ""}
+      </div>`;
+  }).join("") + `</div>`;
+}
+
+// Opens an archived file in the same preview modal the document rows use.
+async function viewSnapshot(e, snapshotId, label = "Document version") {
+  e.preventDefault();
+  const body = document.getElementById("viewBody");
+  // The button's tooltip carries the filename; put it in the title too so the
+  // viewer says which of the two versions is on screen.
+  const filename = e.currentTarget ? e.currentTarget.title : "";
+  document.getElementById("viewTitle").textContent =
+    filename ? `${label} — ${filename}` : label;
+  document.getElementById("viewModal").classList.remove("hidden");
+  body.innerHTML = "<span style='color:#6b7280'>Loading…</span>";
+  document.getElementById("viewDownloadBtn").classList.add("hidden");
+
+  try {
+    releasePreview();
+    const res = await fetch(`${API_BASE}/hr/document-snapshots/${snapshotId}/download`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error((data && data.detail) || "Could not load this file");
+    }
+    const blob = await res.blob();
+    currentPreviewUrl = URL.createObjectURL(blob);
+    renderPreview(body, blob.type, currentPreviewUrl);
+    document.getElementById("viewNewTabBtn").onclick = () => window.open(currentPreviewUrl, "_blank");
+  } catch (err) {
+    body.innerHTML = `<div style="color:#b91c1c;padding:20px;">${escapeHtml(err.message)}</div>`;
+  }
+}
+
 
 // ---- Collapsible section headers (CIF / Document Collection / BGV / AI Summary) ----
 function toggleCollapse(headerEl) {

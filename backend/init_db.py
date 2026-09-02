@@ -96,6 +96,34 @@ def main():
                         AND doc.form_type = 'DOCUMENT_COLLECTION'
                         AND doc.status = 'APPROVED')
         """))
+        # The audit log now records candidate edits too, so the HR actor is
+        # no longer always set. Add the new columns before relaxing the old
+        # constraint, and stamp every pre-existing row as an HR edit.
+        conn.execute(text("ALTER TABLE field_edit_log ADD COLUMN IF NOT EXISTS reason TEXT"))
+        conn.execute(text("ALTER TABLE field_edit_log ADD COLUMN IF NOT EXISTS "
+                           "actor_role VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE field_edit_log ADD COLUMN IF NOT EXISTS "
+                           "edited_by_candidate_id INTEGER"))
+        conn.execute(text("ALTER TABLE field_edit_log ADD COLUMN IF NOT EXISTS "
+                           "permission_id INTEGER"))
+        conn.execute(text("ALTER TABLE field_edit_log ALTER COLUMN edited_by_hr_id "
+                           "DROP NOT NULL"))
+        conn.execute(text("UPDATE field_edit_log SET actor_role = 'HR' "
+                           "WHERE actor_role IS NULL"))
+        # Changes saved together share a change-set id. Rows written before
+        # this existed keep NULL and each stands on its own in the trail.
+        conn.execute(text("ALTER TABLE field_edit_log ADD COLUMN IF NOT EXISTS "
+                           "change_set_id VARCHAR(32)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_field_edit_log_change_set_id "
+                           "ON field_edit_log (change_set_id)"))
+
+        # A replaced document keeps its file now, so the audit trail can show
+        # both sides of the change.
+        conn.execute(text("ALTER TABLE field_edit_log ADD COLUMN IF NOT EXISTS "
+                           "old_file_id INTEGER"))
+        conn.execute(text("ALTER TABLE field_edit_log ADD COLUMN IF NOT EXISTS "
+                           "new_file_id INTEGER"))
+
         # Bring every existing table up to date with its model.
         _sync_columns(conn)
 
