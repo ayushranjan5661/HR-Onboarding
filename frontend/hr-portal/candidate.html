@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>HR Portal — Candidate</title>
-<link rel="stylesheet" href="css/style.css?v=20260831f">
+<link rel="stylesheet" href="css/style.css?v=20260901b">
 </head>
 <body>
   <div class="app-shell">
@@ -58,6 +58,10 @@
           <div id="insightsBody"></div>
         </div>
 
+        <!-- Fields currently unlocked for the candidate. Deliberately outside
+             the CIF card, which starts collapsed — HR must see this at a glance. -->
+        <div id="openAccessBanner"></div>
+
         <div class="card section-card collapsed" id="cifCard">
           <div class="section-title collapsible" onclick="toggleCollapse(this)">
             <h3>Candidate Details (CIF)</h3>
@@ -72,6 +76,18 @@
         </div>
 
         <div id="followupForms"></div>
+
+        <!-- Every post-submission change: what, from what to what, why, when, by whom -->
+        <div class="card section-card collapsed" id="auditCard">
+          <div class="section-title collapsible" onclick="toggleCollapse(this)">
+            <h3>Change History <span class="badge badge-pending" id="auditCount">0</span></h3>
+            <div class="section-title-actions" onclick="event.stopPropagation()">
+              <button class="btn btn-outline btn-small" onclick="loadAudit()">Refresh</button>
+            </div>
+            <span class="chevron">&#9660;</span>
+          </div>
+          <div id="auditBody"><p style="color:#6b7280;">Loading…</p></div>
+        </div>
       </div>
     </div>
   </div>
@@ -102,6 +118,51 @@
     </div>
   </div>
 
+  <!-- Open individual fields for the candidate to correct -->
+  <div class="modal-backdrop hidden" id="grantModal">
+    <div class="modal" style="max-width:620px;">
+      <h3 id="grantModalTitle">Allow the candidate to edit specific values</h3>
+      <p style="color:var(--muted);font-size:0.86rem;margin-top:0;">
+        A submitted form is read-only to the candidate. Tick only what needs correcting —
+        a field, an upload, or one cell of one repeating entry. They will be able to
+        change those and nothing else, and must give a reason, which is recorded in the
+        Change History.
+      </p>
+
+      <label for="grantSearch">Find a field, upload or entry</label>
+      <input type="text" id="grantSearch" placeholder="e.g. aadhaar" autocomplete="off">
+
+      <div id="grantList" style="max-height:38vh;overflow-y:auto;margin-top:12px;
+           border:1px solid var(--border);border-radius:8px;padding:6px 10px;"></div>
+
+      <label for="grantNote" style="margin-top:14px;">Note to the candidate (optional)</label>
+      <textarea id="grantNote" rows="2"
+        placeholder="e.g. Your Aadhaar number does not match the uploaded card — please correct it."></textarea>
+
+      <div class="error-msg" id="grantError"></div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeGrantModal()">Cancel</button>
+        <button class="btn btn-primary" id="grantSubmitBtn" onclick="submitGrants(this)">Open Selected Fields</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reason for an HR edit; the audit trail records it alongside the change -->
+  <div class="modal-backdrop hidden" id="reasonModal">
+    <div class="modal">
+      <h3 id="reasonTitle">Reason for this change</h3>
+      <p style="color:var(--muted);font-size:0.86rem;margin-top:0;" id="reasonSubtitle">
+        This is stored in the candidate's Change History next to the old and new values.
+      </p>
+      <textarea id="reasonText" rows="3" placeholder="Why is this being changed?"></textarea>
+      <div class="error-msg" id="reasonError"></div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="reasonCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="reasonOkBtn">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Document preview -->
   <div class="modal-backdrop hidden" id="viewModal">
     <div class="modal" style="width:90vw;max-width:1000px;">
@@ -119,9 +180,9 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260831f"></script>
-  <script src="js/api.js?v=20260831f"></script>
-  <script src="js/field-labels.js?v=20260831f"></script>
-  <script src="js/candidate.js?v=20260831f"></script>
+  <script src="../js/config.js?v=20260901b"></script>
+  <script src="js/api.js?v=20260901b"></script>
+  <script src="../js/field-labels.js?v=20260901b"></script>
+  <script src="js/candidate.js?v=20260901b"></script>
 </body>
 </html>

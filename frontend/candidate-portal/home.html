@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Candidate Portal — Home</title>
-<link rel="stylesheet" href="css/style.css?v=20260831b">
+<link rel="stylesheet" href="css/style.css?v=20260901b">
 </head>
 <body>
   <div class="topbar">
@@ -23,11 +23,23 @@
       <p style="color:#6b7280;">Thank you for your interest. HR will reach out if anything further is needed.</p>
     </div>
 
+    <!-- Fields HR has unlocked on an already-submitted form -->
+    <div class="card correction-card hidden" id="correctionsCard">
+      <div class="correction-head">
+        <div>
+          <div class="ft-name">Corrections requested by HR</div>
+          <div class="ft-desc" id="correctionsSummary"></div>
+        </div>
+        <button class="btn btn-primary btn-small"
+          onclick="window.location.href='my-corrections.html'">Make Corrections</button>
+      </div>
+    </div>
+
     <div id="formTiles"></div>
   </div>
 
-  <script src="../js/config.js?v=20260831b"></script>
-  <script src="js/api.js?v=20260831b"></script>
+  <script src="../js/config.js?v=20260901b"></script>
+  <script src="js/api.js?v=20260901b"></script>
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
@@ -97,12 +109,13 @@
         const tile = document.createElement("div");
         tile.className = "card form-tile";
         const canFill = f.status === "PENDING";
-        // Still awaiting review -> the candidate can go back in and correct it.
-        const canEdit = f.status === "SUBMITTED";
-        const label = canFill ? "Fill Form" : canEdit ? "Edit" : "View";
-        const note = canEdit
-          ? "<div class='ft-desc' style='color:#b45309;margin-top:4px;'>You can still edit this until HR reviews it.</div>"
-          : "";
+        // Every form is frozen once submitted — corrections go through a value
+        // HR opens for you, so there is no "Edit" here any more.
+        const label = canFill ? "Fill Form" : "View";
+        const note = canFill
+          ? ""
+          : "<div class='ft-desc' style='color:#6b7280;margin-top:4px;'>Submitted and locked. "
+            + "To change something, ask HR to open that field for you.</div>";
         tile.innerHTML = `
           <div>
             <div class="ft-name">${meta.title}</div>
@@ -111,18 +124,34 @@
           </div>
           <div style="text-align:right;">
             <div class="badge badge-${f.status.toLowerCase()}" style="margin-bottom:8px;">${statusBadgeText(f.status)}</div><br>
-            <button class="btn ${(canFill || canEdit) ? "btn-primary" : "btn-outline"} btn-small"
-              ${(canFill || canEdit) ? "" : "disabled"}
+            <button class="btn ${canFill ? "btn-primary" : "btn-outline"} btn-small"
+              ${canFill ? "" : "disabled"}
               onclick="window.location.href='${meta.page}'">${label}</button>
           </div>`;
         container.appendChild(tile);
       });
     }
 
+    function renderCorrections(permissions) {
+      const card = document.getElementById("correctionsCard");
+      if (!permissions.length) { card.classList.add("hidden"); return; }
+      const note = permissions.find(p => p.hr_note);
+      document.getElementById("correctionsSummary").textContent =
+        `HR has unlocked ${permissions.length} value(s) for you to correct.`
+        + (note ? ` “${note.hr_note}”` : "")
+        + " You will be asked why you are changing each one.";
+      card.classList.remove("hidden");
+    }
+
     async function load() {
       const data = await apiFetch("/candidate/me/status");
       renderTrack(data.stage);
       if (data.stage !== "REJECTED") renderTiles(data.forms);
+      // A failure here must not take the status page down with it.
+      try {
+        const access = await apiFetch("/candidate/me/edit-access");
+        renderCorrections(access.permissions || []);
+      } catch (e) { /* nothing unlocked, or offline */ }
     }
 
     load().catch(err => {

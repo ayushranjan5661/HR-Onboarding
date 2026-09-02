@@ -230,3 +230,23 @@ tr { cursor: pointer; }
 .auto-filled { background: #f0fdf4; border-color: #86efac; }
 .auto-filled-note { color: #15803d; font-size: 0.76rem; margin-top: 3px; }
 .auto-filled-note.carried-doc { color: #0369a1; }
+
+/* --- Corrections HR has unlocked on a submitted form --- */
+.correction-card { border-left: 4px solid var(--warn); margin-bottom: 20px; }
+.correction-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+}
+.correction-head .btn { flex: none; white-space: nowrap; }
+.correction-item { margin-bottom: 16px; }
+.correction-field { font-weight: 700; font-size: 1rem; }
+.correction-current { color: var(--muted); font-size: 0.86rem; margin-top: 4px; }
+.correction-note {
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px;
+  padding: 8px 12px; font-size: 0.85rem; margin-top: 10px;
+}
+
+.correction-group {
+  font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--muted); margin: 22px 0 10px;
+}
+.correction-group:first-child { margin-top: 8px; }

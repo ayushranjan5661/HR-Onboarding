@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Candidate Document Collection</title>
-<link rel="stylesheet" href="css/style.css?v=20260831b">
+<link rel="stylesheet" href="css/style.css?v=20260901b">
 <style>
   .form-card { max-width: 980px; }
   .doc-group { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 18px; }
@@ -241,14 +241,14 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260831b"></script>
-  <script src="js/api.js?v=20260831b"></script>
-  <script src="js/dialog.js?v=20260831b"></script>
-  <script src="js/doc-viewer.js?v=20260831b"></script>
-  <script src="js/prefill.js?v=20260831b"></script>
-  <script src="js/edit-mode.js?v=20260831b"></script>
-  <script src="js/auto-fill.js?v=20260831b"></script>
-  <script src="js/draft.js?v=20260831f"></script>
+  <script src="../js/config.js?v=20260901b"></script>
+  <script src="js/api.js?v=20260901b"></script>
+  <script src="js/dialog.js?v=20260901b"></script>
+  <script src="js/doc-viewer.js?v=20260901b"></script>
+  <script src="js/prefill.js?v=20260901b"></script>
+  <script src="js/edit-mode.js?v=20260901b"></script>
+  <script src="js/auto-fill.js?v=20260901b"></script>
+  <script src="js/draft.js?v=20260901b"></script>
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
@@ -301,32 +301,20 @@
                         { title: "Not available", tone: "info" });
         window.location.href = "home.html"; return;
       }
-      if (!["PENDING", "SUBMITTED"].includes(doc.status)) {
-        await showAlert("This form has already been reviewed and can no longer be edited.",
-                        { title: "Already reviewed", tone: "info" });
+      // Frozen on submission, like every other form: corrections afterwards
+      // go through a document HR opens for you.
+      if (doc.status !== "PENDING") {
+        await showAlert("You have already submitted this form, so it can no longer be "
+                        + "edited here. If a document needs replacing, ask HR to open "
+                        + "it for you — it will then appear under "
+                        + '"Corrections requested by HR" on your home page.',
+                        { title: "Already submitted", tone: "info" });
         window.location.href = "home.html"; return;
       }
       // The mapping agent fills what it can from the CIF before we decide
       // which uploads still need the candidate's attention.
       await runAutoFill("DOCUMENT_COLLECTION", document.getElementById("docForm"),
                          document.querySelector(".form-card"));
-
-      if (doc.status === "SUBMITTED") {
-        const formEl = document.getElementById("docForm");
-        const saved = await loadExistingSubmission("DOCUMENT_COLLECTION");
-        if (!saved) {
-          // Without the record of what's already uploaded, every mandatory
-          // field would demand a re-upload — bail out rather than mislead.
-          await showAlert("Could not load your previously submitted documents. " +
-                          "Please check your connection and open the form again.",
-                          { title: "Load failed", tone: "error" });
-          window.location.href = "home.html";
-          return;
-        }
-        markExistingUploads(formEl, saved.documents);
-        applyEditModeChrome(formEl.querySelector('button[type="submit"]'),
-                             document.querySelector(".form-card"), "Documents");
-      }
 
       // Restore goes last so drafted files land on top of the seeded state.
       await offerDraftRestore({ formType: "DOCUMENT_COLLECTION",

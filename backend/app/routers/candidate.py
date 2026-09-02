@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.deps import get_current_candidate
+from app import edit_access
 from app.form_definitions import (
     BGV_FIELDS,
     BGV_FILE_FIELDS,
@@ -36,8 +38,11 @@ from app.models import (
     CIFDetails,
     DocCollectionDetails,
     Document,
+    EditPermissionStatus,
     EducationDetail,
     EmploymentDetail,
+    FieldEditLog,
+    FieldEditPermission,
     FormDraft,
     FormDraftDocument,
     FormStatus,
@@ -47,7 +52,8 @@ from app.models import (
 )
 from app.agents import prefill as prefill_agent
 from app.schemas import MyStatusOut
-from app.utils.file_storage import save_bytes, save_upload, upload_path
+from app.utils.file_storage import (save_bytes, save_upload, snapshot_document,
+                                     upload_path)
 
 router = APIRouter(prefix="/candidate", tags=["candidate"])
 
@@ -409,8 +415,17 @@ def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> li
 @router.post("/forms/cif")
 async def submit_cif(request: Request, db: Session = Depends(get_db),
                       current: Candidate = Depends(get_current_candidate)):
-    # Editable until HR acts on it: INVITED (first submission) or
-    # CIF_SUBMITTED (resubmitting corrections before review).
+    # The CIF is a one-shot form: once submitted it is frozen, and the only
+    # way a value changes afterwards is a field HR explicitly opens (see
+    # /me/edit-access). That keeps the record HR reviewed from moving under
+    # them, and makes every later change auditable.
+    submission = db.query(FormSubmission).filter(FormSubmission.candidate_id == current.id,
+                                                   FormSubmission.form_type == FormType.CIF).first()
+    if submission and submission.status != FormStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail="Your CIF has already been submitted and can no longer be edited. "
+                    "If something needs correcting, ask HR to open that field for you.")
     if current.stage not in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
         raise HTTPException(status_code=400,
                              detail="Your CIF has already been reviewed and can no longer be edited.")
@@ -453,8 +468,6 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
     _promote_draft_documents(db, current.id, FormType.CIF, provided_cif)
     replaced += _discard_draft(db, current.id, FormType.CIF)
 
-    submission = db.query(FormSubmission).filter(FormSubmission.candidate_id == current.id,
-                                                   FormSubmission.form_type == FormType.CIF).first()
     if not submission:
         submission = FormSubmission(candidate_id=current.id, form_type=FormType.CIF)
         db.add(submission)
@@ -475,12 +488,19 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
     if current.stage != CandidateStage.APPROVED_FOR_BGV:
         raise HTTPException(status_code=400, detail="This form is not unlocked for you yet")
 
+    # Like the CIF, a follow-up form is frozen once submitted: the record HR
+    # reviews must not move under them. Corrections afterwards go through a
+    # value HR opens (see /me/edit-access), which costs a reason and is audited.
     submission = db.query(FormSubmission).filter(
         FormSubmission.candidate_id == current.id, FormSubmission.form_type == FormType(form_type)
     ).first()
-    if not submission or submission.status not in (FormStatus.PENDING, FormStatus.SUBMITTED):
-        raise HTTPException(status_code=400,
-                             detail="This form has already been reviewed and can no longer be edited.")
+    if not submission or submission.status == FormStatus.LOCKED:
+        raise HTTPException(status_code=400, detail="This form is not unlocked for you yet")
+    if submission.status != FormStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail="You have already submitted this form and it can no longer be edited. "
+                    "If something needs correcting, ask HR to open that field for you.")
 
     form = await request.form()
 
@@ -548,6 +568,186 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
     if carried:
         detail += f" ({len(carried)} document(s) carried over from your earlier forms.)"
     return {"detail": detail, "carried_documents": carried}
+
+
+# ---------------------------------------------------------------------------
+# Correcting a submitted form, one field at a time
+#
+# A submitted CIF is read-only. HR can open a single field for the candidate;
+# changing it then costs them a written reason, and the before/after, the
+# reason, the timestamp and who made the change all go to the audit log.
+# ---------------------------------------------------------------------------
+
+@router.get("/me/edit-access")
+def my_edit_access(db: Session = Depends(get_db),
+                    current: Candidate = Depends(get_current_candidate)):
+    """The fields HR has opened for this candidate to correct."""
+    permissions = edit_access.active_permissions(db, current.id)
+    return {
+        "permissions": [
+            {
+                "id": p.id,
+                "form": edit_access.owning_form(p.form_type),
+                "form_type": p.form_type,
+                "field_kind": p.field_kind,
+                "field_name": p.field_name,
+                "row_table": p.row_table,
+                "row_label": edit_access.row_label_for(db, current.id, p),
+                "hr_note": p.hr_note,
+                "granted_at": p.granted_at,
+                "current_value": edit_access.current_value(db, current.id, p),
+            }
+            for p in permissions
+        ]
+    }
+
+
+@router.post("/me/edit-access/apply")
+async def apply_granted_edits(request: Request, db: Session = Depends(get_db),
+                               current: Candidate = Depends(get_current_candidate)):
+    """Apply every correction the candidate filled in, as one audited action.
+
+    Multipart: `changes` is a JSON list of `{permission_id, new_value?}`, a
+    document's replacement file rides along as `file_<permission_id>`, and
+    `reason` explains the submission as a whole. HR opens these fields
+    together, so the candidate is asked once rather than field by field — but
+    asked they are: an unexplained change to reviewed data is what this flow
+    exists to prevent.
+
+    All or nothing: if one entry is invalid the whole submission is rejected
+    and nothing changes, so the candidate never ends up half-corrected.
+    """
+    form = await request.form()
+    try:
+        changes = json.loads(form.get("changes") or "[]")
+    except (TypeError, ValueError):
+        changes = None
+    if not isinstance(changes, list) or not changes:
+        raise HTTPException(status_code=400, detail="Nothing to submit.")
+
+    reason = str(form.get("reason") or "").strip()
+    if len(reason) < 5:
+        raise HTTPException(status_code=400,
+                             detail="Please give a reason for these changes "
+                                    "(at least 5 characters).")
+
+    change_set_id = uuid4().hex
+    written_paths: list[str] = []    # this request's files, removed if it fails
+    applied = 0
+    try:
+        for change in changes:
+            if not isinstance(change, dict):
+                raise HTTPException(status_code=400, detail="Malformed change.")
+            perm = _active_permission(db, current.id, change.get("permission_id"))
+            if perm.field_kind == "DOCUMENT":
+                written_paths += _apply_granted_document(
+                    db, current, perm, form.get(f"file_{perm.id}"), reason, change_set_id)
+            else:
+                _apply_granted_field(db, current, perm, change.get("new_value"),
+                                      reason, change_set_id)
+
+            perm.status = EditPermissionStatus.USED.value
+            perm.resolved_at = datetime.now(timezone.utc)
+            applied += 1
+        db.commit()
+    except Exception:
+        db.rollback()
+        _remove_files(written_paths)   # a failed attempt leaves no orphans
+        raise
+
+    return {"detail": f"{applied} change(s) saved and recorded in the audit trail.",
+            "changed": applied}
+
+
+def _active_permission(db: Session, candidate_id: int, permission_id) -> FieldEditPermission:
+    """The grant being used, if it is this candidate's and still open."""
+    perm = db.query(FieldEditPermission).filter(
+        FieldEditPermission.id == permission_id,
+        FieldEditPermission.candidate_id == candidate_id).first()
+    if not perm:
+        raise HTTPException(status_code=404, detail="This edit request no longer exists")
+    if perm.status != EditPermissionStatus.ACTIVE.value:
+        raise HTTPException(
+            status_code=400,
+            detail=("You have already submitted this change." if perm.status == "USED"
+                     else "HR has withdrawn access to this field."))
+    # Belt and braces: the grant itself was validated, but the allowed set can
+    # shrink between granting and using it.
+    edit_access.validate_target(db, candidate_id, perm.form_type, perm.field_kind,
+                                 perm.field_name, perm.row_table, perm.row_id)
+    return perm
+
+
+def _apply_granted_field(db: Session, current: Candidate, perm: FieldEditPermission,
+                          raw_value, reason: str, change_set_id: str) -> None:
+    """Apply a granted change to a detail-table column or to one cell of a
+    repeating entry — the two differ only in which row is fetched."""
+    if perm.field_kind == "ROW_FIELD":
+        row = edit_access.table_row(db, perm.row_table, current.id, perm.row_id)
+        if not row:
+            raise HTTPException(status_code=400, detail="That entry no longer exists")
+    else:
+        row = edit_access.detail_row(db, perm.form_type, current.id)
+        if not row:
+            raise HTTPException(status_code=400, detail="No submitted data for this form yet")
+
+    new_value = None if raw_value is None else str(raw_value).strip()
+    old_value = getattr(row, perm.field_name)
+    if (old_value or "") == (new_value or ""):
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{perm.field_name}' is the same as the value already on record.")
+
+    setattr(row, perm.field_name, new_value or None)
+    db.add(FieldEditLog(
+        candidate_id=current.id, form_type=edit_access.owning_form(perm.form_type),
+        field_name=edit_access.audit_field_name(perm),
+        old_value=old_value, new_value=new_value or None, action="EDIT", reason=reason,
+        actor_role="CANDIDATE", edited_by_candidate_id=current.id, permission_id=perm.id,
+        change_set_id=change_set_id))
+
+
+def _apply_granted_document(db: Session, current: Candidate, perm: FieldEditPermission,
+                             upload, reason: str, change_set_id: str) -> list[str]:
+    """Replace one uploaded file. Returns the files written by this request,
+    so a later failure can clean them up. Nothing is deleted: the replaced
+    file stays on disk behind its snapshot."""
+    if upload is None or not hasattr(upload, "filename") or not upload.filename:
+        raise HTTPException(status_code=400,
+                             detail=f"Choose the replacement file for '{perm.field_name}'.")
+
+    ft = FormType(perm.form_type)
+    # Write and validate the new file before touching the old rows. The file
+    # being replaced is kept on disk and pinned by a snapshot, so HR can still
+    # open what the document used to contain.
+    original, stored = save_upload(upload, current.id, perm.form_type, perm.field_name)
+    written = [upload_path(stored)]
+
+    replaced = db.query(Document).filter(Document.candidate_id == current.id,
+                                          Document.form_type == ft,
+                                          Document.field_key == perm.field_name).all()
+    old_snapshot = snapshot_document(db, replaced[0]) if replaced else None
+    old_name = replaced[0].original_filename if replaced else None
+    for doc in replaced:
+        db.delete(doc)
+    db.flush()
+
+    new_doc = Document(candidate_id=current.id, form_type=ft, field_key=perm.field_name,
+                        original_filename=original, stored_filename=stored,
+                        content_type=upload.content_type)
+    db.add(new_doc)
+    db.flush()
+    new_snapshot = snapshot_document(db, new_doc)
+
+    db.add(FieldEditLog(
+        candidate_id=current.id, form_type=edit_access.owning_form(perm.form_type),
+        field_name=perm.field_name, old_value=old_name, new_value=original,
+        action="EDIT", reason=reason, actor_role="CANDIDATE",
+        edited_by_candidate_id=current.id, permission_id=perm.id,
+        change_set_id=change_set_id,
+        old_file_id=old_snapshot.id if old_snapshot else None,
+        new_file_id=new_snapshot.id))
+    return written
 
 
 @router.get("/documents/{document_id}/download")

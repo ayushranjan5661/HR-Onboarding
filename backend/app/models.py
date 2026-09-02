@@ -315,6 +315,28 @@ class Document(Base):
     candidate = relationship("Candidate", back_populates="documents")
 
 
+class DocumentSnapshot(Base):
+    """A file as it existed at one moment, so the audit trail can still open
+    what a replaced (or removed) document actually contained.
+
+    Replacing a document no longer deletes the old file from disk: the row
+    here keeps a handle on it, and `field_edit_log` points at both sides of
+    the change. One row per stored file — a file that is snapshotted as the
+    "new" side of one change is the same row referenced as the "old" side of
+    the next.
+    """
+    __tablename__ = "document_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id"), nullable=False, index=True)
+    form_type = Column(String(50), nullable=False)
+    field_key = Column(String(100), nullable=False)
+    original_filename = Column(String(255), nullable=False)
+    stored_filename = Column(String(255), nullable=False, unique=True, index=True)
+    content_type = Column(String(100), nullable=True)
+    captured_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class FormDraft(Base):
     """A candidate's unsubmitted work on one form.
 
@@ -353,8 +375,50 @@ class FormDraftDocument(Base):
                                         name="uq_draft_doc_candidate_form_field"),)
 
 
+class EditPermissionStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"    # candidate may change this one field right now
+    USED = "USED"        # candidate submitted the change; access closed again
+    REVOKED = "REVOKED"  # HR withdrew it before the candidate used it
+
+
+class FieldEditPermission(Base):
+    """One field HR has unlocked for a candidate on an already-submitted form.
+
+    A submitted form is read-only to the candidate. This table is the only way
+    a value can be changed by them afterwards, and it is deliberately narrow:
+    one row unlocks exactly one value once. The candidate's change closes it
+    (USED) and is written to `field_edit_log` together with the reason they
+    gave.
+    """
+    __tablename__ = "field_edit_permissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id"), nullable=False, index=True)
+    # Where the value lives. For FIELD, the detail table: PROFILE / CIF / BGV /
+    # DOCUMENT_COLLECTION. For DOCUMENT and ROW_FIELD, the form it belongs to.
+    form_type = Column(String(50), nullable=False)
+    # FIELD (a detail-table column) | DOCUMENT (an upload) | ROW_FIELD (one
+    # column of one entry in a repeating section).
+    field_kind = Column(String(20), nullable=False, default="FIELD")
+    field_name = Column(String(100), nullable=False)
+    # ROW_FIELD only: which repeating section, and which entry in it.
+    row_table = Column(String(50), nullable=True)
+    row_id = Column(Integer, nullable=True)
+
+    status = Column(String(20), nullable=False, default=EditPermissionStatus.ACTIVE.value)
+    hr_note = Column(Text, nullable=True)          # why HR opened it, shown to the candidate
+
+    granted_by_hr_id = Column(Integer, ForeignKey("hr_users.id"), nullable=False)
+    granted_at = Column(DateTime(timezone=True), server_default=func.now())
+    # When the candidate used it, or HR revoked it.
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class FieldEditLog(Base):
-    """Audit trail whenever HR edits or deletes a candidate-submitted value."""
+    """Audit trail for every change to a submitted value — by HR or, through a
+    granted permission, by the candidate themselves.
+
+    Each row answers: what changed, from what to what, why, when, and who."""
     __tablename__ = "field_edit_log"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -363,8 +427,27 @@ class FieldEditLog(Base):
     field_name = Column(String(100), nullable=False)
     old_value = Column(Text, nullable=True)
     new_value = Column(Text, nullable=True)
-    action = Column(String(20), nullable=False)  # EDIT | DELETE
-    edited_by_hr_id = Column(Integer, ForeignKey("hr_users.id"), nullable=False)
+    action = Column(String(20), nullable=False)  # EDIT | DELETE | REVOKE
+    reason = Column(Text, nullable=True)         # mandatory for candidate edits
+
+    # Everything saved in one action (one HR "Save Changes", one candidate
+    # submission) shares an id, so the trail reads as one entry with several
+    # changes rather than a run of unrelated ones. Null on rows written before
+    # change sets existed; each of those stands alone.
+    change_set_id = Column(String(32), nullable=True, index=True)
+
+    # Exactly one of these is set; actor_role says which.
+    actor_role = Column(String(20), nullable=False, default="HR")   # HR | CANDIDATE
+    edited_by_hr_id = Column(Integer, ForeignKey("hr_users.id"), nullable=True)
+    edited_by_candidate_id = Column(Integer, ForeignKey("candidates.id"), nullable=True)
+    # The grant the candidate acted under, so an edit can be traced to its approval.
+    permission_id = Column(Integer, ForeignKey("field_edit_permissions.id"), nullable=True)
+
+    # For a document change: the file before and the file after, both still on
+    # disk, so HR can open either from the trail.
+    old_file_id = Column(Integer, ForeignKey("document_snapshots.id"), nullable=True)
+    new_file_id = Column(Integer, ForeignKey("document_snapshots.id"), nullable=True)
+
     edited_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

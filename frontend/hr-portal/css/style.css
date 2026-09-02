@@ -538,3 +538,171 @@ table .edit-input { min-width: 120px; margin: 0; padding: 6px 8px; font-size: 0.
   .cred-actions { flex-direction: column-reverse; }
   .cred-actions .btn { width: 100%; justify-content: center; }
 }
+
+/* ---------------------------------------------------------------------
+   Field-level edit access + change history
+--------------------------------------------------------------------- */
+.access-banner {
+  background: var(--warn-bg); border: 1px solid #fde68a;
+  border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px;
+}
+.access-banner-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  font-size: 0.8rem; font-weight: 700; color: var(--warn);
+  text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px;
+}
+.access-banner-head .btn { flex: none; text-transform: none; letter-spacing: 0; }
+.access-row {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 7px 0; border-top: 1px solid #fde68a;
+}
+.access-text { min-width: 0; }
+.access-field { display: block; font-weight: 650; font-size: 0.9rem; }
+.access-meta { display: block; color: var(--muted); font-size: 0.78rem; margin-top: 2px; }
+
+.grant-option {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 4px; border-bottom: 1px solid var(--border);
+  font-size: 0.88rem; cursor: pointer;
+}
+.grant-option:last-child { border-bottom: 0; }
+.grant-option input { width: auto; margin: 0; flex: none; }
+.grant-option .grant-label { flex: 1; min-width: 0; }
+.grant-option input:disabled + .grant-label { color: var(--muted); }
+.grant-open-tag {
+  flex: none; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.03em; color: var(--warn);
+}
+
+/* --- Change History: a timeline of what changed, when and why --- */
+.audit-timeline { position: relative; padding-left: 22px; }
+.audit-timeline::before {
+  content: ""; position: absolute; left: 5px; top: 6px; bottom: 6px;
+  width: 2px; background: var(--border); border-radius: 2px;
+}
+
+.audit-day {
+  position: relative; margin: 18px 0 10px -22px; padding-left: 22px;
+  font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--muted);
+}
+.audit-day:first-child { margin-top: 2px; }
+
+.audit-entry {
+  position: relative;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 14px 16px; margin-bottom: 12px; background: #fff;
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+.audit-entry:hover { border-color: #d7d9e6; box-shadow: var(--shadow-sm); }
+
+.audit-dot {
+  position: absolute; left: -21px; top: 20px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--brand); box-shadow: 0 0 0 3px #fff;
+}
+.audit-entry.is-candidate .audit-dot { background: var(--warn); }
+.audit-entry.is-revoke .audit-dot { background: var(--danger); }
+
+.audit-head { display: flex; align-items: baseline; gap: 10px; }
+.audit-field {
+  font-weight: 650; font-size: 0.95rem; line-height: 1.35; flex: 1; min-width: 0;
+}
+.audit-when {
+  color: var(--muted); font-size: 0.76rem; font-variant-numeric: tabular-nums;
+  flex: none; cursor: default;
+}
+
+.audit-byline {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  margin-top: 6px; font-size: 0.79rem; color: var(--muted);
+}
+.audit-byline strong { color: var(--text); font-weight: 600; }
+.audit-avatar {
+  width: 19px; height: 19px; border-radius: 50%; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--brand-light); color: var(--brand-dark);
+  font-size: 0.64rem; font-weight: 700;
+}
+.audit-role {
+  padding: 1px 7px; border-radius: 20px; font-size: 0.66rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.audit-role.is-hr { background: var(--success-bg); color: #047857; }
+.audit-role.is-candidate { background: var(--warn-bg); color: var(--warn); }
+.audit-forms { text-transform: capitalize; }
+.audit-forms::before { content: "· "; }
+
+.audit-changes { margin-top: 11px; }
+/* Several changes saved together: separate them so each is readable. */
+.audit-changes.is-set .audit-change {
+  padding: 9px 0 9px 12px; border-left: 2px solid var(--brand-light);
+}
+.audit-changes.is-set .audit-change + .audit-change {
+  margin-top: 2px; border-top: 1px dashed var(--border);
+}
+.audit-change-name {
+  font-size: 0.72rem; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.audit-changes:not(.is-set) .audit-change-name { display: none; }
+
+.audit-diff {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 5px; font-size: 0.88rem; word-break: break-word;
+}
+.audit-old, .audit-new {
+  padding: 2px 9px; border-radius: 6px; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.audit-old {
+  background: var(--danger-bg); color: #9f1239; text-decoration: line-through;
+  text-decoration-color: rgba(159, 18, 57, 0.45);
+}
+.audit-new { background: var(--success-bg); color: #065f46; font-weight: 600; }
+.audit-empty { color: var(--muted); font-style: italic; text-decoration: none; }
+.audit-arrow { color: #b6b9c9; flex: none; }
+.audit-action {
+  color: var(--danger); font-weight: 700; font-size: 0.66rem;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+
+/* Both sides of a document change stay openable from the trail. */
+.audit-files { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.audit-file {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 11px; border: 1px solid var(--border); border-radius: 20px;
+  background: #fff; color: var(--brand-dark); font: inherit;
+  font-size: 0.76rem; font-weight: 600; cursor: pointer;
+  transition: border-color var(--ease), background var(--ease);
+}
+.audit-file:hover { border-color: var(--brand); background: var(--brand-light); }
+.audit-file.is-gone {
+  color: var(--warn); background: var(--warn-bg); border-color: #fde68a; cursor: default;
+}
+
+.audit-reason {
+  margin-top: 9px; padding-top: 9px; border-top: 1px dashed var(--border);
+  font-size: 0.85rem; line-height: 1.55; color: var(--text);
+}
+.audit-reason span {
+  display: inline-block; margin-right: 7px;
+  font-size: 0.66rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--muted);
+}
+.audit-reason.is-missing { color: var(--muted); font-style: italic; }
+.audit-change .audit-reason { margin-top: 7px; padding-top: 7px; }
+
+/* An access event (grant withdrawn) rather than a value change */
+.audit-access {
+  font-size: 0.86rem; color: var(--warn);
+  background: var(--warn-bg); border: 1px solid #fde68a;
+  border-radius: var(--radius-sm); padding: 5px 10px;
+}
+
+.audit-empty-state {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 26px 0; text-align: center;
+}
+.audit-empty-state strong { font-size: 0.92rem; }
+.audit-empty-state span { color: var(--muted); font-size: 0.84rem; }

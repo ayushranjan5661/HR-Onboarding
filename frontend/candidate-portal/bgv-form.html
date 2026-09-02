@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Background Verification Form</title>
-<link rel="stylesheet" href="css/style.css?v=20260831b">
+<link rel="stylesheet" href="css/style.css?v=20260901b">
 <style>
   .form-card { max-width: 1000px; }
   .tbl-wrap { overflow-x: auto; margin-top: 6px; }
@@ -215,14 +215,14 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260831b"></script>
-  <script src="js/api.js?v=20260831b"></script>
-  <script src="js/dialog.js?v=20260831b"></script>
-  <script src="js/doc-viewer.js?v=20260831b"></script>
-  <script src="js/prefill.js?v=20260831b"></script>
-  <script src="js/edit-mode.js?v=20260831b"></script>
-  <script src="js/auto-fill.js?v=20260831b"></script>
-  <script src="js/draft.js?v=20260831f"></script>
+  <script src="../js/config.js?v=20260901b"></script>
+  <script src="js/api.js?v=20260901b"></script>
+  <script src="js/dialog.js?v=20260901b"></script>
+  <script src="js/doc-viewer.js?v=20260901b"></script>
+  <script src="js/prefill.js?v=20260901b"></script>
+  <script src="js/edit-mode.js?v=20260901b"></script>
+  <script src="js/auto-fill.js?v=20260901b"></script>
+  <script src="js/draft.js?v=20260901b"></script>
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
@@ -322,41 +322,19 @@
                         { title: "Not available", tone: "info" });
         window.location.href = "home.html"; return;
       }
-      if (!["PENDING", "SUBMITTED"].includes(bgv.status)) {
-        await showAlert("This form has already been reviewed and can no longer be edited.",
-                        { title: "Already reviewed", tone: "info" });
+      // Frozen on submission, like every other form: corrections afterwards
+      // go through a value HR opens for you.
+      if (bgv.status !== "PENDING") {
+        await showAlert("You have already submitted this form, so it can no longer be "
+                        + "edited here. If something needs correcting, ask HR to open "
+                        + "that field for you — it will then appear under "
+                        + '"Corrections requested by HR" on your home page.',
+                        { title: "Already submitted", tone: "info" });
         window.location.href = "home.html"; return;
       }
 
       await runAutoFill("BGV", document.getElementById("bgvForm"),
                          document.querySelector(".form-card"));
-
-      // Already submitted -> reload the saved answers for editing.
-      if (bgv.status === "SUBMITTED") {
-        const formEl = document.getElementById("bgvForm");
-        const saved = await loadExistingSubmission("BGV");
-        if (!saved) {
-          // Updating from an empty form would wipe the saved answers — bail out.
-          await showAlert("Could not load your previously submitted answers. " +
-                          "Please check your connection and open the form again.",
-                          { title: "Load failed", tone: "error" });
-          window.location.href = "home.html";
-          return;
-        }
-        fillFlatFields(formEl, saved.fields);
-        markExistingUploads(formEl, saved.documents);
-        const t = saved.tables || {};
-        fillTable("addrTable", t.bgv_address_history, addRow);
-        fillTable("eduTable", t.bgv_education_checks, addRow);
-        fillTable("empTable", t.bgv_employment_checks, addRow);
-        fillTable("refTable", t.bgv_reference_checks, addRow);
-        fillTable("gapTable", t.bgv_gaps, addRow);
-        applyEditModeChrome(formEl.querySelector('button[type="submit"]'),
-                             document.querySelector(".form-card"), "BGV Form");
-        syncGapTable();
-        await initBgvDraft();
-        return;   // skip the fresh-form seeding below
-      }
 
       // Carry the CIF answers forward so nothing is typed twice.
       if (data.profile) {

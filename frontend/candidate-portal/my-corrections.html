@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Candidate Portal — Corrections</title>
+<link rel="stylesheet" href="css/style.css?v=20260901b">
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Candidate Portal</div>
+    <div class="who">
+      <span id="whoami"></span>
+      <button onclick="candidateLogout()">Log out</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <a class="back-link" href="home.html">&larr; Back</a>
+    <h2 style="margin-top:14px;">Corrections requested by HR</h2>
+    <p style="color:#6b7280;font-size:0.9rem;max-width:720px;">
+      Your submitted forms are locked. HR has unlocked only what is listed below. Change
+      what you need, say why once at the bottom, and submit — the old value, the new value,
+      your reason and the time are all kept on record. Each one closes again once you
+      submit it.
+    </p>
+
+    <div id="correctionList"></div>
+
+    <div class="card hidden" id="submitBar">
+      <label for="overallReason">Reason for these changes *</label>
+      <textarea id="overallReason" rows="3"
+        placeholder="Why are you making these corrections? e.g. I entered my Aadhaar and PAN with typos."></textarea>
+      <p style="color:#6b7280;font-size:0.85rem;margin:10px 0 12px;">
+        Fill in only the ones you want to change now — the rest stay open for later.
+        Everything you submit together is recorded as one entry, under this reason.
+      </p>
+      <div class="error-msg" id="submitError"></div>
+      <button class="btn btn-primary" id="submitAllBtn"
+        onclick="submitCorrections(this)">Submit Changes</button>
+    </div>
+  </div>
+
+  <script src="../js/config.js?v=20260901b"></script>
+  <script src="js/api.js?v=20260901b"></script>
+  <script src="js/dialog.js?v=20260901b"></script>
+  <script src="../js/field-labels.js?v=20260901b"></script>
+  <script>
+    requireAuth();
+    document.getElementById("whoami").textContent = getName();
+
+    function escapeHtml(str) {
+      return String(str ?? "")
+        .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+    }
+
+    // Values too long for a single-line input.
+    const LONG_TEXT_FIELDS = new Set([
+      "current_address", "permanent_address", "skills_technologies",
+      "technical_certifications", "understanding_of_levelshift", "aspirations",
+    ]);
+
+    function inputFor(perm) {
+      const value = escapeHtml(perm.current_value ?? "");
+      if (perm.field_kind === "DOCUMENT") {
+        return `<input type="file" id="value-${perm.id}"
+          accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,.doc,.docx">`;
+      }
+      if (LONG_TEXT_FIELDS.has(perm.field_name)) {
+        return `<textarea id="value-${perm.id}" rows="3">${value}</textarea>`;
+      }
+      return `<input type="text" id="value-${perm.id}" value="${value}">`;
+    }
+
+    const FORM_TITLES = {
+      CIF: "Candidate Information Form (CIF)",
+      DOCUMENT_COLLECTION: "Document Collection Form",
+      BGV: "Background Verification Form",
+    };
+    const FORM_ORDER = ["CIF", "DOCUMENT_COLLECTION", "BGV"];
+
+    // "Employment #2 — Acme Ltd → Reason for Leaving", or just the field label.
+    function permLabel(perm) {
+      const field = labelFor(perm.field_name);
+      return perm.field_kind === "ROW_FIELD"
+        ? `${perm.row_label} → ${field}` : field;
+    }
+
+    function renderCorrections(permissions) {
+      const host = document.getElementById("correctionList");
+      if (!permissions.length) {
+        host.innerHTML = `<div class="card"><p style="color:#6b7280;margin:0;">
+          HR has not opened anything for you to edit. If something on one of your forms
+          is wrong, contact HR and they can unlock that field.</p></div>`;
+        return;
+      }
+      // Grouped by form, so it is obvious which form each correction belongs to.
+      host.innerHTML = FORM_ORDER.flatMap(form => {
+        const group = permissions.filter(p => p.form === form);
+        if (!group.length) return [];
+        return [`<h3 class="correction-group">${escapeHtml(FORM_TITLES[form] || form)}</h3>`,
+                 ...group.map(permCard)];
+      }).join("");
+    }
+
+    function permCard(perm) {
+      return `
+        <div class="card correction-item" id="perm-${perm.id}">
+          <div class="correction-field">${escapeHtml(permLabel(perm))}</div>
+          <div class="correction-current">
+            Currently on record:
+            ${perm.current_value
+              ? `<strong>${escapeHtml(String(perm.current_value))}</strong>`
+              : `<em>not provided</em>`}
+          </div>
+          ${perm.hr_note
+            ? `<div class="correction-note">HR's note: ${escapeHtml(perm.hr_note)}</div>`
+            : ""}
+
+          <label for="value-${perm.id}">${perm.field_kind === "DOCUMENT"
+            ? "Replacement file" : "New value"}</label>
+          ${inputFor(perm)}
+        </div>`;
+    }
+
+    // What the candidate has actually filled in. A field counts as changed
+    // once its value differs from what is on record (or a file is chosen);
+    // everything else is left open for later.
+    function pendingChanges(permissions) {
+      return permissions.map(perm => {
+        const valueEl = document.getElementById(`value-${perm.id}`);
+        if (valueEl.type === "file") {
+          const file = valueEl.files && valueEl.files[0];
+          return file ? { perm, file } : null;
+        }
+        const value = valueEl.value.trim();
+        return value !== (perm.current_value ?? "") ? { perm, value } : null;
+      }).filter(Boolean);
+    }
+
+    async function submitCorrections(btn) {
+      const submitError = document.getElementById("submitError");
+      submitError.textContent = "";
+
+      const pending = pendingChanges(currentPermissions);
+      if (!pending.length) {
+        submitError.textContent = "Change at least one value before submitting.";
+        return;
+      }
+      const reason = document.getElementById("overallReason").value.trim();
+      if (reason.length < 5) {
+        submitError.textContent = "Please say why you are making these changes.";
+        document.getElementById("overallReason").focus();
+        return;
+      }
+
+      const body = new FormData();
+      body.append("reason", reason);
+      body.append("changes", JSON.stringify(pending.map(c => ({
+        permission_id: c.perm.id, ...(c.file ? {} : { new_value: c.value }),
+      }))));
+      pending.filter(c => c.file).forEach(c => body.append(`file_${c.perm.id}`, c.file));
+
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Submitting…";
+      try {
+        const res = await apiFetch("/candidate/me/edit-access/apply", { method: "POST", body });
+        await showAlert(res.detail, { title: "Changes recorded" });
+        await load();
+      } catch (err) {
+        submitError.textContent = err.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    }
+
+    // Clear the complaint as soon as it is being addressed — leaving it up
+    // while the candidate fixes things reads as if it is still wrong.
+    ["correctionList", "submitBar"].forEach(id => {
+      document.getElementById(id).addEventListener("input", () => {
+        document.getElementById("submitError").textContent = "";
+      });
+    });
+
+    let currentPermissions = [];
+
+    async function load() {
+      const access = await apiFetch("/candidate/me/edit-access");
+      currentPermissions = access.permissions || [];
+      renderCorrections(currentPermissions);
+      document.getElementById("overallReason").value = "";
+      document.getElementById("submitError").textContent = "";
+      document.getElementById("submitBar")
+        .classList.toggle("hidden", !currentPermissions.length);
+    }
+
+    load().catch(err => {
+      document.getElementById("correctionList").innerHTML =
+        `<div class="card" style="color:#b91c1c;">Could not load this page: ${escapeHtml(err.message)}
+         — refresh to try again.</div>`;
+    });
+  </script>
+</body>
+</html>
