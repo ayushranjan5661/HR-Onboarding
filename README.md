@@ -14,27 +14,80 @@ HR reviews those and closes out onboarding.
 
 ## Project layout
 ```
-backend/
-  app/
-    main.py            FastAPI app + CORS
-    models.py           Candidate, HRUser, CandidateProfile, FormSubmission, Document,
-                         DocumentSnapshot, FieldEditPermission, FieldEditLog
-    form_definitions.py  which fields belong to CIF vs BGV vs Document Collection
-    edit_access.py       which fields HR may unlock on a submitted form, and where they live
-    routers/auth.py     HR + candidate login/logout/change-password
-    routers/hr.py       invite, review, edit/delete fields, grant/revoke edit access,
-                         audit trail, approve/reject
-    routers/candidate.py  status, submit CIF/BGV/Document forms, apply granted edits
-  init_db.py            creates tables + seeds first HR login
-  requirements.txt
-frontend/
-  hr-portal/            login.html, dashboard.html, candidate.html
-  candidate-portal/      login.html, change-password.html, home.html,
-                          cif-form.html, bgv-form.html, document-form.html,
-                          my-corrections.html
-  js/field-labels.js     field labels shared by both portals
-.env                     secrets (DB url, JWT key, seed HR login) — not committed
+HR-Onboarding/
+├─ backend/
+│  ├─ app/
+│  │  ├─ main.py               FastAPI app, CORS, router wiring
+│  │  ├─ config.py             settings read from ../.env (DB, JWT, uploads, Azure OpenAI)
+│  │  ├─ database.py           SQLAlchemy engine + session factory
+│  │  ├─ deps.py               auth guards — get_current_hr / get_current_candidate
+│  │  ├─ security.py           password hashing, JWT issue/decode, invite tokens
+│  │  ├─ models.py             every table (see Data model below)
+│  │  ├─ schemas.py            Pydantic request / response models
+│  │  ├─ form_definitions.py   which field belongs to which form and which table
+│  │  ├─ field_catalog.py      canonical field list + human labels, read by the AI agents
+│  │  ├─ edit_access.py        what HR may unlock on a submitted form, and where it lives
+│  │  ├─ routers/
+│  │  │  ├─ auth.py            HR + candidate login / logout / change-password
+│  │  │  ├─ hr.py              invite, review, edit, grant/revoke access, audit, decisions
+│  │  │  └─ candidate.py       status, drafts, form submission, applying granted edits
+│  │  ├─ agents/
+│  │  │  ├─ field_mapper.py    LLM — which fields mean the same thing across forms
+│  │  │  ├─ prefill.py         turns those mappings into pre-filled values + carried documents
+│  │  │  └─ insights.py        LLM — CIF summary and anomaly flags for HR
+│  │  └─ utils/
+│  │     └─ file_storage.py    upload validation, safe storage, document snapshots
+│  ├─ uploads/                 candidate files + retained versions (gitignored)
+│  ├─ init_db.py               creates tables, runs light migrations, seeds the first HR login
+│  ├─ requirements.txt
+│  └─ .env.example
+├─ frontend/                   static — no build step; serve this folder as ONE site
+│  ├─ index.html               the only login page; HR / Candidate role toggle
+│  ├─ js/
+│  │  ├─ config.js             API_BASE — the single place the backend URL is set
+│  │  └─ field-labels.js       field labels + section titles, shared by both portals
+│  ├─ assets/
+│  │  └─ logo-white.svg
+│  ├─ hr-portal/
+│  │  ├─ dashboard.html        candidate list, invite, delete
+│  │  ├─ candidate.html        one candidate: forms, decisions, edit access, change history
+│  │  ├─ js/api.js             fetch wrapper + HR session
+│  │  ├─ js/candidate.js       everything on the candidate page
+│  │  └─ css/style.css
+│  └─ candidate-portal/
+│     ├─ home.html             application status + the forms assigned to them
+│     ├─ cif-form.html         Candidate Information Form
+│     ├─ document-form.html    Document Collection (uploads only)
+│     ├─ bgv-form.html         Background Verification
+│     ├─ my-corrections.html   the fields HR has unlocked, with one reason per submission
+│     ├─ js/api.js             fetch wrapper + candidate session
+│     ├─ js/draft.js           save / restore an unsubmitted form
+│     ├─ js/auto-fill.js       applies what the prefill agent returned
+│     ├─ js/prefill.js         shows which values were carried from an earlier form
+│     ├─ js/doc-viewer.js      in-page preview for uploaded files
+│     ├─ js/dialog.js          styled replacements for alert() / confirm()
+│     ├─ js/edit-mode.js       shared helpers for reloading a saved submission
+│     └─ css/style.css
+├─ .env                        secrets: DB url, JWT key, seed HR login (NOT committed)
+├─ .gitignore
+└─ README.md
 ```
+
+### Data model
+| Table | What it holds |
+| --- | --- |
+| `hr_users` | HR logins |
+| `candidates` | candidate login, stage, type, invite token |
+| `candidate_profiles` | identity fields shared by every form |
+| `form_submissions` | one row per form: status, submitted/reviewed timestamps |
+| `cif_details` / `bgv_details` / `doc_collection_details` | each form's own flat fields |
+| `education_details` / `employment_details` / `reference_details` | CIF repeating sections |
+| `bgv_address_history` / `bgv_education_checks` / `bgv_employment_checks` / `bgv_reference_checks` / `bgv_gaps` | BGV repeating sections |
+| `documents` | the file currently on record for each upload field |
+| `document_snapshots` | superseded files, kept so old versions stay openable |
+| `form_drafts` / `form_draft_documents` | unsubmitted work; invisible to HR, deleted on submit |
+| `field_edit_permissions` | one row per field HR has unlocked for a candidate |
+| `field_edit_log` | the audit trail: before, after, reason, when, who |
 
 ## One-time setup
 1. Create the Postgres database referenced by `DATABASE_URL` in `.env`
