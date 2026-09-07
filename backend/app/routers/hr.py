@@ -60,6 +60,7 @@ from app.schemas import (
 )
 from app.security import (decrypt_password, encrypt_password, generate_invite_token,
                             generate_temp_password, hash_password)
+from app.services import zoho_push
 from app.utils.file_storage import save_upload, snapshot_document, upload_path
 
 router = APIRouter(prefix="/hr", tags=["hr"])
@@ -241,6 +242,10 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
             key: [_row_dict(r, cols) for r in getattr(candidate, attr)]
             for key, (attr, cols) in BGV_TABLE_SECTIONS.items()
         },
+        zoho_record_id=candidate.zoho_record_id,
+        zoho_status=candidate.zoho_status,
+        zoho_synced_at=candidate.zoho_synced_at,
+        zoho_last_error=candidate.zoho_last_error,
     )
 
 
@@ -708,6 +713,56 @@ def mark_onboarding_complete(candidate_id: int, db: Session = Depends(get_db),
     candidate.stage = CandidateStage.ONBOARDING_COMPLETE
     db.commit()
     return {"detail": "Onboarding marked complete"}
+
+
+# ---------------------------------------------------------------------------
+# Zoho People sync — "Publish to Zoho People" button on the candidate page.
+# See app/services/zoho_push.py, which wraps integrations/zoho/zoho_client.py.
+# ---------------------------------------------------------------------------
+
+# Data is only trustworthy enough to leave the building once BGV has been
+# reached — pushing an unreviewed CIF would just mean re-pushing it later.
+_ZOHO_PUSH_STAGES = {CandidateStage.APPROVED_FOR_BGV, CandidateStage.ONBOARDING_COMPLETE}
+
+
+@router.post("/candidates/{candidate_id}/zoho/push")
+def push_candidate_to_zoho(candidate_id: int, db: Session = Depends(get_db),
+                            current: HRUser = Depends(get_current_hr)):
+    """Publish this candidate into Zoho People. The first call inserts a
+    Zoho draft record; every call after that updates the same record (never
+    a second insert). Nothing is sent unless ZOHO_CANDIDATE_WRITE_FORM is
+    configured in .env — see integrations/zoho/README.md."""
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    if candidate.stage not in _ZOHO_PUSH_STAGES:
+        raise HTTPException(
+            status_code=400,
+            detail="Only candidates approved for BGV, or fully onboarded, can be "
+                    "published to Zoho People.")
+
+    try:
+        was_synced_before = bool(candidate.zoho_record_id)
+        result = zoho_push.push_candidate(db, candidate)
+    except zoho_push.ZohoPushError as exc:
+        candidate.zoho_last_error = str(exc)[:2000]
+        db.commit()
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    candidate.zoho_record_id = result["record_id"]
+    candidate.zoho_status = result["status"]
+    candidate.zoho_synced_at = datetime.now(timezone.utc)
+    candidate.zoho_last_error = None
+    db.commit()
+
+    lead = (f"Zoho People draft updated (record {result['record_id']})."
+            if was_synced_before else
+            f"Draft created in Zoho People (record {result['record_id']}).")
+    tail = ""
+    if result.get("tabular_deferred"):
+        tail = (" Note: the education/employment tables are not sent automatically yet — "
+                "complete them on the draft in Zoho before submitting it.")
+    return {"detail": lead + tail, **result}
 
 
 # ---------------------------------------------------------------------------

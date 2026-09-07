@@ -54,6 +54,26 @@ class Settings(BaseSettings):
     AI_INSIGHTS_ENABLED: bool = True
     AI_INSIGHTS_TIMEOUT: int = 30
 
+    # --- Zoho People push (integrations/zoho/zoho_client.py) ---
+    # Both URLs must match the data centre where the OAuth client was created.
+    ZOHO_ACCOUNTS_BASE_URL: str = "https://accounts.zoho.in"
+    ZOHO_PEOPLE_BASE_URL: str = "https://people.zoho.in"
+    ZOHO_CLIENT_ID: str = ""
+    ZOHO_CLIENT_SECRET: str = ""
+    ZOHO_REFRESH_TOKEN: str = ""
+    # Stopgap for a one-hour test window when you only have an access token.
+    # Set it and no refresh happens; expect 401s once it lapses.
+    ZOHO_ACCESS_TOKEN: str = ""
+    # Read-only fallback only. Writes always require an explicit --form so a
+    # stale .env value can never silently target the live Candidate form.
+    ZOHO_CANDIDATE_FORM: str = ""
+    # The ONLY value the "Publish to Zoho People" HR-portal button writes to.
+    # Deliberately separate from ZOHO_CANDIDATE_FORM above — set this only once
+    # the payload has round-tripped against that form via the CLI (see
+    # integrations/zoho/README.md). Leave blank to keep the button disabled.
+    ZOHO_CANDIDATE_WRITE_FORM: str = ""
+    ZOHO_TIMEOUT: int = 30
+
     # --- File uploads ---
     UPLOAD_DIR: str = "uploads"
     MAX_UPLOAD_MB: int = 10

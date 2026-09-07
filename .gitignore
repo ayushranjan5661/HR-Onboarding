@@ -30,3 +30,6 @@ Thumbs.db
 
 # --- Logs ---
 *.log
+
+# Zoho push - generated payloads (PII), cached access token, push log
+integrations/zoho/out/

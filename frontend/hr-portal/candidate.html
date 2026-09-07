@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>HR Portal — Candidate</title>
-<link rel="stylesheet" href="css/style.css?v=20260901b">
+<link rel="stylesheet" href="css/style.css?v=20260907a">
 </head>
 <body>
   <div class="app-shell">
@@ -87,6 +87,13 @@
             <span class="chevron">&#9660;</span>
           </div>
           <div id="auditBody"><p style="color:#6b7280;">Loading…</p></div>
+        </div>
+
+        <!-- Publish this candidate's data into Zoho People. Only shown once
+             BGV has been reached — see backend _ZOHO_PUSH_STAGES. -->
+        <div class="card section-card hidden" id="zohoCard">
+          <div class="section-title"><h3>Zoho People</h3></div>
+          <div id="zohoBody"></div>
         </div>
       </div>
     </div>
@@ -180,9 +187,9 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260901b"></script>
-  <script src="js/api.js?v=20260901b"></script>
-  <script src="../js/field-labels.js?v=20260901b"></script>
-  <script src="js/candidate.js?v=20260901b"></script>
+  <script src="../js/config.js?v=20260907a"></script>
+  <script src="js/api.js?v=20260907a"></script>
+  <script src="../js/field-labels.js?v=20260907a"></script>
+  <script src="js/candidate.js?v=20260907a"></script>
 </body>
 </html>

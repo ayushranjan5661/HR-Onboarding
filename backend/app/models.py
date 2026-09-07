@@ -95,6 +95,17 @@ class Candidate(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    # Zoho People sync (HR portal "Publish to Zoho People" button; see
+    # app/services/zoho_push.py). record_id is set on first successful push —
+    # every push after that updates the same record instead of inserting a
+    # second one. status is DRAFT (first push, isDraft=true) or SYNCED (a
+    # later push updated it) — Zoho's own draft flag is not tracked here, so
+    # a DRAFT record still needs reviewing in Zoho itself.
+    zoho_record_id = Column(String(50), nullable=True)
+    zoho_status = Column(String(20), nullable=True)
+    zoho_synced_at = Column(DateTime(timezone=True), nullable=True)
+    zoho_last_error = Column(Text, nullable=True)
+
     profile = relationship("CandidateProfile", uselist=False, back_populates="candidate", cascade="all, delete-orphan")
     submissions = relationship("FormSubmission", back_populates="candidate", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="candidate", cascade="all, delete-orphan")
@@ -272,6 +283,8 @@ class BGVDetails(Base):
     passport_number = Column(String(255))
     passport_expiry = Column(String(255))
     driving_licence_number = Column(String(255))
+    father_guardian_name = Column(String(255))
+    uan_number = Column(String(255))
     has_gaps = Column(String(255))
     ever_convicted = Column(String(255))
     conviction_details = Column(Text)
@@ -482,6 +495,10 @@ class BGVEducationCheck(Base):
     roll_number = Column(String(255))
     registration_number = Column(String(255))
     year_of_passing = Column(String(255))
+    course_name = Column(String(255))
+    field_of_study = Column(String(255))
+    grade_percentage = Column(String(255))
+    course_length = Column(String(255))
     study_mode = Column(String(255))
     verification_contact = Column(String(255))
 
@@ -494,9 +511,12 @@ class BGVEmploymentCheck(Base):
     candidate_id = Column(Integer, ForeignKey("candidates.id"), nullable=False)
     company_name = Column(String(255))
     company_address = Column(Text)
+    last_working_city = Column(String(255))
     employee_id = Column(String(255))
+    name_as_per_company_records = Column(String(255))
     designation_joining = Column(String(255))
     designation_leaving = Column(String(255))
+    job_description = Column(Text)
     from_date = Column(String(255))
     to_date = Column(String(255))
     employment_type = Column(String(255))
