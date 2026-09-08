@@ -117,6 +117,8 @@ CATALOG = {
             ("passport_number", "Passport Number"),
             ("passport_expiry", "Passport Expiry"),
             ("driving_licence_number", "Driving Licence Number"),
+            ("father_guardian_name", "Father's / Guardian's Name"),
+            ("uan_number", "UAN (Universal Account Number, EPFO)"),
             ("has_gaps", "Any gap of more than 60 days in education or employment?"),
             ("ever_convicted", "Ever convicted of a criminal offence?"),
             ("conviction_details", "Conviction details"),

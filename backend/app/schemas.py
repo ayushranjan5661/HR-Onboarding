@@ -226,6 +226,11 @@ class CandidateDetailOut(BaseModel):
     employment: list[dict[str, Any]] = []
     references: list[dict[str, Any]] = []
     bgv_tables: dict[str, list[dict[str, Any]]] = {}
+    # Zoho People sync state — see app/services/zoho_push.py
+    zoho_record_id: Optional[str] = None
+    zoho_status: Optional[str] = None
+    zoho_synced_at: Optional[datetime] = None
+    zoho_last_error: Optional[str] = None
 
     class Config:
         from_attributes = True

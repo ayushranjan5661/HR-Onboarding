@@ -1,0 +1,272 @@
+{
+  "_readme": "local field key -> Zoho People field API name on the Confirmation_Process_Form (displayed in Zoho as \"Candidate Information\") — this is the org's actual candidate-intake form; the generic-sounding \"Candidate\" form named in ZOHO_CANDIDATE_FORM does not exist in this org. Every API name below was read live from GET forms/Confirmation_Process_Form/components on 2026-09-07 (see integrations/zoho/README.md step 2 to re-verify after any Zoho-side form change). Leave a value as \"\" to skip that field.",
+  "_form": "Confirmation_Process_Form",
+  "map": {
+    "full_name": "First_name",
+    "email": "Email_ID",
+    "contact_number": "Personal_Mobile_Number",
+    "alternate_number": "Alternate_Contact",
+    "date_of_birth": "Original_Date_of_Birth",
+    "gender": "Gender",
+    "current_address": "Present_Communication_Address",
+    "permanent_address": "Permanent_Address1",
+    "aadhaar_number": "",
+    "pan_number": "PAN_Number",
+    "highest_qualification": "",
+    "university_name": "",
+    "graduation_year": "",
+    "bank_account_number": "",
+    "bank_ifsc_code": "",
+    "emergency_contact_name": "",
+    "emergency_contact_number": "",
+    "position_applied_for": "Position_Applied_For",
+    "skills_technologies": "Skill_Technologies_Worked",
+    "alternate_email": "Alternate_E_Mail_ID",
+    "blood_group": "Blood_Group1",
+    "linkedin_link": "LinkedIn_Page_link",
+    "marital_status": "Marital_Status",
+    "any_backlogs": "Any_Backlogs_in_the_Education",
+    "source": "Source",
+    "worked_in_levelshift_before": "Have_you_Worked_in_PreludeSys_before",
+    "total_experience_yrs": "Total_IT_Exp_in_Yrs",
+    "relevant_skill_exp_yrs": "Relevant_Skill_Exp_in_Yrs",
+    "current_ctc_lpa": "Current_CTC_Details_LPA",
+    "expected_ctc_lpa": "Expected_CTC_LPA_Rs",
+    "additional_allowance": "Additional_Allowance_Rs",
+    "variable_comp": "Variable_Comp_Rs",
+    "notice_period_days": "Notice_Period_in_Days",
+    "other_offers": "Do_you_hold_any_other_offers_currently",
+    "technical_certifications": "Technical_Certifications_if_any",
+    "understanding_of_levelshift": "What_is_your_understanding_of_PreludeSys_and_why_do_you_want_to_be_a_part_of_PreludeSys",
+    "aspirations": "What_do_you_aspire_for_and_how_do_you_think_PreludeSys_will_help_you_achieve_it",
+    "declaration_accepted": "I_declare_that_the_information_provided_by_me_above_is_true_to_the_best_of_my_knowledge_and_belie",
+    "declaration_place": "Place",
+    "declaration_date": "Date1",
+    "hr_candidate_id": "",
+    "hr_candidate_email": "Candidate_Email_ID"
+  },
+  "_local_labels": {
+    "full_name": "Full Name",
+    "email": "Email",
+    "contact_number": "Mobile Number",
+    "alternate_number": "Alternate Contact",
+    "date_of_birth": "Date of Birth",
+    "gender": "Gender",
+    "current_address": "Present/Communication Address",
+    "permanent_address": "Permanent Address",
+    "aadhaar_number": "Aadhaar Number",
+    "pan_number": "PAN Number",
+    "highest_qualification": "Highest Qualification",
+    "university_name": "University Name",
+    "graduation_year": "Graduation Year",
+    "bank_account_number": "Bank Account Number",
+    "bank_ifsc_code": "Bank Ifsc Code",
+    "emergency_contact_name": "Emergency Contact Name",
+    "emergency_contact_number": "Emergency Contact Number",
+    "position_applied_for": "Position Applied For",
+    "skills_technologies": "Skill/Technologies Worked",
+    "alternate_email": "Alternate E-Mail ID",
+    "blood_group": "Blood Group",
+    "linkedin_link": "LinkedIn Page Link",
+    "marital_status": "Marital Status",
+    "any_backlogs": "Any Backlogs in the Education",
+    "source": "Source",
+    "worked_in_levelshift_before": "Worked in LevelShift Before",
+    "total_experience_yrs": "Total Experience (Yrs)",
+    "relevant_skill_exp_yrs": "Relevant Skill Exp. (Yrs)",
+    "current_ctc_lpa": "Current CTC (LPA)",
+    "expected_ctc_lpa": "Expected CTC (LPA)",
+    "additional_allowance": "Additional Allowance (Rs)",
+    "variable_comp": "Variable Comp (Rs)",
+    "notice_period_days": "Notice Period (Days)",
+    "other_offers": "Holds Other Offers",
+    "technical_certifications": "Technical Certifications",
+    "understanding_of_levelshift": "Understanding of LevelShift",
+    "aspirations": "Aspirations",
+    "declaration_accepted": "Declaration accepted",
+    "declaration_place": "Place",
+    "declaration_date": "Date",
+    "hr_candidate_id": "HR: Candidate ID",
+    "hr_candidate_email": "HR: Candidate Email ID"
+  },
+  "_confirmed": [
+    "First_name", "Email_ID", "Personal_Mobile_Number", "Alternate_Contact",
+    "Original_Date_of_Birth", "Gender", "Present_Communication_Address",
+    "Permanent_Address1", "PAN_Number", "Position_Applied_For",
+    "Skill_Technologies_Worked", "Alternate_E_Mail_ID", "Blood_Group1",
+    "LinkedIn_Page_link", "Marital_Status", "Any_Backlogs_in_the_Education",
+    "Source", "Have_you_Worked_in_PreludeSys_before", "Total_IT_Exp_in_Yrs",
+    "Relevant_Skill_Exp_in_Yrs", "Current_CTC_Details_LPA", "Expected_CTC_LPA_Rs",
+    "Additional_Allowance_Rs", "Variable_Comp_Rs", "Notice_Period_in_Days",
+    "Do_you_hold_any_other_offers_currently", "Technical_Certifications_if_any",
+    "What_is_your_understanding_of_PreludeSys_and_why_do_you_want_to_be_a_part_of_PreludeSys",
+    "What_do_you_aspire_for_and_how_do_you_think_PreludeSys_will_help_you_achieve_it",
+    "I_declare_that_the_information_provided_by_me_above_is_true_to_the_best_of_my_knowledge_and_belie",
+    "Place", "Date1", "Candidate_Email_ID", "Image_1", "Signature"
+  ],
+  "_unconfirmed_or_unavailable": {
+    "hr_candidate_id": "Zoho's Candidate_ID is a Number field; local hr_candidate_id is free text HR types in (e.g. \"NANA\") and is not reliably numeric, so it is left unmapped rather than risk an insert failing on a non-numeric value. Map it only if hr_candidate_id is made strictly numeric.",
+    "aadhaar_number, bank_account_number, bank_ifsc_code, emergency_contact_*, highest_qualification, university_name, graduation_year": "No matching flat field exists on Confirmation_Process_Form. Education comes through the Bachelor/Diploma/10th tabular sections instead (see _subforms below) — export_zoho_payload.py does not emit those yet."
+  },
+  "_date_fields_readme": "Zoho Date fields expect dd-MMM-yyyy (e.g. 07-Sep-2026); the local DB stores dates as free strings from an <input type=date>, i.e. yyyy-mm-dd. Listed local keys are reformatted by build_payload() before being sent — see export_zoho_payload.py.",
+  "_date_fields": ["date_of_birth", "declaration_date"],
+  "_email_fields_readme": "local keys mapped to Zoho Email-type fields. Zoho rejects the ENTIRE record (error 7053) if any of these carries a non-email value, so build_payload() drops a value here that doesn't look like an email (e.g. an HR \"NANA\" placeholder) instead of sending it and losing the whole push.",
+  "_email_fields": ["email", "alternate_email", "hr_candidate_email"],
+  "_value_map_readme": "local value -> exact Zoho picklist option text, for fields whose local option wording doesn't already match what's configured in Zoho. Applied by build_payload() before the value is sent. A field with no entry here is passed through unchanged. \"_default\" (if present) catches any local value not explicitly listed, e.g. a local option Zoho has no equivalent for.",
+  "_value_map": {
+    "gender": {
+      "Other": "Others"
+    },
+    "source": {
+      "Job Portal": "Job Portal (Naukri/Monster/Others)",
+      "Employee Referral": "Referral (Name & EMP ID)",
+      "Social Media": "Social Media (Linkedin/Others)",
+      "Campus": "Others",
+      "Walk-in": "Others",
+      "Other": "Others",
+      "_default": "Others"
+    }
+  },
+  "_derived": {
+    "full_name": "sent as-is to First_name — the real Zoho form has a single Name field, not separate First/Last Name (an earlier version of this map incorrectly assumed a split first/last schema)."
+  },
+  "files": {
+    "_readme": "local Document.field_key -> Zoho field API name of a FILE-UPLOAD field on Confirmation_Process_Form. Used by zoho_client.py --with-files and by app/services/zoho_push.py, which sends the record as multipart/form-data with each file attached under its Zoho field name. Image_1 (Candidate Profile Picture) is MANDATORY on the Zoho side — an insert will fail without it.",
+    "map": {
+      "profile_picture": "Image_1",
+      "signature": "Signature",
+      "passport_size_photo": "",
+      "aadhar_card": "",
+      "pan_card": "",
+      "passport_copy": "",
+      "address_proof": "",
+      "id_proof": "",
+      "marksheet_10": "",
+      "marksheet_12_diploma": "",
+      "ug_consolidated_marksheet": "",
+      "ug_certificate": "",
+      "pg_consolidated_marksheet": "",
+      "pg_certificate": "",
+      "other_edu_marksheet": "",
+      "other_edu_certificate": "",
+      "additional_certifications": "",
+      "cc_offer_letter": "",
+      "cc_role_change_letter": "",
+      "cc_experience_letter": "",
+      "cc_relieving_letter": "",
+      "cc_pay_slips": "",
+      "pc1_offer_letter": "",
+      "pc1_role_change_letter": "",
+      "pc1_experience_letter": "",
+      "pc1_relieving_letter": "",
+      "pc1_pay_slips": "",
+      "pc2_offer_letter": "",
+      "pc2_role_change_letter": "",
+      "pc2_experience_letter": "",
+      "pc2_relieving_letter": "",
+      "pc2_pay_slips": "",
+      "pc3_offer_letter": "",
+      "pc3_role_change_letter": "",
+      "pc3_experience_letter": "",
+      "pc3_relieving_letter": "",
+      "pc3_pay_slips": "",
+      "pc4_offer_letter": "",
+      "pc4_role_change_letter": "",
+      "pc4_experience_letter": "",
+      "pc4_relieving_letter": "",
+      "pc4_pay_slips": "",
+      "signed_consent_form": "",
+      "passport_copy_bgv": "",
+      "form16_last_year": "",
+      "form16_previous_year": "",
+      "bank_statement_salary": "",
+      "police_clearance_certificate": "",
+      "bgv_signature": ""
+    }
+  },
+  "_mandatory_no_local_source": {
+    "_readme": "Fields Zoho reports as mandatory on Confirmation_Process_Form with no corresponding local data at all. An insertRecord may fail on any of these with error 7052 until they're either answered for real or made optional in Zoho's form builder. Left deliberately unmapped rather than filled with placeholder text.",
+    "fields": [
+      "If_yes_how_many (shown only when Any_Backlogs_in_the_Education = Yes)",
+      "Others_Please_mentioned (shown only when Source = Others)",
+      "Employee_Name / Employee_ID_Ref (referral name/ID)",
+      "If_Yes_mention_your_Employee_Code (shown only when Have_you_Worked_in_PreludeSys_before = Yes)",
+      "if_Yes_provide_details (shown only when Do_you_hold_any_other_offers_currently = Yes)",
+      "Reason_for_Relieving"
+    ]
+  },
+  "_subforms_readme": "Zoho's Confirmation_Process_Form has tabular (subform) sections in addition to the main fields above. Field API names were read live on 2026-09-07 from forms/components; the _zoho_section_display strings are the section HEADER text, read from a getRecords read-back. IMPORTANT: Zoho's insert/updateRecord wants tabular data nested under a top-level \"tabularSections\" object keyed by the DISPLAY name (not the link name) — build_subforms()/build_full_payload() in export_zoho_payload.py do exactly that. _zoho_section (link name) is kept only for reference.",
+  "_subforms": {
+    "education_ug_pg": {
+      "_zoho_section": "Bachelor_Education_Details",
+      "_zoho_section_display": "UG and PG Education Details",
+      "map": {
+        "qualification": "B_Qualification",
+        "course_college": "B_Course_Name_Specialization_and_College",
+        "cgpa_percent": "B_CGPA_Obtained",
+        "year_of_passing": "B_Year_of_Passing",
+        "has_marksheet": "B_Have_Mark_Sheet_and_Certificate",
+        "gaps": "Gaps_if_any"
+      }
+    },
+    "education_12th": {
+      "_zoho_section": "th_Diploma_Education_Details",
+      "_zoho_section_display": "12th / Diploma Education Details",
+      "map": {
+        "qualification": "thQualification",
+        "course_college": "thCourse_Name_Specialization_and_College",
+        "cgpa_percent": "th_CGPA_Obtained",
+        "year_of_passing": "thYear_of_Passing",
+        "has_marksheet": "th_Have_Mark_Sheet_and_Certificate",
+        "gaps": "Gaps_if_any1"
+      }
+    },
+    "education_10th": {
+      "_zoho_section": "Education_Details",
+      "_zoho_section_display": "10th Education Details:",
+      "map": {
+        "qualification": "Qualification",
+        "course_college": "Course_Name_Specialization_and_College",
+        "cgpa_percent": "CGPA_Obtained",
+        "year_of_passing": "Year_of_Passing",
+        "has_marksheet": "Have_Mark_Sheet_and_Certificate",
+        "gaps": "Gaps_if_any2"
+      }
+    },
+    "work_experience": {
+      "_zoho_section": "Employment_Details",
+      "_zoho_section_display": "Employment Details (Starting with your present or most recent employer, please list of all your past employments)",
+      "map": {
+        "company_name": "Company_Name",
+        "position_held": "Position_Held_While_leaving",
+        "from_date": "From",
+        "to_date": "To",
+        "currently_working": "Currently_Working_here",
+        "reason_for_leaving": "Reason_for_leaving",
+        "offer_letter": "Offer_Letter_OL",
+        "relieving_letter_status": "Relieving_letter_RL",
+        "experience_certificate": "Experience_Certificate_EC",
+        "gaps": "E_Gaps_if_any"
+      }
+    },
+    "dependents": {
+      "_zoho_section": "",
+      "map": {}
+    },
+    "previous_employment": {
+      "_zoho_section": "",
+      "map": {}
+    },
+    "references": {
+      "_zoho_section": "References_You_may_refer_your_known_ones_who_are_looking_out_for_change",
+      "_zoho_section_display": "References (You may refer your known ones who are looking out for change)",
+      "map": {
+        "employee_name": "Employee_Name_Referal",
+        "email_id": "Email_ID_Ref",
+        "technology": "Technology_Ref",
+        "experience": "Experience_Ref",
+        "contact_number": "Contact_Number_Ref"
+      }
+    }
+  }
+}

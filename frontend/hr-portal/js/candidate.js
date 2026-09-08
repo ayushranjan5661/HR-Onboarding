@@ -326,6 +326,7 @@ function showLoadError(message) {
   document.getElementById("decisionCard").classList.add("hidden");
   document.getElementById("cifCard").classList.add("hidden");
   document.getElementById("auditCard").classList.add("hidden");
+  document.getElementById("zohoCard").classList.add("hidden");
   document.getElementById("openAccessBanner").innerHTML = "";
   document.getElementById("followupForms").innerHTML = "";
   const notice = document.getElementById("rejectedNotice");
@@ -474,6 +475,57 @@ function render() {
         <button class="btn btn-success" onclick="markComplete()">Mark Onboarding Complete</button>`;
       document.getElementById("followupForms").appendChild(wrap);
     }
+  }
+
+  // ---- Zoho People publish ----
+  const zohoEligible = c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE";
+  document.getElementById("zohoCard").classList.toggle("hidden", !zohoEligible);
+  if (zohoEligible) renderZoho(c);
+}
+
+function renderZoho(c) {
+  const pushed = !!c.zoho_record_id;
+  const statusLine = !pushed
+    ? "Not yet published to Zoho People."
+    : `Zoho record <code>${escapeHtml(c.zoho_record_id)}</code> — `
+      + (c.zoho_status === "DRAFT"
+          ? "created as a draft there; open it in Zoho to review before treating it as final."
+          : "last synced")
+      + (c.zoho_synced_at ? ` (${new Date(c.zoho_synced_at).toLocaleString()}).` : ".");
+  const errorLine = c.zoho_last_error
+    ? `<div style="color:var(--danger);margin-top:6px;font-size:0.85rem;">Last attempt failed: ${escapeHtml(c.zoho_last_error)}</div>`
+    : "";
+  document.getElementById("zohoBody").innerHTML = `
+    <p style="color:#6b7280;font-size:0.88rem;">${statusLine}</p>
+    ${errorLine}
+    <button class="btn btn-primary" id="zohoPushBtn" onclick="pushToZoho()">
+      ${pushed ? "Re-sync to Zoho People" : "Publish to Zoho People"}
+    </button>`;
+}
+
+async function pushToZoho() {
+  const alreadyPushed = !!(currentData && currentData.zoho_record_id);
+  const msg = alreadyPushed
+    ? "Push this candidate's latest data to the existing Zoho People record?"
+    : "Create this candidate as a draft record in Zoho People? You'll be able to "
+      + "review it there before treating it as final.";
+  if (!await showConfirm(msg, {
+        title: "Publish to Zoho People",
+        confirmText: alreadyPushed ? "Re-sync" : "Publish",
+      })) return;
+
+  const btn = document.getElementById("zohoPushBtn");
+  btn.disabled = true;
+  btn.textContent = "Publishing…";
+  try {
+    const result = await apiFetch(`/hr/candidates/${candidateId}/zoho/push`, {
+      method: "POST", body: JSON.stringify({}),
+    });
+    await load();
+    alert(result.detail);
+  } catch (err) {
+    alert(err.message);
+    await load();
   }
 }
 
