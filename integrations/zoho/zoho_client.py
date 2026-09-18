@@ -195,9 +195,9 @@ def api(method, path, data=None, token=None, params=None, body=None, content_typ
 
 
 def _multipart(fields, files):
-    """multipart/form-data body: text fields plus (zoho_field, filename,
-    content_type, path) file parts. Zoho's file-upload form fields only accept
-    files this way - inputData alone cannot carry them."""
+    """multipart/form-data body: text fields plus (name, filename,
+    content_type, path) file parts. Only uploadFile() needs this - insert and
+    updateRecord take ordinary urlencoded form data (see upload_files)."""
     boundary = "----hr-onboarding-" + os.urandom(12).hex()
     out = bytearray()
     for name, value in fields.items():
@@ -375,7 +375,50 @@ def _dumps(obj):
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
 
 
+def upload_file(token, form, zoho_field, filename, content_type, path):
+    """One local file -> Zoho's encryptedfilepath handle for `zoho_field`.
+
+    Files do NOT ride along with insert/updateRecord. Posting them as
+    multipart parts on those calls is silently ignored: Zoho replies
+    "Successfully Updated", status 0, and leaves the field empty - which is
+    exactly how the profile picture went missing for every push before
+    2026-09-18. Uploads are a separate two-step dance:
+
+        1. POST the bytes here, with fieldName=<field API name>. Zoho stores
+           them and hands back an opaque "encryptedfilepath".
+        2. Send that string as the field's value in inputData (upload_files
+           below builds the dict; insert_record/update_record merge it).
+
+    The endpoint is forms/<form>/uploadFile - note there is no /json/ segment
+    like the record calls have; with it Zoho 404s (error 7201). An unknown
+    field name comes back as error 7013 rather than being ignored.
+    """
+    body, ctype = _multipart({"fieldName": zoho_field},
+                             [(zoho_field, filename, content_type, path)])
+    resp = api("POST", "forms/%s/uploadFile" % urllib.parse.quote(form),
+               token=token, body=body, content_type=ctype)
+    result = resp.get("response", {}).get("result") or {}
+    handle = result.get("encryptedfilepath")
+    if not handle:
+        raise ZohoError("upload of %s for field %s failed: %s"
+                        % (filename, zoho_field, str(resp)[:400]))
+    return handle
+
+
+def upload_files(token, form, files):
+    """[(zoho_field, filename, content_type, path)] -> {zoho_field: handle}.
+
+    Uploaded before the record write so a rejected file (e.g. a field name
+    that is not on the form, error 7013) fails the push loudly instead of
+    landing a record with silently missing documents.
+    """
+    return {zoho_field: upload_file(token, form, zoho_field, filename, ctype, path)
+            for zoho_field, filename, ctype, path in files}
+
+
 def insert_record(token, form, payload, draft=False, files=None, tabular=None):
+    if files:
+        payload = dict(payload, **upload_files(token, form, files))
     data = {"inputData": _dumps(payload)}
     if tabular:
         # Tabular sections ride in their own request field, NOT inside
@@ -384,13 +427,12 @@ def insert_record(token, form, payload, draft=False, files=None, tabular=None):
     if draft:
         data["isDraft"] = "true"
     path = "forms/json/%s/insertRecord" % urllib.parse.quote(form)
-    if files:
-        body, ctype = _multipart(data, files)
-        return api("POST", path, token=token, body=body, content_type=ctype)
     return api("POST", path, data=data, token=token)
 
 
 def update_record(token, form, record_id, payload, files=None, tabular=None, draft=False):
+    if files:
+        payload = dict(payload, **upload_files(token, form, files))
     data = {
         "recordId": record_id,
         "inputData": _dumps(payload),
@@ -403,9 +445,6 @@ def update_record(token, form, record_id, payload, files=None, tabular=None, dra
         # yet (error 7052). As a draft it stays editable/valid in Zoho.
         data["isDraft"] = "true"
     path = "forms/json/%s/updateRecord" % urllib.parse.quote(form)
-    if files:
-        body, ctype = _multipart(data, files)
-        return api("POST", path, token=token, body=body, content_type=ctype)
     return api("POST", path, data=data, token=token)
 
 

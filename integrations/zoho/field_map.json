@@ -131,7 +131,8 @@
     "full_name": "sent as-is to First_name — the real Zoho form has a single Name field, not separate First/Last Name (an earlier version of this map incorrectly assumed a split first/last schema)."
   },
   "files": {
-    "_readme": "local Document.field_key -> Zoho field API name of a FILE-UPLOAD field on Confirmation_Process_Form. Used by zoho_client.py --with-files and by app/services/zoho_push.py, which sends the record as multipart/form-data with each file attached under its Zoho field name. Image_1 (Candidate Profile Picture) is MANDATORY on the Zoho side — an insert will fail without it.",
+    "_readme": "local Document.field_key -> Zoho field API name of a file/Image field on Confirmation_Process_Form. Used by zoho_client.py --with-files and by app/services/zoho_push.py. Files are NOT attached to insertRecord/updateRecord as multipart parts — Zoho silently ignores those and answers status 0 with the field left empty. Each file is POSTed to forms/<form>/uploadFile with fieldName=<API name> first, and the encryptedfilepath it returns is sent as that field's value in inputData (see upload_files() in zoho_client.py). Image_1 (Candidate Profile Picture) is MANDATORY on the Zoho side — an insert will fail without it.",
+    "_only_two_file_fields": "Confirmation_Process_Form has exactly TWO file-bearing fields, both comptype Image: Image_1 and Signature (read live from forms/components on 2026-09-18). Every other key below stays \"\" because the form has nowhere to put it — marksheet_10/marksheet_12_diploma were briefly mapped to th_Certificate/th_Certificate1, which do not exist on the form (uploadFile rejects them with error 7013). Add a file field in Zoho's form builder before mapping any of these.",
     "map": {
       "profile_picture": "Image_1",
       "signature": "Signature",
