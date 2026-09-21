@@ -93,72 +93,7 @@ def collect_values(db, candidate):
     if not values.get("full_name"):
         values["full_name"] = candidate.name or ""
 
-    values.update(flatten_education(db, candidate))
-    values.update(flatten_employment(db, candidate))
     return values
-
-
-# Local EducationDetail.section -> the local-key prefixes each of its rows gets
-# when flattened. The UG/PG section holds two rows (the Zoho form itself tells
-# the candidate to click + and add a PG row below their UG one), so it spends
-# two prefixes; 10th and 12th only ever have one.
-_EDU_FLAT_PREFIXES = {"UG_PG": ("ug", "pg"), "12TH": ("edu12",), "10TH": ("edu10",)}
-_EDU_FLAT_COLUMNS = ("qualification", "course_college", "cgpa_percent",
-                     "year_of_passing", "has_marksheet", "gaps")
-
-
-def flatten_education(db, candidate):
-    """Education rows -> flat local keys, e.g. ug_qualification, pg_course_college.
-
-    Zoho cannot be written through its tabular sections at all — see
-    "_subforms_write_status" in field_map.json for the full probe matrix — so
-    the education tables are ALSO offered as ordinary flat fields, which do
-    write. Map these in field_map.json once the matching plain fields exist on
-    the Zoho form; each one left as "" is simply skipped, exactly like any
-    other unmapped key.
-
-    Rows are taken in entry order, so the candidate's first UG/PG row becomes
-    ug_* and a second becomes pg_*. A third row in a section has nowhere flat
-    to go and is dropped — the subform map still carries every row for
-    whenever Zoho's tabular write is fixed.
-    """
-    flat = {}
-    rows_by_section = {}
-    for row in (db.query(EducationDetail).filter_by(candidate_id=candidate.id)
-                .order_by(EducationDetail.id).all()):
-        rows_by_section.setdefault(row.section, []).append(row)
-
-    for section, prefixes in _EDU_FLAT_PREFIXES.items():
-        rows = rows_by_section.get(section, [])
-        for prefix, row in zip(prefixes, rows):
-            for col in _EDU_FLAT_COLUMNS:
-                flat["%s_%s" % (prefix, col)] = getattr(row, col, None)
-    return flat
-
-
-# Employment rows flatten the same way, newest employer first (emp1 is the
-# current/most recent one, matching the order the Zoho table asks for).
-_EMP_FLAT_PREFIXES = ("emp1", "emp2")
-_EMP_FLAT_COLUMNS = ("company_name", "position_held", "from_date", "to_date",
-                     "currently_working", "reason_for_leaving", "offer_letter",
-                     "relieving_letter_status", "experience_certificate", "gaps")
-
-
-def flatten_employment(db, candidate):
-    """Employment rows -> flat local keys, e.g. emp1_company_name.
-
-    The flat counterpart of the work_experience subform, for the same reason
-    the education tables have one: Zoho's tabular sections cannot be written.
-    Two employers get slots; a third and beyond are dropped here and survive
-    only in the subform map. See flatten_education for the rest of the story.
-    """
-    flat = {}
-    rows = (db.query(EmploymentDetail).filter_by(candidate_id=candidate.id)
-            .order_by(EmploymentDetail.id).all())
-    for prefix, row in zip(_EMP_FLAT_PREFIXES, rows):
-        for col in _EMP_FLAT_COLUMNS:
-            flat["%s_%s" % (prefix, col)] = getattr(row, col, None)
-    return flat
 
 
 def _apply_value_map(key, value, value_map):
@@ -253,71 +188,79 @@ def collect_subform_rows(db, candidate):
 
 
 def build_subforms(local_rows, subforms_config, value_map=None, email_fields=None):
-    """Local rows + _subforms config -> {section link name: [ {Zoho field: val} ]}.
+    """Local rows + _subforms config -> {Zoho column API name: [row1, row2, ...]}.
 
-    This is Zoho's `tabularData` request parameter (a sibling of `inputData`,
-    NOT nested inside it — nesting is rejected with error 7013). The row fields
-    below use the right field API names, but the SECTION KEY here is wrong:
-    Zoho wants the numeric sectionId from forms/<form>/components, not the link
-    name (a link-name key fails with a generic 7200). Nothing built here is
-    sent yet — zoho_push.py defers tabular writes — and the envelope is still
-    unsolved regardless of the key; see "_subforms_write_status" in
-    field_map.json for the full probe matrix before changing this.
+    Tabular sections are written by putting their COLUMNS flat inside
+    `inputData`, each value a JSON array with one element per row. There is no
+    `tabularData` parameter, no section id and no section name anywhere in the
+    request — the section a column belongs to is implied by the column itself.
+    Zoho names this shape itself: send a tabular column as a bare string and it
+    answers 7022 "Input is expected in JSONArray for tabular field '...'".
 
-    Only sections that actually have rows are emitted (an empty tabular section
-    is left out rather than sent blank). yyyy-mm-dd values are reformatted to
-    Zoho's dd-MMM-yyyy, and email-shaped columns are validated the same way the
-    flat fields are, so one bad cell can't sink the whole record.
+    The columns are returned separately from the flat fields only so callers
+    can count rows for logging; build_full_payload merges them straight into
+    the payload.
+
+    Row alignment is positional, so a column is padded with "" for any row that
+    left it blank — dropping the blank instead would silently shift every later
+    value up a row. A column that is empty in every row is left out entirely
+    rather than sent as a list of blanks. Sections with no rows contribute
+    nothing. yyyy-mm-dd values are reformatted to Zoho's dd-MMM-yyyy, and
+    email-shaped columns are validated the same way the flat fields are, so
+    one bad cell cannot sink the whole record.
     """
     value_map = value_map or {}
     email_fields = email_fields or set()
     out = {}
     for key, cfg in subforms_config.items():
-        section = cfg.get("_zoho_section")
         colmap = cfg.get("map", {})
-        if not section or not colmap:
+        rows = local_rows.get(key, [])
+        if not colmap or not rows:
             continue
-        zoho_rows = []
-        for entry in local_rows.get(key, []):
-            zrow = {}
-            for local_col, zoho_field in colmap.items():
-                if not zoho_field:
-                    continue
+        for local_col, zoho_field in colmap.items():
+            if not zoho_field:
+                continue
+            column = []
+            for entry in rows:
                 value = entry.get(local_col)
                 if value in (None, ""):
+                    column.append("")
                     continue
                 text = str(value).strip()
                 if local_col in email_fields and not _EMAIL_RE.match(text):
+                    column.append("")
                     continue
                 if _DATE_RE.match(text):
                     text = _reformat_date(text)
-                zrow[zoho_field] = _apply_value_map(local_col, text, value_map)
-            if zrow:
-                zoho_rows.append(zrow)
-        if zoho_rows:
-            out[section] = zoho_rows
+                column.append(str(_apply_value_map(local_col, text, value_map)))
+            if any(column):
+                out[zoho_field] = column
     return out
 
 
 def build_full_payload(db, candidate):
-    """Everything one candidate sends to Zoho, split the way the API wants it:
-    flat fields go in `inputData`, tabular sections in the separate `tabularData`
-    parameter. The single source of truth shared by the CLI, this exporter, and
-    the HR-portal service, so all three send exactly the same thing.
+    """Everything one candidate sends to Zoho, in the single `inputData` dict
+    the API wants: flat fields as plain strings, tabular columns as arrays with
+    one element per row. The single source of truth shared by the CLI, this
+    exporter, and the HR-portal service, so all three send exactly the same
+    thing.
 
     Returns (payload, tabular, skipped, unmapped, subform_counts):
-      payload  - flat inputData dict
-      tabular  - {section link name: [row dicts]} for tabularData (may be empty)
-      subform_counts - {section: row count} for what was emitted.
+      payload  - the whole inputData dict, tabular columns already merged in
+      tabular  - just the tabular columns, kept separate for logging
+      subform_counts - {local section key: row count} for what was emitted.
     """
     local = collect_values(db, candidate)
     payload, skipped, unmapped = build_payload(
         local, load_map(), value_map=load_value_map(), date_fields=load_date_fields(),
         email_fields=load_email_fields())
-    tabular = build_subforms(
-        collect_subform_rows(db, candidate), load_subforms(),
-        value_map=load_value_map(), email_fields={"email_id"})
-    subform_counts = {section: len(rows) for section, rows in tabular.items()}
+    local_rows = collect_subform_rows(db, candidate)
+    tabular = build_subforms(local_rows, load_subforms(),
+                             value_map=load_value_map(), email_fields={"email_id"})
+    # Tabular columns ride inside inputData alongside the flat fields — see
+    # build_subforms for why there is no separate tabularData parameter.
+    payload.update(tabular)
+    subform_counts = {key: len(rows) for key, rows in local_rows.items() if rows}
     return payload, tabular, skipped, unmapped, subform_counts
 
 
@@ -348,13 +291,14 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
         out_path = os.path.join(out_dir, "candidate_%d.inputData.json" % candidate.id)
         with open(out_path, "w", encoding="utf-8") as fh:
-            json.dump({"inputData": payload, "tabularData": tabular}, fh,
+            json.dump({"inputData": payload}, fh,
                       ensure_ascii=False, separators=(",", ":"))
 
         print("wrote %s" % out_path)
-        print("  %d flat fields in payload: %s" % (len(payload), ", ".join(sorted(payload))))
-        print("  %d subform section(s): %s" % (
-            len(subform_counts),
+        flat_only = sorted(k for k in payload if k not in tabular)
+        print("  %d flat fields in payload: %s" % (len(flat_only), ", ".join(flat_only)))
+        print("  %d tabular column(s) across %d section(s): %s" % (
+            len(tabular), len(subform_counts),
             ", ".join("%s=%d rows" % (s, n) for s, n in subform_counts.items()) or "-"))
         print("  %d empty in DB, omitted: %s" % (len(skipped), ", ".join(skipped) or "-"))
         print("  %d unmapped in field_map.json: %s" % (len(unmapped), ", ".join(unmapped) or "-"))

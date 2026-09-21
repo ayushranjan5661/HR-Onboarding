@@ -416,33 +416,32 @@ def upload_files(token, form, files):
             for zoho_field, filename, ctype, path in files}
 
 
-def insert_record(token, form, payload, draft=False, files=None, tabular=None):
+def insert_record(token, form, payload, draft=False, files=None):
+    """Create a record. `payload` is the whole inputData, tabular columns
+    included — build_full_payload has already merged them in, because Zoho
+    takes tabular rows as column arrays inside inputData and has no
+    tabularData parameter (see build_subforms)."""
     if files:
         payload = dict(payload, **upload_files(token, form, files))
     data = {"inputData": _dumps(payload)}
-    if tabular:
-        # Tabular sections ride in their own request field, NOT inside
-        # inputData (Zoho rejects that with 7013). Keyed by section link name.
-        data["tabularData"] = _dumps(tabular)
     if draft:
         data["isDraft"] = "true"
     path = "forms/json/%s/insertRecord" % urllib.parse.quote(form)
     return api("POST", path, data=data, token=token)
 
 
-def update_record(token, form, record_id, payload, files=None, tabular=None, draft=False):
+def update_record(token, form, record_id, payload, files=None, draft=False):
+    """Update a record. Same payload contract as insert_record."""
     if files:
         payload = dict(payload, **upload_files(token, form, files))
     data = {
         "recordId": record_id,
         "inputData": _dumps(payload),
     }
-    if tabular:
-        data["tabularData"] = _dumps(tabular)
     if draft:
         # Keep the record a draft on update too: a non-draft update enforces
-        # every mandatory field, including the tabular sections we don't write
-        # yet (error 7052). As a draft it stays editable/valid in Zoho.
+        # every mandatory field on the form, including ones no local data
+        # answers (error 7052). As a draft it stays editable/valid in Zoho.
         data["isDraft"] = "true"
     path = "forms/json/%s/updateRecord" % urllib.parse.quote(form)
     return api("POST", path, data=data, token=token)
@@ -605,13 +604,14 @@ def main():
         os.makedirs(OUT_DIR, exist_ok=True)
         out_path = os.path.join(OUT_DIR, "candidate_%d.inputData.json" % cid)
         with open(out_path, "w", encoding="utf-8") as fh:
-            json.dump({"inputData": payload, "tabularData": tabular}, fh,
+            json.dump({"inputData": payload}, fh,
                       ensure_ascii=False, separators=(",", ":"))
 
         print("candidate %d <%s>" % (cid, cemail))
-        print("  %d flat fields in payload: %s" % (len(payload), ", ".join(sorted(payload))))
-        print("  %d subform section(s): %s" % (
-            len(subform_counts),
+        flat_only = sorted(k for k in payload if k not in tabular)
+        print("  %d flat fields in payload: %s" % (len(flat_only), ", ".join(flat_only)))
+        print("  %d tabular column(s) across %d section(s): %s" % (
+            len(tabular), len(subform_counts),
             ", ".join("%s=%d rows" % (s, n) for s, n in subform_counts.items()) or "-"))
         print("  %d empty in DB, omitted: %s" % (len(skipped), ", ".join(skipped) or "-"))
         print("  %d unmapped in field_map.json: %s" % (len(unmapped), ", ".join(unmapped) or "-"))
@@ -679,10 +679,10 @@ def main():
             tabular=tabular, files=[f[0] for f in files])
         if args.record_id:
             response = update_record(token, args.form, args.record_id, payload,
-                                     files=files, tabular=tabular)
+                                     files=files)
         else:
             response = insert_record(token, args.form, payload, draft=args.draft,
-                                     files=files, tabular=tabular)
+                                     files=files)
         log("push.response", form=args.form, candidate_id=cid, response=response)
 
         print(json.dumps(response, indent=2, ensure_ascii=False)[:4000])
