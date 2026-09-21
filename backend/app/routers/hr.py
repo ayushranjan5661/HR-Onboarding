@@ -758,10 +758,15 @@ def push_candidate_to_zoho(candidate_id: int, db: Session = Depends(get_db),
     lead = (f"Zoho People draft updated (record {result['record_id']})."
             if was_synced_before else
             f"Draft created in Zoho People (record {result['record_id']}).")
+    # Zoho cannot be written through its tabular sections, so the education and
+    # employment tables only reach it via the flat fields mapped in
+    # field_map.json. Warn only while nothing of them is getting through —
+    # once those are mapped the data does arrive, and repeating the warning
+    # would send HR off to redo work that is already done.
     tail = ""
-    if result.get("tabular_deferred"):
-        tail = (" Note: the education/employment tables are not sent automatically yet — "
-                "complete them on the draft in Zoho before submitting it.")
+    if result.get("tabular_deferred") and not result.get("tabular_sent_flat"):
+        tail = (" Note: the education/employment tables could not be sent — "
+                "fill them in on the draft in Zoho before submitting it.")
     return {"detail": lead + tail, **result}
 
 

@@ -93,7 +93,72 @@ def collect_values(db, candidate):
     if not values.get("full_name"):
         values["full_name"] = candidate.name or ""
 
+    values.update(flatten_education(db, candidate))
+    values.update(flatten_employment(db, candidate))
     return values
+
+
+# Local EducationDetail.section -> the local-key prefixes each of its rows gets
+# when flattened. The UG/PG section holds two rows (the Zoho form itself tells
+# the candidate to click + and add a PG row below their UG one), so it spends
+# two prefixes; 10th and 12th only ever have one.
+_EDU_FLAT_PREFIXES = {"UG_PG": ("ug", "pg"), "12TH": ("edu12",), "10TH": ("edu10",)}
+_EDU_FLAT_COLUMNS = ("qualification", "course_college", "cgpa_percent",
+                     "year_of_passing", "has_marksheet", "gaps")
+
+
+def flatten_education(db, candidate):
+    """Education rows -> flat local keys, e.g. ug_qualification, pg_course_college.
+
+    Zoho cannot be written through its tabular sections at all — see
+    "_subforms_write_status" in field_map.json for the full probe matrix — so
+    the education tables are ALSO offered as ordinary flat fields, which do
+    write. Map these in field_map.json once the matching plain fields exist on
+    the Zoho form; each one left as "" is simply skipped, exactly like any
+    other unmapped key.
+
+    Rows are taken in entry order, so the candidate's first UG/PG row becomes
+    ug_* and a second becomes pg_*. A third row in a section has nowhere flat
+    to go and is dropped — the subform map still carries every row for
+    whenever Zoho's tabular write is fixed.
+    """
+    flat = {}
+    rows_by_section = {}
+    for row in (db.query(EducationDetail).filter_by(candidate_id=candidate.id)
+                .order_by(EducationDetail.id).all()):
+        rows_by_section.setdefault(row.section, []).append(row)
+
+    for section, prefixes in _EDU_FLAT_PREFIXES.items():
+        rows = rows_by_section.get(section, [])
+        for prefix, row in zip(prefixes, rows):
+            for col in _EDU_FLAT_COLUMNS:
+                flat["%s_%s" % (prefix, col)] = getattr(row, col, None)
+    return flat
+
+
+# Employment rows flatten the same way, newest employer first (emp1 is the
+# current/most recent one, matching the order the Zoho table asks for).
+_EMP_FLAT_PREFIXES = ("emp1", "emp2")
+_EMP_FLAT_COLUMNS = ("company_name", "position_held", "from_date", "to_date",
+                     "currently_working", "reason_for_leaving", "offer_letter",
+                     "relieving_letter_status", "experience_certificate", "gaps")
+
+
+def flatten_employment(db, candidate):
+    """Employment rows -> flat local keys, e.g. emp1_company_name.
+
+    The flat counterpart of the work_experience subform, for the same reason
+    the education tables have one: Zoho's tabular sections cannot be written.
+    Two employers get slots; a third and beyond are dropped here and survive
+    only in the subform map. See flatten_education for the rest of the story.
+    """
+    flat = {}
+    rows = (db.query(EmploymentDetail).filter_by(candidate_id=candidate.id)
+            .order_by(EmploymentDetail.id).all())
+    for prefix, row in zip(_EMP_FLAT_PREFIXES, rows):
+        for col in _EMP_FLAT_COLUMNS:
+            flat["%s_%s" % (prefix, col)] = getattr(row, col, None)
+    return flat
 
 
 def _apply_value_map(key, value, value_map):
@@ -191,8 +256,13 @@ def build_subforms(local_rows, subforms_config, value_map=None, email_fields=Non
     """Local rows + _subforms config -> {section link name: [ {Zoho field: val} ]}.
 
     This is Zoho's `tabularData` request parameter (a sibling of `inputData`,
-    NOT nested inside it — nesting is rejected with error 7013). Its keys are
-    the tabular section API/link names and the row fields use field API names.
+    NOT nested inside it — nesting is rejected with error 7013). The row fields
+    below use the right field API names, but the SECTION KEY here is wrong:
+    Zoho wants the numeric sectionId from forms/<form>/components, not the link
+    name (a link-name key fails with a generic 7200). Nothing built here is
+    sent yet — zoho_push.py defers tabular writes — and the envelope is still
+    unsolved regardless of the key; see "_subforms_write_status" in
+    field_map.json for the full probe matrix before changing this.
 
     Only sections that actually have rows are emitted (an empty tabular section
     is left out rather than sent blank). yyyy-mm-dd values are reformatted to
