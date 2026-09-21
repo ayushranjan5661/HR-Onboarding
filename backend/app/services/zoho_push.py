@@ -28,8 +28,7 @@ if _INTEGRATIONS_ZOHO not in sys.path:
     sys.path.insert(0, _INTEGRATIONS_ZOHO)
 
 import zoho_client as _zc                                                 # noqa: E402
-from export_zoho_payload import (build_full_payload, collect_values,     # noqa: E402
-                                  load_map)
+from export_zoho_payload import build_full_payload, collect_values       # noqa: E402
 
 from sqlalchemy.orm import Session                                       # noqa: E402
 
@@ -55,28 +54,6 @@ def _network_message(exc: "_zc.ZohoUnreachable") -> str:
             "connection is back.")
 
 
-# Local keys that carry the education/employment TABLES as ordinary flat
-# fields, because Zoho's tabular sections cannot be written at all (the probe
-# matrix lives in field_map.json's "_subforms_write_status"). ug_/pg_ are the
-# UG/PG rows, edu12_/edu10_ the school rows, emp1_/emp2_ the employers.
-_FLAT_TABLE_PREFIXES = ("ug_", "pg_", "edu12_", "edu10_", "emp1_", "emp2_")
-
-
-def _flat_table_fields_sent(payload):
-    """How many of those flat table fields actually made it into this payload.
-
-    Counted from the payload rather than from the map, so it reports what Zoho
-    was really given: a mapped field whose value was empty does not count. The
-    caller uses this to decide whether HR still has to fill the tables in by
-    hand — a warning that keeps firing after the data has started arriving is
-    worse than no warning.
-    """
-    mapping = load_map()
-    zoho_fields = {zoho for key, zoho in mapping.items()
-                   if zoho and key.startswith(_FLAT_TABLE_PREFIXES)}
-    return sum(1 for name in payload if name in zoho_fields)
-
-
 def push_candidate(db: Session, candidate: Candidate) -> dict:
     """Insert (first call) or update (every call after) this candidate's Zoho
     People record. Returns {"record_id", "status", "fields_pushed",
@@ -89,7 +66,7 @@ def push_candidate(db: Session, candidate: Candidate) -> dict:
             "the exact Zoho form (formLinkName) this button should write to, once "
             "the payload has round-tripped against it via the CLI.")
 
-    payload, _tabular, _skipped, unmapped, _subform_counts = build_full_payload(db, candidate)
+    payload, tabular, _skipped, unmapped, subform_counts = build_full_payload(db, candidate)
     if not payload:
         raise ZohoPushError(
             "Nothing to push — field_map.json has no mapped field with a value yet.")
@@ -130,15 +107,14 @@ def push_candidate(db: Session, candidate: Candidate) -> dict:
                 "is not linked to. Resolve it in Zoho first (or link it via the CLI's "
                 "--record-id) before publishing from here.")
 
-    # The record is written as a Zoho DRAFT, with flat fields + files only.
-    # Tabular sections (education/employment) are deliberately NOT sent yet:
-    # Zoho's tabularData write envelope is still unresolved, and a non-draft
-    # write would fail on those mandatory tables (error 7052). As a draft the
-    # record lands valid and editable, and HR completes the tables in Zoho
-    # when reviewing. `tabular` is built (for the CLI/experiments) but not sent.
+    # The record is written as a Zoho DRAFT: a non-draft write enforces every
+    # mandatory field on the form, including ones no local data answers
+    # (error 7052). As a draft it lands valid and editable for HR.
+    # Education/employment rows ARE sent — they ride inside inputData as
+    # column arrays, which build_full_payload has already merged in.
     _zc.log("push.request", source="hr-portal", form=form, candidate_id=candidate.id,
             email=email, record_id=record_id, fields=len(payload),
-            files=[f[0] for f in files], tabular_deferred=len(_subform_counts))
+            files=[f[0] for f in files], tabular_rows=subform_counts)
     try:
         response = (_zc.update_record(token, form, record_id, payload, files=files, draft=True)
                     if record_id
@@ -169,6 +145,6 @@ def push_candidate(db: Session, candidate: Candidate) -> dict:
         "status": "DRAFT",
         "fields_pushed": len(payload),
         "fields_unmapped": len(unmapped),
-        "tabular_deferred": len(_subform_counts),
-        "tabular_sent_flat": _flat_table_fields_sent(payload),
+        "tabular_columns": len(tabular),
+        "tabular_rows": sum(subform_counts.values()),
     }
