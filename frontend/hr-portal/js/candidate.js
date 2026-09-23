@@ -1367,21 +1367,50 @@ document.getElementById("approveBtn").addEventListener("click", async () => {
   }
 });
 
+// Rejecting ends the application for good, so it asks for the same
+// type-the-name confirmation the dashboard uses before deleting a candidate —
+// a misplaced click on a red button should not be able to close someone out.
+function closeRejectModal() {
+  document.getElementById("rejectModal").classList.add("hidden");
+}
+
 document.getElementById("rejectBtn").addEventListener("click", () => {
   if (!currentData) return;  // page never loaded — don't act on a stale id
+  document.getElementById("rejectCandName").textContent = currentData.name;
+  document.getElementById("rejectCandNameConfirm").textContent = currentData.name;
+  const input = document.getElementById("rejectConfirmInput");
+  input.value = "";
+  document.getElementById("rejectReason").value = "";
+  document.getElementById("confirmRejectBtn").disabled = true;
   document.getElementById("rejectModal").classList.remove("hidden");
+  input.focus();
+});
+
+document.getElementById("rejectConfirmInput").addEventListener("input", (e) => {
+  document.getElementById("confirmRejectBtn").disabled =
+    !currentData || e.target.value !== currentData.name;
 });
 
 document.getElementById("confirmRejectBtn").addEventListener("click", async () => {
+  // Re-check rather than trust the disabled attribute: currentData can have
+  // been reloaded under a stale modal.
+  if (!currentData ||
+      document.getElementById("rejectConfirmInput").value !== currentData.name) return;
+  const btn = document.getElementById("confirmRejectBtn");
+  btn.disabled = true;
+  btn.textContent = "Rejecting...";
   try {
     await apiFetch(`/hr/candidates/${candidateId}/reject`, {
       method: "POST",
       body: JSON.stringify({ reason: document.getElementById("rejectReason").value }),
     });
-    document.getElementById("rejectModal").classList.add("hidden");
+    closeRejectModal();
     await load();
   } catch (err) {
     showError(err.message);
+    btn.disabled = false;
+  } finally {
+    btn.textContent = "Reject Candidate";
   }
 });
 
