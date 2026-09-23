@@ -81,21 +81,6 @@ def main():
                           "reference2_name", "reference2_relation", "reference2_contact",
                           "consent_for_bgv"):
             conn.execute(text(f"ALTER TABLE bgv_details DROP COLUMN IF EXISTS {obsolete}"))
-        # Sequential flow: BGV must not sit open before the candidate's
-        # Document Collection has been approved. Candidates approved under the
-        # earlier rule (both forms opened at once) are corrected here. Only
-        # untouched (PENDING) BGV forms are re-locked, so nothing is lost.
-        conn.execute(text("""
-            UPDATE form_submissions bgv
-               SET status = 'LOCKED'
-             WHERE bgv.form_type = 'BGV'
-               AND bgv.status = 'PENDING'
-               AND NOT EXISTS (
-                     SELECT 1 FROM form_submissions doc
-                      WHERE doc.candidate_id = bgv.candidate_id
-                        AND doc.form_type = 'DOCUMENT_COLLECTION'
-                        AND doc.status = 'APPROVED')
-        """))
         # The audit log now records candidate edits too, so the HR actor is
         # no longer always set. Add the new columns before relaxing the old
         # constraint, and stamp every pre-existing row as an HR edit.

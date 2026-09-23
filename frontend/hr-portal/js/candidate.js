@@ -466,14 +466,25 @@ function render() {
     const sub = c.submissions.find(s => s.form_type === type);
     if (!sub) return;
     if (sub.status === "LOCKED") {
+      // Approving the documents no longer opens BGV by itself — HR decides
+      // whether this candidate needs it at all, so the card offers the send.
+      const docApproved = (c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION") || {})
+                            .status === "APPROVED";
+      const canSend = docApproved && c.stage !== "REJECTED";
       const wrap = document.createElement("div");
       wrap.className = "card section-card collapsed";
-      wrap.style.opacity = "0.7";
+      wrap.style.opacity = canSend ? "1" : "0.7";
       wrap.innerHTML = `<div class="section-title collapsible" onclick="toggleCollapse(this)">
-          <h3>${cfg.title} <span class="badge badge-locked">LOCKED</span></h3>
+          <h3>${cfg.title} <span class="badge badge-locked">NOT SENT</span></h3>
+          <div class="section-title-actions" onclick="event.stopPropagation()">
+            ${canSend ? `<button class="btn btn-primary btn-small"
+              onclick="sendForm('${type}')">Send Form</button>` : ""}
+          </div>
           <span class="chevron">&#9660;</span></div>
-        <p style="color:#6b7280;">Unlocks for the candidate once you approve their
-        Document Collection form above.</p>`;
+        <p style="color:#6b7280;">${canSend
+          ? "The candidate cannot see this form until you send it. If you do not need it, "
+            + "you can mark the onboarding complete without it."
+          : "Available once you approve their Document Collection form above."}</p>`;
       document.getElementById("followupForms").appendChild(wrap);
       return;
     }
@@ -489,11 +500,15 @@ function render() {
     const reviewControls = canReview && !editing ? `
       <button class="btn btn-success btn-small" onclick="reviewSubmission(${sub.id}, 'APPROVED')">Approve</button>
       <button class="btn btn-danger btn-small" onclick="reviewSubmission(${sub.id}, 'REJECTED')">Reject</button>` : "";
+    // Sent but still untouched, so access can be taken back. Once submitted
+    // the card holds the candidate's work and the button goes away.
+    const accessControls = sub.status === "PENDING" && c.stage !== "REJECTED" ? `
+      <button class="btn btn-outline btn-small" onclick="unsendForm('${type}')">Withdraw</button>` : "";
     wrap.innerHTML = `
       <div class="section-title collapsible" onclick="toggleCollapse(this)">
         <h3>${cfg.title} <span class="badge badge-${sub.status.toLowerCase()}">${sub.status.replaceAll("_"," ")}</span></h3>
         <div class="section-title-actions" onclick="event.stopPropagation()">
-          ${submitted ? formEditControls(type) : ""}${reviewControls}
+          ${submitted ? formEditControls(type) : ""}${reviewControls}${accessControls}
         </div>
         <span class="chevron">&#9660;</span>
       </div>
@@ -513,15 +528,24 @@ function render() {
     if (card) card.classList.remove("collapsed");
   });
 
-  // ---- Mark onboarding complete once both follow-ups are approved ----
+  // ---- Mark onboarding complete: documents approved is the only requirement ----
+  // BGV is optional, so the card appears as soon as the documents pass and
+  // says where BGV stands rather than waiting for it.
   if (c.stage === "APPROVED_FOR_BGV") {
-    const bgv = c.submissions.find(s => s.form_type === "BGV");
     const doc = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
-    if (bgv && doc && bgv.status === "APPROVED" && doc.status === "APPROVED") {
+    if (doc && doc.status === "APPROVED") {
+      const bgv = c.submissions.find(s => s.form_type === "BGV");
+      const bgvNote =
+        !bgv || bgv.status === "LOCKED"
+          ? "BGV has not been sent. Complete the onboarding now if you do not need it."
+        : bgv.status === "APPROVED"
+          ? "BGV is approved."
+          : `BGV is ${bgv.status.replaceAll("_", " ").toLowerCase()}. `
+            + "You can still complete the onboarding without it.";
       const wrap = document.createElement("div");
       wrap.className = "card section-card";
       wrap.innerHTML = `<div class="section-title"><h3>Onboarding</h3></div>
-        <p style="color:#6b7280;">Both BGV and Document Collection are approved.</p>
+        <p style="color:#6b7280;">Document Collection is approved. ${bgvNote}</p>
         <button class="btn btn-success" onclick="markComplete()">Mark Onboarding Complete</button>`;
       document.getElementById("followupForms").appendChild(wrap);
     }
@@ -1353,11 +1377,41 @@ async function markComplete() {
   }
 }
 
+// Opening a form for the candidate. Only BGV surfaces this today: the CIF
+// opens at invite and Document Collection on approval, while BGV is the one
+// HR may or may not want.
+async function unsendForm(formType) {
+  const title = FORM_TITLES[formType] || formType;
+  if (!await showConfirm(
+        `Withdraw the ${title} form? The candidate will no longer see it, and anything `
+        + `they have typed but not submitted stays as an unsent draft.`,
+        { confirmText: "Withdraw" })) return;
+  try {
+    await apiFetch(`/hr/candidates/${candidateId}/forms/${formType}/unsend`, { method: "POST" });
+    await load();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function sendForm(formType) {
+  const title = FORM_TITLES[formType] || formType;
+  if (!await showConfirm(`Send the ${title} form to this candidate?`,
+                          { confirmText: "Send Form" })) return;
+  try {
+    await apiFetch(`/hr/candidates/${candidateId}/forms/${formType}/send`, { method: "POST" });
+    await load();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
 // Deleting an invitation is done from the dashboard list, not here.
 
 document.getElementById("approveBtn").addEventListener("click", async () => {
   if (!currentData) return;  // page never loaded — don't act on a stale id
-  if (!await showConfirm("The Document Collection form will be unlocked. BGV opens once you approve their documents.",
+  if (!await showConfirm("The Document Collection form will be unlocked. Once you approve "
+      + "those documents you can send the BGV form, or finish the onboarding without it.",
       { title: "Approve this candidate?", confirmText: "Approve" })) return;
   try {
     await apiFetch(`/hr/candidates/${candidateId}/approve`, { method: "POST", body: JSON.stringify({}) });
