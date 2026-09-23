@@ -26,7 +26,10 @@ const CIF_FIELDS = [
   "variable_comp", "notice_period_days", "other_offers",
   "technical_certifications", "understanding_of_levelshift", "aspirations",
   "declaration_accepted", "declaration_place", "declaration_date",
-  "hr_candidate_id", "hr_candidate_email",
+  // hr_candidate_id / hr_candidate_email are deliberately not listed: nothing
+  // writes them (they are on no form, and HR cannot open them to the
+  // candidate), so they only ever rendered as "Not provided". The columns and
+  // their labels below are kept so old values still read back.
 ];
 
 const BGV_FIELDS = [

@@ -692,7 +692,7 @@ def approve_candidate(candidate_id: int, payload: DecisionRequest, db: Session =
     candidate.stage = CandidateStage.APPROVED_FOR_BGV
     db.commit()
     return {"detail": "Candidate approved. The Document Collection form is now unlocked. "
-                       "BGV opens once you approve their documents."}
+                       "BGV is sent separately, once you have approved those documents."}
 
 
 @router.post("/candidates/{candidate_id}/reject")
@@ -725,17 +725,16 @@ def mark_onboarding_complete(candidate_id: int, db: Session = Depends(get_db),
         raise HTTPException(status_code=404, detail="Candidate not found")
     if candidate.stage != CandidateStage.APPROVED_FOR_BGV:
         raise HTTPException(status_code=400, detail="Candidate is not in the BGV/Document stage")
-    # "Complete" must mean both follow-up forms were actually reviewed and
-    # approved — not merely that the stage was reached.
+    # The documents still have to be approved — that is the review this stage
+    # exists for. BGV does not: whether it is needed at all is HR's call, so a
+    # BGV that was never sent, or is still with the candidate, does not block.
     approved = {s.form_type for s in db.query(FormSubmission).filter(
         FormSubmission.candidate_id == candidate_id,
         FormSubmission.status == FormStatus.APPROVED).all()}
-    pending = [ft.value for ft in (FormType.DOCUMENT_COLLECTION, FormType.BGV)
-                if ft not in approved]
-    if pending:
+    if FormType.DOCUMENT_COLLECTION not in approved:
         raise HTTPException(status_code=400,
-                             detail="Cannot mark complete: these forms are not approved yet: "
-                                    + ", ".join(pending))
+                             detail="Cannot mark complete: the Document Collection form has "
+                                    "not been approved yet.")
     candidate.stage = CandidateStage.ONBOARDING_COMPLETE
     db.commit()
     return {"detail": "Onboarding marked complete"}
@@ -830,25 +829,63 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
     submission.reviewed_at = datetime.now(timezone.utc)
     submission.reviewed_by_hr_id = current.id
 
-    # Sequential gate: approving Document Collection unlocks BGV.
-    unlocked_bgv = False
+    # Approving the documents used to open BGV automatically. It no longer
+    # does: BGV is not always wanted, so once the documents are approved HR
+    # chooses between sending BGV (/candidates/{id}/forms/BGV/send) and
+    # finishing the onboarding there and then.
+    db.commit()
     if (submission.form_type == FormType.DOCUMENT_COLLECTION
             and submission.status == FormStatus.APPROVED):
-        bgv = db.query(FormSubmission).filter(
-            FormSubmission.candidate_id == submission.candidate_id,
-            FormSubmission.form_type == FormType.BGV).first()
-        if not bgv:
-            db.add(FormSubmission(candidate_id=submission.candidate_id,
-                                   form_type=FormType.BGV, status=FormStatus.PENDING))
-            unlocked_bgv = True
-        elif bgv.status == FormStatus.LOCKED:
-            bgv.status = FormStatus.PENDING
-            unlocked_bgv = True
-
-    db.commit()
-    if unlocked_bgv:
-        return {"detail": "Documents approved. The BGV form is now unlocked for the candidate."}
+        return {"detail": "Documents approved. Send the BGV form if you need it, "
+                           "or mark the onboarding complete."}
     return {"detail": "Submission reviewed"}
+
+
+# ---------------------------------------------------------------------------
+# Opening a form for the candidate
+#
+# A form is open when its FormSubmission row is PENDING and withheld when it
+# is LOCKED, which is what FormStatus.LOCKED has always meant. Today only BGV
+# reaches HR as a choice — the CIF opens at invite and Document Collection on
+# approval — but nothing here is BGV-specific.
+# ---------------------------------------------------------------------------
+
+@router.post("/candidates/{candidate_id}/forms/{form_type}/send")
+def send_form(candidate_id: int, form_type: str, db: Session = Depends(get_db),
+               current: HRUser = Depends(get_current_hr)):
+    """Open one form for the candidate to fill in."""
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    try:
+        form = FormType(form_type)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Unknown form")
+    if candidate.stage == CandidateStage.REJECTED:
+        raise HTTPException(status_code=400,
+                             detail="This candidate is rejected — no form can be sent.")
+
+    submission = db.query(FormSubmission).filter(
+        FormSubmission.candidate_id == candidate_id,
+        FormSubmission.form_type == form).first()
+    title = edit_access.form_title(form_type)
+    if submission is None:
+        db.add(FormSubmission(candidate_id=candidate_id, form_type=form,
+                              status=FormStatus.PENDING))
+    elif submission.status == FormStatus.LOCKED:
+        submission.status = FormStatus.PENDING
+    elif submission.status == FormStatus.PENDING:
+        return {"detail": f"{title} is already open for this candidate."}
+    else:
+        # Submitted, approved or rejected: re-opening would put the record HR
+        # reviewed back in the candidate's hands. Field-level edit access is
+        # the supported way to change something at that point.
+        raise HTTPException(
+            status_code=400,
+            detail=f"The candidate has already submitted their {title} form. "
+                    "Open individual fields instead if something needs correcting.")
+    db.commit()
+    return {"detail": f"{title} sent to the candidate."}
 
 
 # ---------------------------------------------------------------------------
