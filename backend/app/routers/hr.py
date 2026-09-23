@@ -888,6 +888,36 @@ def send_form(candidate_id: int, form_type: str, db: Session = Depends(get_db),
     return {"detail": f"{title} sent to the candidate."}
 
 
+@router.post("/candidates/{candidate_id}/forms/{form_type}/unsend")
+def unsend_form(candidate_id: int, form_type: str, db: Session = Depends(get_db),
+                 current: HRUser = Depends(get_current_hr)):
+    """Take back a form the candidate has not filled in yet."""
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    try:
+        form = FormType(form_type)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Unknown form")
+
+    submission = db.query(FormSubmission).filter(
+        FormSubmission.candidate_id == candidate_id,
+        FormSubmission.form_type == form).first()
+    title = edit_access.form_title(form_type)
+    if submission is None or submission.status == FormStatus.LOCKED:
+        return {"detail": f"{title} is not open for this candidate."}
+    if submission.status != FormStatus.PENDING:
+        # Only an untouched form can be taken back. Past that it holds the
+        # candidate's work, and HR may still need to review it.
+        raise HTTPException(
+            status_code=400,
+            detail=f"The candidate has already submitted their {title} form, "
+                    "so access can no longer be withdrawn.")
+    submission.status = FormStatus.LOCKED
+    db.commit()
+    return {"detail": f"{title} withdrawn — the candidate can no longer see it."}
+
+
 # ---------------------------------------------------------------------------
 # Documents
 # ---------------------------------------------------------------------------

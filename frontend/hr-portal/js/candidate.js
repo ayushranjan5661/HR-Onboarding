@@ -500,11 +500,15 @@ function render() {
     const reviewControls = canReview && !editing ? `
       <button class="btn btn-success btn-small" onclick="reviewSubmission(${sub.id}, 'APPROVED')">Approve</button>
       <button class="btn btn-danger btn-small" onclick="reviewSubmission(${sub.id}, 'REJECTED')">Reject</button>` : "";
+    // Sent but still untouched, so access can be taken back. Once submitted
+    // the card holds the candidate's work and the button goes away.
+    const accessControls = sub.status === "PENDING" && c.stage !== "REJECTED" ? `
+      <button class="btn btn-outline btn-small" onclick="unsendForm('${type}')">Withdraw</button>` : "";
     wrap.innerHTML = `
       <div class="section-title collapsible" onclick="toggleCollapse(this)">
         <h3>${cfg.title} <span class="badge badge-${sub.status.toLowerCase()}">${sub.status.replaceAll("_"," ")}</span></h3>
         <div class="section-title-actions" onclick="event.stopPropagation()">
-          ${submitted ? formEditControls(type) : ""}${reviewControls}
+          ${submitted ? formEditControls(type) : ""}${reviewControls}${accessControls}
         </div>
         <span class="chevron">&#9660;</span>
       </div>
@@ -1376,6 +1380,20 @@ async function markComplete() {
 // Opening a form for the candidate. Only BGV surfaces this today: the CIF
 // opens at invite and Document Collection on approval, while BGV is the one
 // HR may or may not want.
+async function unsendForm(formType) {
+  const title = FORM_TITLES[formType] || formType;
+  if (!await showConfirm(
+        `Withdraw the ${title} form? The candidate will no longer see it, and anything `
+        + `they have typed but not submitted stays as an unsent draft.`,
+        { confirmText: "Withdraw" })) return;
+  try {
+    await apiFetch(`/hr/candidates/${candidateId}/forms/${formType}/unsend`, { method: "POST" });
+    await load();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
 async function sendForm(formType) {
   const title = FORM_TITLES[formType] || formType;
   if (!await showConfirm(`Send the ${title} form to this candidate?`,
