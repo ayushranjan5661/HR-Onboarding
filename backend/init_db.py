@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
-from app.models import HRUser
+from app.models import HRUser, StaffRole
 from app.security import hash_password
 
 
@@ -109,6 +109,41 @@ def main():
         conn.execute(text("ALTER TABLE field_edit_log ADD COLUMN IF NOT EXISTS "
                            "new_file_id INTEGER"))
 
+        # Staff hierarchy: Super Admin > Manager > HR Executive, one table.
+        # Existing rows are HR Executives without a team (visible only to the
+        # Super Admin until moved under a Manager); the seed account becomes
+        # the Super Admin.
+        conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS role VARCHAR(20) "
+                           "NOT NULL DEFAULT 'HR'"))
+        conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS manager_id INTEGER"))
+        conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS created_by_id INTEGER"))
+        conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS temp_password_enc TEXT"))
+        conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS must_reset_password "
+                           "BOOLEAN NOT NULL DEFAULT FALSE"))
+        conn.execute(text("UPDATE hr_users SET role = 'SUPER_ADMIN' WHERE email = :e"),
+                     {"e": settings.SEED_HR_EMAIL})
+        # Candidate ownership: who invited stays fixed; who owns can move.
+        conn.execute(text("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS assigned_hr_id INTEGER"))
+        conn.execute(text("UPDATE candidates SET assigned_hr_id = created_by_hr_id "
+                           "WHERE assigned_hr_id IS NULL"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_candidates_assigned_hr_id "
+                           "ON candidates (assigned_hr_id)"))
+        for name, ddl in (
+            ("fk_hr_users_manager", "ALTER TABLE hr_users ADD CONSTRAINT fk_hr_users_manager "
+                                    "FOREIGN KEY (manager_id) REFERENCES hr_users(id)"),
+            ("fk_hr_users_created_by", "ALTER TABLE hr_users ADD CONSTRAINT fk_hr_users_created_by "
+                                       "FOREIGN KEY (created_by_id) REFERENCES hr_users(id)"),
+            ("fk_candidates_assigned_hr", "ALTER TABLE candidates ADD CONSTRAINT "
+                                          "fk_candidates_assigned_hr FOREIGN KEY (assigned_hr_id) "
+                                          "REFERENCES hr_users(id)"),
+        ):
+            conn.execute(text(f"DO $$ BEGIN {ddl}; EXCEPTION WHEN duplicate_object "
+                              "THEN NULL; END $$"))
+        # A deleted staff user must not be pinned in place by permissions they
+        # once granted; the audit trail keeps the grant, minus the name.
+        conn.execute(text("ALTER TABLE field_edit_permissions ALTER COLUMN granted_by_hr_id "
+                           "DROP NOT NULL"))
+
         # Bring every existing table up to date with its model.
         _sync_columns(conn)
 
@@ -120,12 +155,16 @@ def main():
                 name=settings.SEED_HR_NAME,
                 email=settings.SEED_HR_EMAIL,
                 password_hash=hash_password(settings.SEED_HR_PASSWORD),
+                role=StaffRole.SUPER_ADMIN.value,
             ))
             db.commit()
-            print(f"Tables created. Seeded HR login -> {settings.SEED_HR_EMAIL} / {settings.SEED_HR_PASSWORD}")
+            print(f"Tables created. Seeded Super Admin login -> {settings.SEED_HR_EMAIL} / {settings.SEED_HR_PASSWORD}")
             print("Change this password after first login (set SEED_HR_* in .env before first run to customize).")
         else:
-            print("Tables created/verified. Seed HR user already exists.")
+            if existing.role != StaffRole.SUPER_ADMIN.value:
+                existing.role = StaffRole.SUPER_ADMIN.value
+                db.commit()
+            print("Tables created/verified. Seed Super Admin already exists.")
     finally:
         db.close()
 

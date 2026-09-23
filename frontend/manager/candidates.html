@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manager Portal — Candidates</title>
+<link rel="stylesheet" href="../hr-portal/css/style.css?v=20260923a">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-brand"><span class="brand-mark">LS</span><span>Manager Portal</span></div>
+      <nav class="sidebar-nav">
+        <a href="candidates.html" class="nav-item active"><span class="nav-dot"></span> Candidates</a>
+        <a href="team.html" class="nav-item"><span class="nav-dot"></span> My Team</a>
+        <a href="audit.html" class="nav-item"><span class="nav-dot"></span> Audit Trail</a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="user-chip">
+          <span class="avatar" id="whoamiAvatar"></span>
+          <span class="user-name"><span id="whoami"></span><span class="user-role" id="whoamiRole"></span></span>
+        </div>
+        <a class="back-link" href="../change-password.html" style="display:block;margin:0 0 8px 2px;font-size:0.78rem;">Change password</a>
+        <button class="logout-btn" onclick="staffLogout()">Log out</button>
+      </div>
+    </aside>
+
+    <div class="main-area">
+      <div class="container" id="pageContent"></div>
+    </div>
+  </div>
+
+  <script src="../js/config.js?v=20260923a"></script>
+  <script src="../hr-portal/js/api.js?v=20260923a"></script>
+  <script src="../js/staff-ui.js?v=20260923a"></script>
+  <script src="../js/staff-candidates.js?v=20260923a"></script>
+  <script>initCandidatesPage("manager").catch(err => alert(err.message));</script>
+</body>
+</html>

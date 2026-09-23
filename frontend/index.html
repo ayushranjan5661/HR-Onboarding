@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LevelShift Onboarding — Login</title>
-<link rel="stylesheet" href="hr-portal/css/style.css?v=20260825j">
+<link rel="stylesheet" href="hr-portal/css/style.css?v=20260923a">
 </head>
 <body>
   <div class="login-wrap">
@@ -13,10 +13,10 @@
     <div class="login-shell">
       <div class="login-card">
         <h1>Welcome back</h1>
-        <p class="sub">One login for HR and candidates. Pick your role below.</p>
+        <p class="sub">One login for staff and candidates. Pick your role below.</p>
 
         <div class="role-tabs" id="roleTabs">
-          <button type="button" class="role-tab active" id="tabHr" onclick="setRole('hr')">HR</button>
+          <button type="button" class="role-tab active" id="tabStaff" onclick="setRole('staff')">Staff</button>
           <button type="button" class="role-tab" id="tabCandidate" onclick="setRole('candidate')">Candidate</button>
         </div>
 
@@ -27,7 +27,7 @@
           <input type="email" id="email" placeholder="you@example.com" required autocomplete="username">
           <label for="password">Password</label>
           <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password">
-          <button class="btn btn-primary btn-block" type="submit" id="loginBtn">Log in as HR</button>
+          <button class="btn btn-primary btn-block" type="submit" id="loginBtn">Log in</button>
           <div class="error-msg" id="errorMsg"></div>
         </form>
       </div>
@@ -36,15 +36,25 @@
     <div class="login-foot">© LevelShift · Internal Use</div>
   </div>
 
-  <script src="js/config.js?v=20260825j"></script>
+  <script src="js/config.js?v=20260923a"></script>
   <script>
-    let role = "hr";
+    // "staff" covers Super Admin, Manager and HR Executive: the server tells
+    // us which after login, and that decides where the user lands. There is
+    // no role picker for staff on purpose — the account is the role.
+    let role = "staff";
+
+    // Where each staff role lands, relative to this page.
+    const STAFF_HOME = {
+      SUPER_ADMIN: "super-admin/users.html",
+      MANAGER: "manager/candidates.html",
+      HR: "hr-portal/dashboard.html",
+    };
 
     function setRole(r) {
       role = r;
-      document.getElementById("tabHr").classList.toggle("active", r === "hr");
+      document.getElementById("tabStaff").classList.toggle("active", r === "staff");
       document.getElementById("tabCandidate").classList.toggle("active", r === "candidate");
-      document.getElementById("loginBtn").textContent = r === "hr" ? "Log in as HR" : "Log in as Candidate";
+      document.getElementById("loginBtn").textContent = r === "staff" ? "Log in" : "Log in as Candidate";
     }
 
     // Invite links open this page as index.html?role=candidate&email=...&next=form
@@ -147,10 +157,16 @@
           throw new Error(typeof data.detail === "string" ? data.detail : "Login failed — check your email and password");
         }
 
-        if (role === "hr") {
-          sessionStorage.setItem("hr_token", data.access_token);
-          sessionStorage.setItem("hr_name", data.name);
-          window.location.href = "hr-portal/dashboard.html";
+        if (role === "staff") {
+          sessionStorage.setItem("staff_token", data.access_token);
+          sessionStorage.setItem("staff_name", data.name);
+          sessionStorage.setItem("staff_role", data.role);
+          // A system-generated password has to be replaced before anything else.
+          if (data.must_reset_password) {
+            window.location.href = "change-password.html?forced=1";
+            return;
+          }
+          window.location.href = STAFF_HOME[data.role] || STAFF_HOME.HR;
         } else {
           sessionStorage.setItem("candidate_token", data.access_token);
           sessionStorage.setItem("candidate_name", data.name);

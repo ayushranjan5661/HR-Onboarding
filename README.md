@@ -7,8 +7,36 @@ HR reviews those and closes out onboarding.
 
 ## Stack
 - Backend: FastAPI + PostgreSQL (SQLAlchemy), JWT auth, two independent login
-  systems (HR vs Candidate).
-- Frontend: static HTML/CSS/JS — two separate portals, no build step.
+  systems (staff vs Candidate).
+- Frontend: static HTML/CSS/JS — four portals (Super Admin, Manager, HR,
+  Candidate), no build step.
+
+## Staff roles
+One staff table (`hr_users`), one login (`/auth/staff/login`); the account's
+role decides the landing page and what the server lets it see.
+
+| Role | Who | Sees | Can do |
+| --- | --- | --- | --- |
+| `SUPER_ADMIN` | the seeded account | every candidate | create / deactivate / delete Managers and HR Executives, reset any staff password, move an HR between teams, reassign any candidate, global audit |
+| `MANAGER` | team lead | own + team candidates | create / deactivate / delete HR Executives in own team, invite candidates for any team member, reassign within team, everything an HR can do on team candidates, team audit |
+| `HR` | HR Executive | candidates assigned to them | invite, review, approve / reject, send / withdraw forms, edit access |
+
+Rules enforced server-side (`app/scope.py`, `app/staff_service.py`):
+- A candidate outside the caller's scope answers **404** on every `/hr` route,
+  including the ones keyed by submission / document / row id.
+- Ownership is `candidates.assigned_hr_id` (moves on reassignment);
+  `created_by_hr_id` records who invited and never changes.
+- Deleting a staff user is blocked while they own candidates or lead HRs.
+  Reassign / move first, or deactivate.
+- New staff get a generated password shown once; they must change it on first
+  login (`must_reset_password` → every other call returns
+  `403 PASSWORD_RESET_REQUIRED`).
+- An HR with no Manager (rows from before teams existed) is visible only to
+  the Super Admin until moved into a team.
+- Staff-hierarchy changes are written to `staff_audit_log`.
+
+Portals: `frontend/super-admin/`, `frontend/manager/`, `frontend/hr-portal/`.
+The candidate detail page (`hr-portal/candidate.html`) is shared by all three.
 - Files (Aadhaar/PAN/mark sheets/resume/etc.) are stored on disk under
   `backend/uploads/`, referenced from Postgres.
 
@@ -38,11 +66,11 @@ HR-Onboarding/
 │  │  └─ utils/
 │  │     └─ file_storage.py    upload validation, safe storage, document snapshots
 │  ├─ uploads/                 candidate files + retained versions (gitignored)
-│  ├─ init_db.py               creates tables, runs light migrations, seeds the first HR login
+│  ├─ init_db.py               creates tables, runs light migrations, seeds the Super Admin login
 │  ├─ requirements.txt
 │  └─ .env.example
 ├─ frontend/                   static — no build step; serve this folder as ONE site
-│  ├─ index.html               the only login page; HR / Candidate role toggle
+│  ├─ index.html               the only login page; Staff / Candidate toggle, routes staff by role
 │  ├─ js/
 │  │  ├─ config.js             API_BASE — the single place the backend URL is set
 │  │  └─ field-labels.js       field labels + section titles, shared by both portals
@@ -76,7 +104,8 @@ HR-Onboarding/
 ### Data model
 | Table | What it holds |
 | --- | --- |
-| `hr_users` | HR logins |
+| `hr_users` | every staff login: `role`, `manager_id` (HR → Manager), `must_reset_password` |
+| `staff_audit_log` | staff create / deactivate / delete / reset / move, candidate reassignment |
 | `candidates` | candidate login, stage, type, invite token |
 | `candidate_profiles` | identity fields shared by every form |
 | `form_submissions` | one row per form: status, submitted/reviewed timestamps |
@@ -117,8 +146,8 @@ Serve the whole `frontend/` folder as ONE static site (single entry point):
 cd frontend
 python -m http.server 5500
 ```
-Open **http://127.0.0.1:5500/index.html** — one login page with an HR /
-Candidate role toggle.
+Open **http://127.0.0.1:5500/index.html** — one login page with a Staff /
+Candidate toggle. Staff land in the portal for their role.
 
 **Ports must match in three places** — a mismatch shows up in the browser as
 a bare "Failed to fetch" on login:
