@@ -44,11 +44,6 @@
         Your personal details are carried over from your CIF and are not asked again.
       </p>
 
-      <div class="form-section">
-        <h3>Your Details (from CIF)</h3>
-        <div id="prefill"></div>
-      </div>
-
       <form id="bgvForm" enctype="multipart/form-data">
 
         <div class="form-section">
@@ -85,7 +80,7 @@
             <div><label>UAN (Universal Account Number, EPFO)</label>
               <input name="uan_number" placeholder="12-digit UAN, if allotted"></div>
             <div><label>Passport Number</label><input name="passport_number"></div>
-            <div><label>Passport Expiry</label><input type="date" name="passport_expiry"></div>
+            <div><label>Passport Expiry</label><input data-date name="passport_expiry"></div>
             <div><label>Driving Licence Number</label><input name="driving_licence_number"></div>
           </div>
         </div>
@@ -205,7 +200,7 @@
             <div><label>Signature</label><input type="file" name="bgv_signature" accept=".jpg,.jpeg,.png,.gif">
               <div class="file-hint">JPG, PNG or GIF</div></div>
             <div><label>Place *</label><input name="declaration_place" required></div>
-            <div><label>Date</label><input type="date" name="declaration_date"></div>
+            <div><label>Date</label><input data-date name="declaration_date"></div>
           </div>
         </div>
 
@@ -220,10 +215,10 @@
   </div>
 
   <script src="../js/config.js?v=20260901b"></script>
+  <script src="../js/date-format.js?v=20260922d"></script>
   <script src="js/api.js?v=20260901b"></script>
   <script src="js/dialog.js?v=20260901b"></script>
   <script src="js/doc-viewer.js?v=20260901b"></script>
-  <script src="js/prefill.js?v=20260901b"></script>
   <script src="js/edit-mode.js?v=20260901b"></script>
   <script src="js/auto-fill.js?v=20260901b"></script>
   <script src="js/draft.js?v=20260901b"></script>
@@ -247,11 +242,11 @@
     });
 
     const ROW_TEMPLATES = {
-      addrTable: "<td><select data-k=\"address_type\"><option value=\"\">Select</option><option>Current</option><option>Permanent</option><option>Previous</option></select></td><td><input data-k=\"full_address\"></td><td><input data-k=\"city\"></td><td><input data-k=\"state\"></td><td><input data-k=\"pin_code\"></td><td><input type=\"date\" data-k=\"from_date\"></td><td><input type=\"date\" data-k=\"to_date\"></td><td><select data-k=\"residence_type\"><option value=\"\">Select</option><option>Owned</option><option>Rented</option><option>Family</option><option>PG / Hostel</option></select></td><td><input data-k=\"verifier_name\"></td><td><input data-k=\"verifier_contact\"></td><td><input data-k=\"nearest_police_station\"></td>",
+      addrTable: "<td><select data-k=\"address_type\"><option value=\"\">Select</option><option>Current</option><option>Permanent</option><option>Previous</option></select></td><td><input data-k=\"full_address\"></td><td><input data-k=\"city\"></td><td><input data-k=\"state\"></td><td><input data-k=\"pin_code\"></td><td><input data-date data-k=\"from_date\"></td><td><input data-date data-k=\"to_date\"></td><td><select data-k=\"residence_type\"><option value=\"\">Select</option><option>Owned</option><option>Rented</option><option>Family</option><option>PG / Hostel</option></select></td><td><input data-k=\"verifier_name\"></td><td><input data-k=\"verifier_contact\"></td><td><input data-k=\"nearest_police_station\"></td>",
       eduTable: "<td><input data-k=\"qualification\"></td><td><input data-k=\"institution\"></td><td><input data-k=\"university_board\"></td><td><input data-k=\"roll_number\"></td><td><input data-k=\"registration_number\"></td><td><input data-k=\"year_of_passing\" placeholder=\"e.g. May 2022\"></td><td><input data-k=\"course_name\"></td><td><input data-k=\"field_of_study\"></td><td><input data-k=\"grade_percentage\"></td><td><input data-k=\"course_length\" placeholder=\"e.g. 2 years\"></td><td><select data-k=\"study_mode\"><option value=\"\">Select</option><option>Full-time</option><option>Part-time</option><option>Distance</option><option>Correspondence</option></select></td><td><input data-k=\"verification_contact\"></td>",
-      empTable: "<td><input data-k=\"company_name\"></td><td><input data-k=\"company_address\"></td><td><input data-k=\"last_working_city\"></td><td><input data-k=\"employee_id\"></td><td><input data-k=\"name_as_per_company_records\"></td><td><input data-k=\"designation_joining\"></td><td><input data-k=\"designation_leaving\"></td><td><input data-k=\"job_description\"></td><td><input type=\"date\" data-k=\"from_date\"></td><td><input type=\"date\" data-k=\"to_date\"></td><td><select data-k=\"employment_type\"><option value=\"\">Select</option><option>Permanent</option><option>Contract</option><option>Third-party payroll</option><option>Internship</option></select></td><td><input data-k=\"payroll_company\"></td><td><input data-k=\"last_drawn_ctc\"></td><td><input data-k=\"manager_name\"></td><td><input data-k=\"manager_designation\"></td><td><input type=\"email\" data-k=\"manager_email\"></td><td><input data-k=\"manager_phone\"></td><td><input data-k=\"hr_name\"></td><td><input type=\"email\" data-k=\"hr_email\"></td><td><input data-k=\"hr_phone\"></td><td><input data-k=\"reason_for_leaving\"></td><td><select data-k=\"eligible_for_rehire\"><option value=\"\">Select</option><option>Yes</option><option>No</option><option>Not sure</option></select></td><td><select data-k=\"may_contact_now\"><option value=\"\">Select</option><option>Yes</option><option>No</option></select></td>",
+      empTable: "<td><input data-k=\"company_name\"></td><td><input data-k=\"company_address\"></td><td><input data-k=\"last_working_city\"></td><td><input data-k=\"employee_id\"></td><td><input data-k=\"name_as_per_company_records\"></td><td><input data-k=\"designation_joining\"></td><td><input data-k=\"designation_leaving\"></td><td><input data-k=\"job_description\"></td><td><input data-date data-k=\"from_date\"></td><td><input data-date data-k=\"to_date\"></td><td><select data-k=\"employment_type\"><option value=\"\">Select</option><option>Permanent</option><option>Contract</option><option>Third-party payroll</option><option>Internship</option></select></td><td><input data-k=\"payroll_company\"></td><td><input data-k=\"last_drawn_ctc\"></td><td><input data-k=\"manager_name\"></td><td><input data-k=\"manager_designation\"></td><td><input type=\"email\" data-k=\"manager_email\"></td><td><input data-k=\"manager_phone\"></td><td><input data-k=\"hr_name\"></td><td><input type=\"email\" data-k=\"hr_email\"></td><td><input data-k=\"hr_phone\"></td><td><input data-k=\"reason_for_leaving\"></td><td><select data-k=\"eligible_for_rehire\"><option value=\"\">Select</option><option>Yes</option><option>No</option><option>Not sure</option></select></td><td><select data-k=\"may_contact_now\"><option value=\"\">Select</option><option>Yes</option><option>No</option></select></td>",
       refTable: "<td><input data-k=\"name\"></td><td><input data-k=\"designation\"></td><td><input data-k=\"company\"></td><td><select data-k=\"relationship\"><option value=\"\">Select</option><option>Reporting Manager</option><option>Colleague</option><option>Client</option><option>Professor</option></select></td><td><input type=\"email\" data-k=\"email\"></td><td><input data-k=\"phone\"></td><td><input data-k=\"years_known\"></td>",
-      gapTable: "<td><select data-k=\"gap_type\"><option value=\"\">Select</option><option>Education</option><option>Employment</option></select></td><td><input type=\"date\" data-k=\"from_date\"></td><td><input type=\"date\" data-k=\"to_date\"></td><td><input data-k=\"duration\" placeholder=\"e.g. 4 months\"></td><td><input data-k=\"reason\"></td>",
+      gapTable: "<td><select data-k=\"gap_type\"><option value=\"\">Select</option><option>Education</option><option>Employment</option></select></td><td><input data-date data-k=\"from_date\"></td><td><input data-date data-k=\"to_date\"></td><td><input data-k=\"duration\" placeholder=\"e.g. 4 months\"></td><td><input data-k=\"reason\"></td>",
     };
 
     function delRow(btn) { btn.closest("tr").remove(); }
@@ -266,6 +261,7 @@
         });
       }
       document.querySelector("#" + tableId + " tbody").appendChild(tr);
+      attachDateInputs(tr);   // carried-over CIF dates may still be yyyy-mm-dd
     }
 
     function collectRows(tableId) {
@@ -318,7 +314,6 @@
 
     (async () => {
       const data = await apiFetch("/candidate/me/status");
-      renderPrefill(data.profile, document.getElementById("prefill"));
 
       const bgv = data.forms.find(f => f.form_type === "BGV");
       if (!bgv || bgv.status === "LOCKED") {
@@ -371,7 +366,8 @@
         const cif = await apiFetch("/candidate/me/cif-summary");
         (cif.education || []).forEach(e => {
           addRow("eduTable", {
-            qualification: e.qualification, institution: e.course_college,
+            qualification: e.qualification, institution: e.college_name,
+            field_of_study: e.specialization,
             year_of_passing: e.year_of_passing,
           });
           out.education++;

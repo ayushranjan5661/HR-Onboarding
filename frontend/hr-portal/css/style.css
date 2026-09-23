@@ -391,7 +391,10 @@ tbody tr:last-child td { border-bottom: none; }
 .section-card.collapsed > *:not(.section-title) { display: none; }
 
 /* Whole-form edit controls that sit in a section header, next to the chevron. */
-.section-title-actions { display: flex; gap: 8px; margin-left: auto; }
+.section-title-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+/* The title bar carries the title, a status badge and up to four buttons —
+   let the title give way rather than pushing the decision buttons off-screen. */
+.section-title h3 { min-width: 0; }
 
 /* Inputs rendered in place of values while a section is in edit mode. */
 .field-row .fval .edit-input { width: 100%; margin: 0; }
@@ -400,7 +403,16 @@ table .edit-input { min-width: 120px; margin: 0; padding: 6px 8px; font-size: 0.
 /* ---------------------------------------------------------------------
    AI Summary & Flags
 --------------------------------------------------------------------- */
-.insight-summary { line-height: 1.6; color: var(--text); margin: 0 0 14px; white-space: pre-line; }
+.insight-summary { color: var(--text); margin: 0 0 14px; }
+.insight-summary .summary-lead { margin: 0 0 10px; font-weight: 600; line-height: 1.5; }
+.insight-summary .summary-row { display: flex; gap: 14px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--border); }
+.insight-summary .summary-row:first-child { border-top: none; }
+.insight-summary .summary-label { flex: 0 0 150px; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700; }
+.insight-summary .summary-value { flex: 1; min-width: 0; line-height: 1.55; font-size: 0.89rem; }
+@media (max-width: 720px) {
+  .insight-summary .summary-row { flex-direction: column; gap: 2px; }
+  .insight-summary .summary-label { flex: none; }
+}
 .insight-flags { display: flex; flex-direction: column; gap: 8px; }
 .insight-flag { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); transition: box-shadow var(--ease); }
 .insight-flag:hover { box-shadow: var(--shadow-sm); }

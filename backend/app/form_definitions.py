@@ -22,6 +22,7 @@ CIF_FIELDS = [
     "position_applied_for", "skills_technologies",
     "alternate_email", "blood_group", "linkedin_link", "marital_status",
     "any_backlogs", "source", "worked_in_levelshift_before",
+    "levelshift_employee_id", "levelshift_experience_yrs",
     "total_experience_yrs", "relevant_skill_exp_yrs",
     "current_ctc_lpa", "expected_ctc_lpa", "additional_allowance",
     "variable_comp", "notice_period_days", "other_offers",
@@ -31,7 +32,7 @@ CIF_FIELDS = [
 ]
 CIF_FILE_FIELDS = ["profile_picture", "signature"]
 
-EDUCATION_COLUMNS = ["qualification", "course_college", "cgpa_percent",
+EDUCATION_COLUMNS = ["qualification", "college_name", "specialization", "cgpa_percent",
                       "year_of_passing", "has_marksheet", "gaps"]
 EDUCATION_SECTIONS = {"education_ug_pg": "UG_PG", "education_12th": "12TH", "education_10th": "10TH"}
 
@@ -189,14 +190,14 @@ DOC_FILE_FIELDS = (
         "address_proof", "id_proof"]
 )
 
-# Mandatory everywhere: education + personal identity documents.
+# Mandatory: proof of identity only. Everything else on the form — education
+# marksheets, employment evidence, address and passport copies — is collected
+# but not enforced, so a missing certificate can't block the whole submission.
+# The two variants are kept separate so either can be tightened on its own.
 _DOC_REQUIRED_COMMON = [
-    "marksheet_10", "marksheet_12_diploma",
-    "ug_consolidated_marksheet", "ug_certificate",
-    "passport_size_photo", "pan_card", "aadhar_card", "address_proof", "id_proof",
+    "passport_size_photo", "pan_card", "aadhar_card",
 ]
-# An experienced hire must also evidence their current employment.
 DOC_REQUIRED_BY_TYPE = {
-    "EXPERIENCED": _DOC_REQUIRED_COMMON + ["cc_offer_letter", "cc_pay_slips"],
+    "EXPERIENCED": list(_DOC_REQUIRED_COMMON),
     "FRESHER": list(_DOC_REQUIRED_COMMON),
 }

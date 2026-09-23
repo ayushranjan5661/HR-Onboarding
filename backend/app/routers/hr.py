@@ -12,6 +12,8 @@ from app.config import settings
 from app.database import get_db
 from app.deps import get_current_hr
 from app import edit_access
+from app import date_format
+from app.date_format import normalize_field
 from app.form_definitions import (BGV_FIELDS, BGV_FILE_FIELDS, BGV_TABLE_SECTIONS,
                                     CIF_FIELDS, CIF_FILE_FIELDS, DOC_FIELDS,
                                     DOC_FILE_FIELDS, PROFILE_FIELDS)
@@ -101,6 +103,19 @@ def _document_out(doc: Document) -> DocumentOut:
         file_available=os.path.isfile(upload_path(doc.stored_filename)),
         uploaded_at=doc.uploaded_at,
     )
+
+
+def _reject_invalid_dates(*groups) -> None:
+    """Refuse an edit carrying a date we cannot read — same rule the candidate
+    forms enforce, so HR cannot introduce what the candidate is stopped from
+    entering."""
+    bad: list[str] = []
+    for values in groups:
+        bad.extend(date_format.invalid_labels(values))
+    if bad:
+        unique = list(dict.fromkeys(bad))
+        raise HTTPException(status_code=400, detail=(
+            f"Enter {', '.join(unique)} as DD/MM/YYYY, e.g. 15/08/1998."))
 
 
 def _clean_reason(reason: str | None) -> str | None:
@@ -367,14 +382,24 @@ def apply_changes(candidate_id: int, payload: ChangeSetRequest, db: Session = De
             old_value=old_value, new_value=new_value, action=action, reason=reason,
             actor_role="HR", edited_by_hr_id=current.id, change_set_id=change_set_id))
 
+    # Nothing is applied until every date in the batch reads as DD/MM/YYYY —
+    # the whole save is one transaction, so a bad value fails all of it.
+    _reject_invalid_dates(
+        {e.field_name: e.new_value for e in payload.fields},
+        *[r.values for r in payload.rows],
+    )
+
     for edit in payload.fields:
         row = _get_detail_row(db, edit.form, candidate_id, edit.field_name)
         old_value = getattr(row, edit.field_name)
-        if (old_value or "") == (edit.new_value or ""):
+        # Normalise before comparing, so retyping a date in another shape
+        # doesn't log as a change when the stored value is the same day.
+        new_value = normalize_field(edit.field_name, edit.new_value)
+        if (old_value or "") == (new_value or ""):
             continue   # unchanged: nothing to record
-        setattr(row, edit.field_name, edit.new_value)
-        log(edit.form, edit.field_name, old_value, edit.new_value,
-            "DELETE" if edit.new_value in (None, "") else "EDIT")
+        setattr(row, edit.field_name, new_value)
+        log(edit.form, edit.field_name, old_value, new_value,
+            "DELETE" if new_value in (None, "") else "EDIT")
         applied += 1
 
     for row_edit in payload.rows:
@@ -393,6 +418,7 @@ def apply_changes(candidate_id: int, payload: ChangeSetRequest, db: Session = De
                                  detail=f"Unknown or non-editable field(s): {', '.join(sorted(unknown))}")
         for name, value in row_edit.values.items():
             old_value = getattr(row, name)
+            value = normalize_field(name, value)
             if (old_value or "") == (value or ""):
                 continue
             setattr(row, name, value)
@@ -755,13 +781,13 @@ def push_candidate_to_zoho(candidate_id: int, db: Session = Depends(get_db),
     candidate.zoho_last_error = None
     db.commit()
 
-    lead = (f"Zoho People draft updated (record {result['record_id']})."
-            if was_synced_before else
-            f"Draft created in Zoho People (record {result['record_id']}).")
-    rows = result.get("tabular_rows") or 0
-    tail = (f" Education and employment tables sent ({rows} row(s))." if rows
-            else "")
-    return {"detail": lead + tail, **result}
+    detail = (f"Zoho People draft updated (record {result['record_id']})."
+              if was_synced_before else
+              f"Draft created in Zoho People (record {result['record_id']}).")
+    # tabular_rows still rides in the response for the caller/logs; it is left
+    # out of the message because the API reports success for tabular writes it
+    # did not actually make, so the count promised more than it could confirm.
+    return {"detail": detail, **result}
 
 
 # ---------------------------------------------------------------------------

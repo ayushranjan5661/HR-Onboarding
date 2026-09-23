@@ -22,8 +22,8 @@ from datetime import datetime
 # Good enough to reject obvious non-emails (e.g. the "NANA" placeholder HR
 # sometimes types into an optional email field); not a full RFC validator.
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-# yyyy-mm-dd as produced by <input type=date>; reformatted to Zoho's dd-MMM-yyyy.
-_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# DD/MM/YYYY as the forms store it; reformatted to Zoho's dd-MMM-yyyy.
+_DATE_RE = re.compile(r"^\d{1,2}[/-]\d{1,2}[/-]\d{4}$|^\d{4}-\d{2}-\d{2}$")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -55,7 +55,7 @@ def load_value_map():
 
 
 def load_date_fields():
-    """Local keys whose value needs reformatting from the local yyyy-mm-dd
+    """Local keys whose value needs reformatting from the local DD/MM/YYYY
     into the dd-MMM-yyyy Zoho's Date fields expect."""
     return set(_load_field_map().get("_date_fields", []))
 
@@ -107,14 +107,19 @@ def _apply_value_map(key, value, value_map):
 
 
 def _reformat_date(value):
-    """yyyy-mm-dd (what <input type=date> produces) -> dd-MMM-yyyy (what Zoho's
-    Date fields expect). Any other/unparseable format is passed through as-is —
-    better to let Zoho reject it with a clear field error than silently drop it."""
+    """The app's DD/MM/YYYY -> dd-MMM-yyyy (what Zoho's Date fields expect).
+
+    yyyy-mm-dd is still accepted because rows written before dates were
+    standardised hold that shape. Any other/unparseable format is passed
+    through as-is — better to let Zoho reject it with a clear field error
+    than silently drop it."""
     text = str(value).strip()
-    try:
-        return datetime.strptime(text, "%Y-%m-%d").strftime("%d-%b-%Y")
-    except ValueError:
-        return text
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).strftime("%d-%b-%Y")
+        except ValueError:
+            continue
+    return text
 
 
 def build_payload(local, mapping, value_map=None, date_fields=None, email_fields=None):
@@ -152,12 +157,26 @@ def build_payload(local, mapping, value_map=None, date_fields=None, email_fields
     return payload, skipped, unmapped
 
 
+def _combine_course_college(edu):
+    """Specialization + college back into the one column Zoho's education
+    sections expose. Pre-split rows still carry the old combined value, so
+    fall back to it when neither new column is filled."""
+    parts = [(edu.specialization or "").strip(), (edu.college_name or "").strip()]
+    combined = ", ".join(p for p in parts if p)
+    return combined or edu.course_college
+
+
 def collect_subform_rows(db, candidate):
     """Local repeating-section rows keyed by the field_map.json _subforms key.
 
     {"education_ug_pg": [{col: val, ...}], "education_12th": [...],
      "education_10th": [...], "work_experience": [...], "references": [...]}.
     Ordered by row id so the Zoho table mirrors what the candidate entered.
+
+    Education rows are collected into the combined course_college key the Zoho
+    form still uses: its single "Course Name / Specialization and College"
+    column has no local counterpart since the CIF split that question into
+    College/University Name and Specialization.
     """
     rows = {}
     for e in (db.query(EducationDetail).filter_by(candidate_id=candidate.id)
@@ -166,7 +185,8 @@ def collect_subform_rows(db, candidate):
         if not key:
             continue
         rows.setdefault(key, []).append({
-            "qualification": e.qualification, "course_college": e.course_college,
+            "qualification": e.qualification,
+            "course_college": _combine_course_college(e),
             "cgpa_percent": e.cgpa_percent, "year_of_passing": e.year_of_passing,
             "has_marksheet": e.has_marksheet, "gaps": e.gaps})
     for m in (db.query(EmploymentDetail).filter_by(candidate_id=candidate.id)
@@ -205,7 +225,7 @@ def build_subforms(local_rows, subforms_config, value_map=None, email_fields=Non
     left it blank — dropping the blank instead would silently shift every later
     value up a row. A column that is empty in every row is left out entirely
     rather than sent as a list of blanks. Sections with no rows contribute
-    nothing. yyyy-mm-dd values are reformatted to Zoho's dd-MMM-yyyy, and
+    nothing. DD/MM/YYYY values are reformatted to Zoho's dd-MMM-yyyy, and
     email-shaped columns are validated the same way the flat fields are, so
     one bad cell cannot sink the whole record.
     """
