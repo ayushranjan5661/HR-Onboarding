@@ -116,11 +116,17 @@
   <div class="modal-backdrop hidden" id="rejectModal">
     <div class="modal">
       <h3>Reject Candidate</h3>
+      <p style="color:var(--muted);font-size:0.85rem;">
+        This closes <strong id="rejectCandName"></strong>'s application and ends their
+        onboarding. They can no longer submit forms. <strong>This cannot be undone.</strong>
+      </p>
       <label>Reason (optional, visible only to HR)</label>
       <textarea id="rejectReason" rows="3"></textarea>
+      <label>Type <strong id="rejectCandNameConfirm"></strong> to confirm</label>
+      <input type="text" id="rejectConfirmInput" autocomplete="off" placeholder="Candidate name">
       <div class="modal-actions">
-        <button class="btn btn-outline" onclick="document.getElementById('rejectModal').classList.add('hidden')">Cancel</button>
-        <button class="btn btn-danger" id="confirmRejectBtn">Confirm Reject</button>
+        <button type="button" class="btn btn-outline" onclick="closeRejectModal()">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirmRejectBtn" disabled>Reject Candidate</button>
       </div>
     </div>
   </div>
@@ -191,6 +197,6 @@
   <script src="js/api.js?v=20260907a"></script>
   <script src="../js/field-labels.js?v=20260907a"></script>
   <script src="../js/date-format.js?v=20260922d"></script>
-  <script src="js/candidate.js?v=20260922e"></script>
+  <script src="js/candidate.js?v=20260923a"></script>
 </body>
 </html>
