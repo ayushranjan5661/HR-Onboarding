@@ -12,8 +12,6 @@
   .doc-row:last-child { border-bottom: none; }
   .doc-row label { color: var(--muted); font-weight: 500; margin-bottom: 4px; }
   .req-mark { color: #ef4444; }
-  .type-note { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
-               padding: 10px 14px; font-size: 0.86rem; margin-bottom: 18px; }
 </style>
 </head>
 <body>
@@ -29,12 +27,6 @@
     <a class="back-link" href="home.html">&larr; Back</a>
     <div class="card form-card" style="margin-top:14px;">
       <h2 id="formTitle">Candidate Document Collection</h2>
-      <div class="type-note" id="typeNote"></div>
-
-      <div class="form-section">
-        <h3>Your Details (from CIF)</h3>
-        <div id="prefill"></div>
-      </div>
 
       <form id="docForm" enctype="multipart/form-data">
         <div class="doc-group">
@@ -242,10 +234,10 @@
   </div>
 
   <script src="../js/config.js?v=20260901b"></script>
+  <script src="../js/date-format.js?v=20260922d"></script>
   <script src="js/api.js?v=20260901b"></script>
   <script src="js/dialog.js?v=20260901b"></script>
   <script src="js/doc-viewer.js?v=20260901b"></script>
-  <script src="js/prefill.js?v=20260901b"></script>
   <script src="js/edit-mode.js?v=20260901b"></script>
   <script src="js/auto-fill.js?v=20260901b"></script>
   <script src="js/draft.js?v=20260901b"></script>
@@ -263,11 +255,9 @@
 
     // Mandatory uploads differ between the two variants of the real form.
     // Kept in sync with DOC_REQUIRED_BY_TYPE in backend/app/form_definitions.py.
-    const REQUIRED_COMMON = ["marksheet_10", "marksheet_12_diploma",
-      "ug_consolidated_marksheet", "ug_certificate",
-      "passport_size_photo", "pan_card", "aadhar_card", "address_proof", "id_proof"];
+    const REQUIRED_COMMON = ["passport_size_photo", "pan_card", "aadhar_card"];
     const REQUIRED_BY_TYPE = {
-      EXPERIENCED: REQUIRED_COMMON.concat(["cc_offer_letter", "cc_pay_slips"]),
+      EXPERIENCED: REQUIRED_COMMON,
       FRESHER: REQUIRED_COMMON,
     };
 
@@ -284,15 +274,11 @@
 
     (async () => {
       const data = await apiFetch("/candidate/me/status");
-      renderPrefill(data.profile, document.getElementById("prefill"));
 
       const isFresher = data.candidate_type === "FRESHER";
       document.getElementById("formTitle").textContent = isFresher
         ? "Candidate Document collection - Fresher/trainee"
         : "Experienced Candidate Document collection";
-      document.getElementById("typeNote").innerHTML = isFresher
-        ? "Fields marked <strong>*</strong> are mandatory. Employment documents are optional for freshers/trainees \u2014 fill in any that apply."
-        : "Fields marked <strong>*</strong> are mandatory. Fill in the employment sections for each company you have worked at.";
       applyRequired(data.candidate_type);
 
       const doc = data.forms.find(f => f.form_type === "DOCUMENT_COLLECTION");

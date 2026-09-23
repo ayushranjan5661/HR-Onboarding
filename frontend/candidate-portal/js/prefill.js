@@ -19,7 +19,7 @@ function renderPrefill(profile, targetEl) {
   const rows = Object.entries(PROFILE_LABELS).map(([key, label]) => `
     <div class="field-row">
       <div class="fname">${label}</div>
-      <div class="fval">${profile && profile[key] ? escapePrefillValue(profile[key]) : "<em style='color:#b0b3b9'>Not provided</em>"}</div>
+      <div class="fval">${profile && profile[key] ? escapePrefillValue(isDateField(key) ? toDisplayDate(profile[key]) : profile[key]) : "<em style='color:#b0b3b9'>Not provided</em>"}</div>
     </div>`).join("");
   targetEl.innerHTML = rows;
 }

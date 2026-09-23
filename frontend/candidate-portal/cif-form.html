@@ -60,19 +60,20 @@
 
           <div class="grid-2">
             <div><label>Mobile Number *</label><input name="contact_number" required></div>
-            <div><label>Alternate Contact *</label><input name="alternate_number" required></div>
+            <div><label>Alternate Contact</label><input name="alternate_number"></div>
             <div><label>Email ID *</label><input type="email" name="email" required></div>
-            <div><label>Alternate E-Mail ID *</label><input type="email" name="alternate_email" required></div>
+            <div><label>Alternate E-Mail ID</label><input type="email" name="alternate_email"></div>
             <div><label>Blood Group *</label><input name="blood_group" required></div>
             <div><label>LinkedIn Page link</label><input name="linkedin_link"></div>
-            <div><label>PAN Number</label><input name="pan_number" pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]{1}" title="e.g. ABCDE1234F"></div>
+            <div><label>PAN Number *</label><input name="pan_number" required pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]{1}" title="e.g. ABCDE1234F"></div>
+            <div><label>Aadhaar Number *</label><input name="aadhaar_number" id="aadhaarNumber" required inputmode="numeric" pattern="[0-9]{12}" placeholder="12 digits" title="Aadhaar is 12 digits, e.g. 123412341234"></div>
             <div><label>Gender *</label>
               <select name="gender" required><option value="">Select</option><option>Male</option><option>Female</option><option>Other</option></select>
             </div>
             <div><label>Marital Status *</label>
               <select name="marital_status" required><option value="">Select</option><option>Single</option><option>Married</option></select>
             </div>
-            <div><label>Date of Birth *</label><input type="date" name="date_of_birth" required></div>
+            <div><label>Date of Birth *</label><input data-date name="date_of_birth" required></div>
             <div><label>Any Backlogs in the Education *</label>
               <select name="any_backlogs" required><option value="">Select</option><option>Yes</option><option>No</option></select>
             </div>
@@ -80,7 +81,13 @@
               <select name="source" required><option value="">Select</option><option>Job Portal</option><option>Employee Referral</option><option>Social Media</option><option>Campus</option><option>Walk-in</option><option>Other</option></select>
             </div>
             <div><label>Have you Worked in LevelShift before *</label>
-              <select name="worked_in_levelshift_before" required><option value="">Select</option><option>Yes</option><option>No</option></select>
+              <select name="worked_in_levelshift_before" id="workedBefore" required><option value="">Select</option><option>Yes</option><option>No</option></select>
+            </div>
+            <div class="hidden prev-levelshift"><label>Previous LevelShift Employee ID *</label>
+              <input name="levelshift_employee_id">
+            </div>
+            <div class="hidden prev-levelshift"><label>Years Worked at LevelShift *</label>
+              <input type="number" step="0.1" min="0" name="levelshift_experience_yrs">
             </div>
             <div><label>Total Experience (in Yrs.) *</label><input type="number" step="0.1" min="0" name="total_experience_yrs" required></div>
             <div><label>Relevant Skill Exp. (in Yrs.) *</label><input type="number" step="0.1" min="0" name="relevant_skill_exp_yrs" required></div>
@@ -102,7 +109,7 @@
         </div>
         <div class="tbl-wrap"><table class="rep" id="eduUgPg">
           <thead><tr>
-            <th>Qualification<span class="req">*</span></th><th>Course Name / Specialization and College<span class="req">*</span></th>
+            <th>Qualification<span class="req">*</span></th><th>College/University Name<span class="req">*</span></th><th>Specialization<span class="req">*</span></th>
             <th>% CGPA Obtained<span class="req">*</span></th><th>Year of Passing<span class="req">*</span></th>
             <th>Have Mark Sheet and Certificate<span class="req">*</span></th><th>Gaps if any</th><th></th>
           </tr></thead>
@@ -115,7 +122,7 @@
         </div>
         <div class="tbl-wrap"><table class="rep" id="edu12th">
           <thead><tr>
-            <th>Qualification<span class="req">*</span></th><th>Course Name / Specialization and College<span class="req">*</span></th>
+            <th>Qualification<span class="req">*</span></th><th>College/University Name<span class="req">*</span></th><th>Specialization<span class="req">*</span></th>
             <th>% CGPA Obtained<span class="req">*</span></th><th>Year of Passing<span class="req">*</span></th>
             <th>Have Mark Sheet and Certificate<span class="req">*</span></th><th>Gaps if any</th><th></th>
           </tr></thead>
@@ -128,7 +135,7 @@
         </div>
         <div class="tbl-wrap"><table class="rep" id="edu10th">
           <thead><tr>
-            <th>Qualification<span class="req">*</span></th><th>Course Name / Specialization and College<span class="req">*</span></th>
+            <th>Qualification<span class="req">*</span></th><th>College/University Name<span class="req">*</span></th><th>Specialization<span class="req">*</span></th>
             <th>% CGPA Obtained<span class="req">*</span></th><th>Year of Passing<span class="req">*</span></th>
             <th>Have Mark Sheet and Certificate<span class="req">*</span></th><th>Gaps if any</th><th></th>
           </tr></thead>
@@ -158,8 +165,8 @@
 
         <div class="form-section">
           <h3>Please describe</h3>
-          <label>What is your understanding of LevelShift and why do you want to be a part of LevelShift? *</label>
-          <textarea name="understanding_of_levelshift" rows="3" required></textarea>
+          <label>What is your understanding of LevelShift and why do you want to be a part of LevelShift?</label>
+          <textarea name="understanding_of_levelshift" rows="3"></textarea>
           <label>What do you aspire for? and how do you think LevelShift will help you achieve it?</label>
           <textarea name="aspirations" rows="3"></textarea>
         </div>
@@ -190,15 +197,7 @@
               <div class="file-hint">Files supported: JPG, PNG, GIF, JPEG &bull; Max. size is 10 MB</div>
             </div>
             <div><label>Place *</label><input name="declaration_place" required></div>
-            <div><label>Date</label><input type="date" name="declaration_date"></div>
-          </div>
-        </div>
-
-        <div class="form-section">
-          <h3>HR Team Purpose</h3>
-          <div class="grid-2">
-            <div><label>Candidate ID</label><input name="hr_candidate_id" placeholder="For HR use"></div>
-            <div><label>Candidate Email ID</label><input name="hr_candidate_email" placeholder="For HR use"></div>
+            <div><label>Date</label><input data-date name="declaration_date"></div>
           </div>
         </div>
 
@@ -213,6 +212,7 @@
   </div>
 
   <script src="../js/config.js?v=20260901b"></script>
+  <script src="../js/date-format.js?v=20260922d"></script>
   <script src="js/api.js?v=20260901b"></script>
   <script src="js/dialog.js?v=20260901b"></script>
   <script src="js/doc-viewer.js?v=20260901b"></script>
@@ -244,7 +244,8 @@
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td><input data-k="qualification"></td>
-        <td><input data-k="course_college"></td>
+        <td><input data-k="college_name"></td>
+        <td><input data-k="specialization"></td>
         <td><input data-k="cgpa_percent"></td>
         <td><input data-k="year_of_passing"></td>
         <td><select data-k="has_marksheet">${YES_NO}</select></td>
@@ -258,8 +259,8 @@
       tr.innerHTML = `
         <td><input data-k="company_name"></td>
         <td><input data-k="position_held"></td>
-        <td><input type="date" data-k="from_date"></td>
-        <td><input type="date" data-k="to_date"></td>
+        <td><input data-date data-k="from_date"></td>
+        <td><input data-date data-k="to_date"></td>
         <td><select data-k="currently_working">${YES_NO}</select></td>
         <td><input data-k="reason_for_leaving"></td>
         <td><select data-k="offer_letter">${YES_NO}</select></td>
@@ -268,6 +269,7 @@
         <td><input data-k="gaps"></td>
         <td><button type="button" class="del-row" onclick="delRow(this)">🗑️</button></td>`;
       document.querySelector("#empTable tbody").appendChild(tr);
+      attachDateInputs(tr);
     }
 
     function addRefRow() {
@@ -292,6 +294,34 @@
 
     // Start each section with one empty row, like the original form.
     addEduRow("eduUgPg"); addEduRow("edu12th"); addEduRow("edu10th"); addEmpRow(); addRefRow();
+
+    // ---- Aadhaar ----
+    // Aadhaar is normally written in 4-digit groups ("1234 1234 1234"), so
+    // keep just the digits rather than failing the 12-digit check on a space.
+    // No maxlength on the input: it would truncate such a paste to 12
+    // characters (spaces included) before this could clean it up.
+    const aadhaarNumber = document.getElementById("aadhaarNumber");
+    aadhaarNumber.addEventListener("input", () => {
+      const digits = aadhaarNumber.value.replace(/\D/g, "").slice(0, 12);
+      if (digits !== aadhaarNumber.value) aadhaarNumber.value = digits;
+    });
+
+    // ---- Worked at LevelShift before ----
+    // The two follow-ups only apply to a returning employee: they are required
+    // while "Yes" stands, and cleared on "No" so a changed answer leaves no
+    // stale Employee ID behind.
+    const workedBefore = document.getElementById("workedBefore");
+    function syncPrevLevelShift() {
+      const show = workedBefore.value === "Yes";
+      document.querySelectorAll(".prev-levelshift").forEach(cell => {
+        cell.classList.toggle("hidden", !show);
+        const input = cell.querySelector("input");
+        input.required = show;
+        if (!show) input.value = "";
+      });
+    }
+    workedBefore.addEventListener("change", syncPrevLevelShift);
+    syncPrevLevelShift();
 
     // ---- Permanent address same as present ----
     document.getElementById("sameAddr").addEventListener("change", (e) => {
@@ -340,6 +370,7 @@
           fillTable("refTable", t.refTable, addRefRowWith);
         },
       });
+      attachDateInputs(formEl);   // normalise any date the draft restored
     })().catch(err => {
       document.getElementById("errorMsg").textContent =
         "Could not load the form: " + err.message + " — refresh the page to try again.";
@@ -352,6 +383,7 @@
       tr.querySelectorAll("[data-k]").forEach(el => {
         if (values[el.dataset.k]) el.value = values[el.dataset.k];
       });
+      attachDateInputs(tr);   // a restored date may still be in the old yyyy-mm-dd
     }
     function addEduRowWith(tableId, values) { addEduRow(tableId); applyRowValues(tableId, values); }
     function addEmpRowWith(tableId, values) { addEmpRow(); applyRowValues(tableId, values); }

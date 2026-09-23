@@ -201,6 +201,9 @@ class CIFDetails(Base):
     any_backlogs = Column(String(10))
     source = Column(String(50))
     worked_in_levelshift_before = Column(String(10))
+    # Only asked when worked_in_levelshift_before is "Yes".
+    levelshift_employee_id = Column(String(50))
+    levelshift_experience_yrs = Column(String(10))
     total_experience_yrs = Column(String(10))
     relevant_skill_exp_yrs = Column(String(10))
     current_ctc_lpa = Column(String(30))
@@ -230,6 +233,11 @@ class EducationDetail(Base):
     candidate_id = Column(Integer, ForeignKey("candidates.id"), nullable=False)
     section = Column(String(10), nullable=False)
     qualification = Column(String(150))
+    # Split out of the old single "Course Name / Specialization and College"
+    # column; course_college is kept only so migrate_split_course_college.py
+    # can read what was there before.
+    college_name = Column(String(255))
+    specialization = Column(String(255))
     course_college = Column(String(255))
     cgpa_percent = Column(String(20))
     year_of_passing = Column(String(10))

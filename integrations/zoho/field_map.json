@@ -28,6 +28,8 @@
     "any_backlogs": "Any_Backlogs_in_the_Education",
     "source": "Source",
     "worked_in_levelshift_before": "Have_you_Worked_in_PreludeSys_before",
+    "levelshift_employee_id": "",
+    "levelshift_experience_yrs": "",
     "total_experience_yrs": "Total_IT_Exp_in_Yrs",
     "relevant_skill_exp_yrs": "Relevant_Skill_Exp_in_Yrs",
     "current_ctc_lpa": "Current_CTC_Details_LPA",
@@ -72,6 +74,8 @@
     "any_backlogs": "Any Backlogs in the Education",
     "source": "Source",
     "worked_in_levelshift_before": "Worked in LevelShift Before",
+    "levelshift_employee_id": "Previous LevelShift Employee ID",
+    "levelshift_experience_yrs": "Years Worked at LevelShift",
     "total_experience_yrs": "Total Experience (Yrs)",
     "relevant_skill_exp_yrs": "Relevant Skill Exp. (Yrs)",
     "current_ctc_lpa": "Current CTC (LPA)",
@@ -128,9 +132,10 @@
   ],
   "_unconfirmed_or_unavailable": {
     "hr_candidate_id": "Zoho's Candidate_ID is a Number field; local hr_candidate_id is free text HR types in (e.g. \"NANA\") and is not reliably numeric, so it is left unmapped rather than risk an insert failing on a non-numeric value. Map it only if hr_candidate_id is made strictly numeric.",
+    "levelshift_employee_id, levelshift_experience_yrs": "Asked on the CIF only when \"Have you worked in LevelShift before\" is Yes. No matching field was found on Confirmation_Process_Form in the 2026-09-07 component read; map them if Zoho's form gains an ex-employee ID / tenure field.",
     "aadhaar_number, bank_account_number, bank_ifsc_code, emergency_contact_*, highest_qualification, university_name, graduation_year": "No matching flat field exists on Confirmation_Process_Form. Education comes through the Bachelor/Diploma/10th tabular sections instead (see _subforms below) — export_zoho_payload.py does not emit those yet."
   },
-  "_date_fields_readme": "Zoho Date fields expect dd-MMM-yyyy (e.g. 07-Sep-2026); the local DB stores dates as free strings from an <input type=date>, i.e. yyyy-mm-dd. Listed local keys are reformatted by build_payload() before being sent — see export_zoho_payload.py.",
+  "_date_fields_readme": "Zoho Date fields expect dd-MMM-yyyy (e.g. 07-Sep-2026); the local DB stores dates as free strings in the app's DD/MM/YYYY format (rows written before that standard hold yyyy-mm-dd, which is still accepted). Listed local keys are reformatted by build_payload() before being sent — see export_zoho_payload.py.",
   "_date_fields": [
     "date_of_birth",
     "declaration_date"

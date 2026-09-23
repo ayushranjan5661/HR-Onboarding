@@ -70,6 +70,38 @@ function showConfirm(message, { title = "Please confirm", confirmText = "Confirm
   });
 }
 
+// Same centred modal, one button: the replacement for native alert(), which
+// the browser renders at the top of the viewport with a "127.0.0.1:5500 says"
+// prefix. Resolves once dismissed, so callers can `await` it.
+function showAlert(message, { title = "Done", okText = "OK", danger = false } = {}) {
+  const modal = document.getElementById("confirmModal");
+  const okBtn = document.getElementById("confirmOkBtn");
+  const cancelBtn = document.getElementById("confirmCancelBtn");
+  document.getElementById("confirmTitle").textContent = title;
+  document.getElementById("confirmMessage").textContent = message;
+  okBtn.textContent = okText;
+  okBtn.className = `btn ${danger ? "btn-danger" : "btn-primary"}`;
+  cancelBtn.classList.add("hidden");          // nothing to cancel — just acknowledge
+  modal.classList.remove("hidden");
+
+  return new Promise((resolve) => {
+    function done() {
+      modal.classList.add("hidden");
+      cancelBtn.classList.remove("hidden");   // restore it for the next showConfirm
+      okBtn.removeEventListener("click", done);
+      resolve();
+    }
+    okBtn.addEventListener("click", done);
+    okBtn.focus();
+  });
+}
+
+// Errors are not awaited at the call sites: the modal goes up while the page
+// restores button state behind it, exactly as native alert() allowed.
+function showError(message) {
+  return showAlert(message, { title: "Something went wrong", danger: true });
+}
+
 // One field row: value stored in a relational column. Every form is edited as
 // a whole (one Edit button in the card header) rather than field by field, so
 // a row is either read-only text or — with `opts.editing` — an input.
@@ -78,7 +110,8 @@ function fieldRow(form, field, value, opts = {}) {
   const hasValue = value !== null && value !== undefined && value !== "";
   if (editing) {
     const v = escapeHtml(String(value ?? ""));
-    const attrs = `class="edit-input" data-edit-form="${form}" data-edit-field="${field}" data-orig="${v}"`;
+    const attrs = `class="edit-input" data-edit-form="${form}" data-edit-field="${field}" data-orig="${v}"`
+      + (isDateField(field) ? " data-date" : "");
     return `
       <div class="field-row">
         <div class="fname">${labelFor(field)}</div>
@@ -104,7 +137,7 @@ function fieldRows(form, fieldList, data, opts = {}) {
 // cell becomes an input; the per-row Delete button is shown only when
 // `opts.showDelete` is set, so the read-only CIF view stays free of buttons.
 function rowTable(title, tableName, columns, rows, opts = {}) {
-  const { editing = false, showDelete = false } = opts;
+  const { editing = false, showDelete = false, computed = [] } = opts;
   const header = `<h4 style="margin:16px 0 4px;font-size:0.85rem;color:#6b7280;">${title.toUpperCase()}</h4>`;
   if (!rows || !rows.length) {
     return `${header}<div class="fval empty" style="padding:4px 0 8px;">No entries provided</div>`;
@@ -113,17 +146,26 @@ function rowTable(title, tableName, columns, rows, opts = {}) {
     const v = escapeHtml(String(r[c] ?? ""));
     return editing
       ? `<input type="text" class="edit-input" data-row-table="${tableName}" data-row-id="${r.id}"
-          data-row-col="${c}" data-orig="${v}" value="${v}">`
+          data-row-col="${c}" data-orig="${v}" ${isDateField(c) ? "data-date" : ""} value="${v}">`
       : v;
+  };
+  // Derived columns (e.g. how long a job ran) are read-only even in edit
+  // mode — they restate the row's own dates, so there is nothing to type.
+  const derivedCell = (r, spec) => {
+    const v = spec.value(r);
+    return v ? escapeHtml(v) : `<span class="fval empty">&mdash;</span>`;
   };
   const hasActionCol = editing || showDelete;
   return `${header}
     <div style="overflow-x:auto;margin-bottom:8px;">
       <table>
-        <thead><tr>${columns.map(c => `<th>${labelFor(c)}</th>`).join("")}${hasActionCol ? "<th></th>" : ""}</tr></thead>
+        <thead><tr>${columns.map(c => `<th>${labelFor(c)}</th>`).join("")}${
+          computed.map(spec => `<th>${escapeHtml(spec.label)}</th>`).join("")}${
+          hasActionCol ? "<th></th>" : ""}</tr></thead>
         <tbody>${rows.map(r => `
           <tr style="cursor:default;">
             ${columns.map(c => `<td>${cell(r, c)}</td>`).join("")}
+            ${computed.map(spec => `<td>${derivedCell(r, spec)}</td>`).join("")}
             ${hasActionCol ? `<td>${showDelete
               ? `<button class="btn btn-outline btn-small" onclick="deleteRow('${tableName}', ${r.id})">Delete</button>`
               : ""}</td>` : ""}
@@ -132,6 +174,12 @@ function rowTable(title, tableName, columns, rows, opts = {}) {
       </table>
     </div>`;
 }
+
+// How long each job ran, from the row's own From/To dates.
+const TENURE_COLUMN = {
+  label: "Duration",
+  value: r => humanizeMonths(monthSpan(r.from_date, r.to_date, r.currently_working)),
+};
 
 
 // The five BGV verification sections, each a repeating table with per-row delete.
@@ -292,7 +340,7 @@ async function downloadDoc(e, docId) {
     // may still be reading from the blob URL when click() returns.
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   } catch (err) {
-    alert(err.message);
+    showError(err.message);
   }
 }
 
@@ -400,7 +448,8 @@ function render() {
     for (const [section, label] of Object.entries(EDUCATION_SECTION_LABELS)) {
       cifHtml += rowTable(label, "education", EDUCATION_COLUMNS, (c.education || {})[section], cifRowOpts);
     }
-    cifHtml += rowTable("Employment Details", "employment", EMPLOYMENT_COLUMNS, c.employment, cifRowOpts);
+    cifHtml += rowTable("Employment Details", "employment", EMPLOYMENT_COLUMNS, c.employment,
+                         { ...cifRowOpts, computed: [TENURE_COLUMN] });
     cifHtml += rowTable("References", "references", REFERENCE_COLUMNS, c.references, cifRowOpts);
   }
   document.getElementById("cifExtraFields").innerHTML = cifHtml;
@@ -434,11 +483,17 @@ function render() {
     const wrap = document.createElement("div");
     wrap.id = FORM_CARD_ID[type];
     wrap.className = "card section-card collapsed";
+    // Approve/Reject live in the title bar, beside Edit: these cards render
+    // collapsed, and a decision button inside the body could only be reached
+    // by opening the card first.
+    const reviewControls = canReview && !editing ? `
+      <button class="btn btn-success btn-small" onclick="reviewSubmission(${sub.id}, 'APPROVED')">Approve</button>
+      <button class="btn btn-danger btn-small" onclick="reviewSubmission(${sub.id}, 'REJECTED')">Reject</button>` : "";
     wrap.innerHTML = `
       <div class="section-title collapsible" onclick="toggleCollapse(this)">
         <h3>${cfg.title} <span class="badge badge-${sub.status.toLowerCase()}">${sub.status.replaceAll("_"," ")}</span></h3>
         <div class="section-title-actions" onclick="event.stopPropagation()">
-          ${submitted ? formEditControls(type) : ""}
+          ${submitted ? formEditControls(type) : ""}${reviewControls}
         </div>
         <span class="chevron">&#9660;</span>
       </div>
@@ -446,11 +501,6 @@ function render() {
         fieldRows(type, cfg.fields, cfg.data, { editing })
           + (type === "BGV" ? bgvTables(c, { editing, showDelete: editing }) : "")
           + `<div id="${FORM_DOCS_ID[type]}">${renderDocs(c.documents, type, { editing })}</div>`}
-      ${canReview && !editing ? `
-        <div class="decision-bar">
-          <button class="btn btn-success btn-small" onclick="reviewSubmission(${sub.id}, 'APPROVED')">Approve</button>
-          <button class="btn btn-danger btn-small" onclick="reviewSubmission(${sub.id}, 'REJECTED')">Reject</button>
-        </div>` : ""}
     `;
     document.getElementById("followupForms").appendChild(wrap);
   });
@@ -481,6 +531,9 @@ function render() {
   const zohoEligible = c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE";
   document.getElementById("zohoCard").classList.toggle("hidden", !zohoEligible);
   if (zohoEligible) renderZoho(c);
+
+  // Edit-mode date cells are rebuilt on every render, so re-wire them here.
+  attachDateInputs();
 }
 
 function renderZoho(c) {
@@ -522,9 +575,9 @@ async function pushToZoho() {
       method: "POST", body: JSON.stringify({}),
     });
     await load();
-    alert(result.detail);
+    await showAlert(result.detail, { title: "Published to Zoho People" });
   } catch (err) {
-    alert(err.message);
+    await showAlert(err.message, { title: "Zoho push failed", danger: true });
     await load();
   }
 }
@@ -536,9 +589,10 @@ async function regenerateLink() {
   try {
     await apiFetch(`/hr/candidates/${candidateId}/regenerate-link`, { method: "POST" });
     await load();
-    alert("New link issued. Copy it and send it to the candidate — the old one no longer works.");
+    await showAlert("Copy the new link and send it to the candidate — the old one no longer works.",
+                     { title: "New link issued" });
   } catch (err) {
-    alert(err.message);
+    showError(err.message);
   }
 }
 
@@ -632,6 +686,17 @@ async function saveFormEdits(form, btn) {
     return;
   }
 
+  // These inputs are not inside a <form>, so the browser runs no validation of
+  // its own — check the dates here rather than store an unreadable one.
+  const badDate = document.getElementById(FORM_CARD_ID[form])
+    ?.querySelector("input[data-date]:invalid");
+  if (badDate) {
+    badDate.focus();
+    await showAlert(`Enter the date as ${DATE_FORMAT_LABEL} — e.g. 15/08/1998.`,
+                     { title: "Check that date" });
+    return;
+  }
+
   // Every change to submitted data is audited, and an audit entry without a
   // reason is close to useless — so the reason is collected before saving.
   const count = fieldEdits.length + rowEdits.size;
@@ -661,7 +726,7 @@ async function saveFormEdits(form, btn) {
     editModes[form] = false;
     await load();   // render() restores the read-only view and the Edit button
   } catch (err) {
-    alert(err.message);
+    showError(err.message);
     btn.disabled = false;
     btn.textContent = original;
   }
@@ -753,7 +818,7 @@ async function uploadDoc(formType, fieldKey, input) {
     await refreshFormDocs(formType);
     await loadAudit();
   } catch (err) {
-    alert(err.message);
+    showError(err.message);
   }
 }
 
@@ -774,7 +839,7 @@ async function removeDoc(formType, docId) {
     await refreshFormDocs(formType);
     await loadAudit();
   } catch (err) {
-    alert(err.message);
+    showError(err.message);
   }
 }
 
@@ -789,7 +854,7 @@ async function deleteRow(tableName, rowId) {
     await apiFetch(`/hr/rows/${tableName}/${rowId}`, { method: "DELETE" });
     await load();
   } catch (err) {
-    alert(err.message);
+    showError(err.message);
   }
 }
 
@@ -923,7 +988,7 @@ async function submitGrants(btn) {
     });
     closeGrantModal();
     await loadEditAccess();
-    alert(res.detail);
+    await showAlert(res.detail, { title: "Access updated" });
   } catch (err) {
     error.textContent = err.message;
   } finally {
@@ -959,7 +1024,7 @@ async function revokeAccess(permissionId) {
     await loadEditAccess();
     await loadAudit();   // a revoke is itself an audit entry
   } catch (err) {
-    alert(err.message);
+    showError(err.message);
   }
 }
 
@@ -978,7 +1043,7 @@ async function loadAudit() {
   }
 }
 
-// Field names from repeating sections arrive as "education.course_college".
+// Field names from repeating sections arrive as "education.college_name".
 function auditFieldLabel(name) {
   if (!name) return "";
   const dot = name.indexOf(".");
@@ -1187,11 +1252,19 @@ const FLAG_SECTION_LABELS = {
 
 function flagFieldLabel(key) {
   if (!key) return "";
-  if (FLAG_SECTION_LABELS[key]) return FLAG_SECTION_LABELS[key];
-  const label = labelFor(key);
-  return label === key
-    ? key.replaceAll("_", " ").replace(/\w/g, ch => ch.toUpperCase())
-    : label;
+  // Rule flags carry an exact column name; the LLM improvises around it
+  // ("cif.notice_period_days", "worked_in_levelshift_before/current_status").
+  // Reduce both to the bare key so the chip never shows a raw path.
+  const bare = String(key).trim().toLowerCase()
+    .replace(/\s+/g, "_").split(".").pop().split("/")[0];
+  if (FLAG_SECTION_LABELS[bare]) return FLAG_SECTION_LABELS[bare];
+  const label = labelFor(bare);
+  return label === bare ? titleCase(bare) : label;
+}
+
+// "notice_period_days" -> "Notice Period Days".
+function titleCase(key) {
+  return key.replaceAll("_", " ").replace(/\b\w/g, ch => ch.toUpperCase());
 }
 
 function renderInsights(data) {
@@ -1218,9 +1291,30 @@ function renderInsights(data) {
     : "AI model unavailable — showing a basic summary and rule-based checks only.";
 
   document.getElementById("insightsBody").innerHTML = `
-    <p class="insight-summary">${escapeHtml(data.summary)}</p>
+    ${renderSummary(data.summary)}
     <div class="insight-flags">${flagsHtml}</div>
     <div class="insight-meta">${modelNote}</div>`;
+}
+
+// The summary arrives as short lines, most of them "Education: ...",
+// "Experience: ...". Splitting the label off each one turns a wall of prose
+// into the same scannable label/value rows the rest of this page uses; a line
+// without a label (the opening "X applied for Y") leads the block instead.
+const SUMMARY_LINE = /^([A-Za-z][A-Za-z0-9 /&+-]{1,28}):\s*(.+)$/;
+
+function renderSummary(summary) {
+  const lines = String(summary || "").split("\n").map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return "";
+  const rows = lines.map(line => {
+    const m = SUMMARY_LINE.exec(line);
+    return m
+      ? `<div class="summary-row">
+           <div class="summary-label">${escapeHtml(m[1])}</div>
+           <div class="summary-value">${escapeHtml(m[2])}</div>
+         </div>`
+      : `<p class="summary-lead">${escapeHtml(line)}</p>`;
+  }).join("");
+  return `<div class="insight-summary">${rows}</div>`;
 }
 
 async function loadInsights() {
@@ -1245,7 +1339,7 @@ async function reviewSubmission(submissionId, decision) {
     });
     await load();
   } catch (err) {
-    alert(err.message);
+    showError(err.message);
   }
 }
 
@@ -1255,7 +1349,7 @@ async function markComplete() {
     await apiFetch(`/hr/candidates/${candidateId}/mark-complete`, { method: "POST" });
     await load();
   } catch (err) {
-    alert(err.message);
+    showError(err.message);
   }
 }
 
@@ -1269,7 +1363,7 @@ document.getElementById("approveBtn").addEventListener("click", async () => {
     await apiFetch(`/hr/candidates/${candidateId}/approve`, { method: "POST", body: JSON.stringify({}) });
     await load();
   } catch (err) {
-    alert(err.message);
+    showError(err.message);
   }
 });
 
@@ -1287,7 +1381,7 @@ document.getElementById("confirmRejectBtn").addEventListener("click", async () =
     document.getElementById("rejectModal").classList.add("hidden");
     await load();
   } catch (err) {
-    alert(err.message);
+    showError(err.message);
   }
 });
 

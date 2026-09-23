@@ -99,12 +99,13 @@ def _number(value) -> float | None:
 
 
 def _parse_date(value) -> date | None:
-    """Best-effort date parse. Form inputs are usually YYYY-MM-DD; fall back
-    to year-only so coarse comparisons still work on messier input."""
+    """Best-effort date parse. Forms store DD/MM/YYYY; older rows may still
+    hold YYYY-MM-DD. Falls back to year-only so coarse comparisons still work
+    on messier input."""
     if not value:
         return None
     s = str(value).strip()
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d"):
         try:
             return datetime.strptime(s, fmt).date()
         except ValueError:
@@ -115,6 +116,40 @@ def _parse_date(value) -> date | None:
 
 def _is_yes(value) -> bool:
     return str(value or "").strip().lower() in ("yes", "true", "y")
+
+
+def _month_span(from_value, to_value, currently_working=False) -> int | None:
+    """Whole months between two form dates, counting a part-month as a month.
+
+    An open-ended row ("currently working here") runs to today. Returns None
+    when the dates are missing or run backwards — a duration is only ever
+    reported from dates that make sense.
+    """
+    start = _parse_date(from_value)
+    if not start:
+        return None
+    end = _parse_date(to_value)
+    if not end:
+        if not _is_yes(currently_working):
+            return None
+        end = date.today()
+    if end < start:
+        return None
+    months = (end.year - start.year) * 12 + (end.month - start.month)
+    if end.day >= start.day:
+        months += 1          # a 01-Jan to 15-Jan stint is one month, not zero
+    return max(months, 0)
+
+
+def _humanize_months(months: int | None) -> str:
+    """Months as HR would say it: '7 months', '1 yr 3 mos', '2 yrs'."""
+    if months is None:
+        return ""
+    if months < 12:
+        return f"{months} month{'s' if months != 1 else ''}"
+    years, rest = divmod(months, 12)
+    label = f"{years} yr{'s' if years != 1 else ''}"
+    return f"{label} {rest} mo{'s' if rest != 1 else ''}" if rest else label
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +177,8 @@ def build_context(db: Session, candidate_id: int) -> dict:
         "graduation_year": profile.graduation_year if profile else None,
         "cif": {c: getattr(cif, c) for c in (
             "position_applied_for", "skills_technologies", "marital_status",
-            "any_backlogs", "worked_in_levelshift_before", "total_experience_yrs",
+            "any_backlogs", "worked_in_levelshift_before", "levelshift_employee_id",
+            "levelshift_experience_yrs", "total_experience_yrs",
             "relevant_skill_exp_yrs", "current_ctc_lpa", "expected_ctc_lpa",
             "additional_allowance", "variable_comp", "notice_period_days",
             "other_offers", "technical_certifications", "understanding_of_levelshift",
@@ -150,18 +186,36 @@ def build_context(db: Session, candidate_id: int) -> dict:
         )} if cif else None,
         "education": [
             {"section": e.section, "qualification": e.qualification,
-             "course_college": e.course_college, "cgpa_percent": e.cgpa_percent,
+             "college_name": e.college_name, "specialization": e.specialization,
+             "cgpa_percent": e.cgpa_percent,
              "year_of_passing": e.year_of_passing, "gaps": e.gaps}
             for e in education
         ],
         "employment": [
-            {"company_name": e.company_name, "position_held": e.position_held,
-             "from_date": e.from_date, "to_date": e.to_date,
-             "currently_working": e.currently_working,
-             "reason_for_leaving": e.reason_for_leaving, "gaps": e.gaps}
-            for e in employment
+            _employment_entry(e) for e in employment
         ],
+        "employment_total_duration": _humanize_months(sum(
+            m for m in (_month_span(e.from_date, e.to_date, e.currently_working)
+                        for e in employment) if m)) or None,
         "reference_count": len(references),
+    }
+
+
+def _employment_entry(e: EmploymentDetail) -> dict:
+    """One employment row plus how long it actually ran.
+
+    HR should not have to subtract two dates in their head for every job, and
+    the LLM should not be doing that arithmetic either — it is computed here
+    once, from the dates the candidate entered, and both read the same answer.
+    """
+    months = _month_span(e.from_date, e.to_date, e.currently_working)
+    return {
+        "company_name": e.company_name, "position_held": e.position_held,
+        "from_date": e.from_date, "to_date": e.to_date,
+        "duration": _humanize_months(months) or None,
+        "duration_months": months,
+        "currently_working": e.currently_working,
+        "reason_for_leaving": e.reason_for_leaving, "gaps": e.gaps,
     }
 
 
@@ -292,21 +346,17 @@ def rule_based_flags(ctx: dict) -> list[dict]:
             "medium", "rule"))
 
     if total_exp is not None and parsed:
-        years_seen = set()
-        total_months = 0
-        for e, f, t in parsed:
-            if not f:
-                continue
-            end = t or date.today()
-            if end < f:
-                continue
-            total_months += (end.year - f.year) * 12 + (end.month - f.month)
+        total_months = sum(e.get("duration_months") or 0 for e, _f, _t in parsed)
         summed_years = round(total_months / 12, 1)
         if summed_years and abs(summed_years - total_exp) > 1.5:
+            breakdown = "; ".join(
+                f"{e.get('company_name') or 'unnamed employer'} {e['duration']}"
+                for e, _f, _t in parsed if e.get("duration"))
             flags.append(_flag(
                 "total_experience_yrs", "Stated experience does not match the jobs listed",
                 f"The candidate declared {total_exp} years, but the employment dates on "
-                f"the form add up to about {summed_years} years — a gap of roughly "
+                f"the form add up to about {summed_years} years "
+                f"({breakdown}) — a gap of roughly "
                 f"{abs(round(total_exp - summed_years, 1))} years. A missing job entry is "
                 f"the usual cause.", "low", "rule"))
 
@@ -357,6 +407,10 @@ Return ONLY a JSON object with exactly two keys:
               separated by \\n (NOT one run-on paragraph) — roughly: one line
               on who/role, one on education, one on experience, one on
               certifications (if any), one on compensation/notice.
+              For experience, name each employer with the role and the
+              pre-computed "duration" value for that row — never work a
+              duration out yourself, and never print a from/to date pair
+              without the duration beside it.
               ALWAYS include the marks/CGPA/percentage for every education
               level present (10th, 12th or Diploma, UG, PG) exactly as given
               — do not add a '%' if the value already has one or already has
@@ -374,6 +428,19 @@ Return ONLY a JSON object with exactly two keys:
       "severity": "low|medium|high"}}
   ]
 }}
+
+Write for a human reader throughout. Never print an internal field name in
+the summary or in a flag — say "currently working" not "currently_working",
+"expected CTC" not "expected_ctc_lpa". The "field" key is the one place a
+field name belongs, and it must be a single snake_case key copied exactly
+from the data above (e.g. "notice_period_days"), never a path like
+"cif.notice_period_days" and never two keys joined by "/".
+
+These checks are ALREADY done in code and their flags are added for you — do
+not raise your own version of any of them, even with different wording:
+current-vs-expected CTC size or ratio, total/relevant experience against the
+employment dates, employment overlaps, reversed date ranges, education
+chronology, and date-of-birth plausibility.
 
 Only flag things in the free-text/narrative content that a simple date or
 number check would NOT catch — e.g. a reason-for-leaving that contradicts
@@ -483,6 +550,22 @@ def _education_breakdown(ctx: dict) -> str:
     return ", ".join(bits)
 
 
+def _employment_breakdown(ctx: dict) -> str:
+    """One entry per job with how long it ran, e.g.
+    'Acme (Developer) 2 yrs 3 mos; Globex (Lead) 1 yr - 3 yrs 3 mos total'."""
+    bits = []
+    for e in ctx.get("employment", []):
+        name = e.get("company_name") or "Unnamed employer"
+        role = f" ({e['position_held']})" if e.get("position_held") else ""
+        span = f" {e['duration']}" if e.get("duration") else " duration not given"
+        if _is_yes(e.get("currently_working")):
+            span += ", current"
+        bits.append(f"{name}{role}{span}")
+    total = ctx.get("employment_total_duration")
+    line = "; ".join(bits)
+    return f"{line} - {total} total" if line and total and len(bits) > 1 else line
+
+
 def _fallback_summary(ctx: dict) -> str:
     """Used only when the LLM is unavailable — a plain templated digest so
     HR always sees something instead of an error. Built as short lines
@@ -509,10 +592,12 @@ def _fallback_summary(ctx: dict) -> str:
     if cif.get("total_experience_yrs"):
         exp_bit.append(f"Total experience: {cif['total_experience_yrs']} years "
                         f"({cif.get('relevant_skill_exp_yrs') or '?'} years relevant)")
-    if ctx.get("employment"):
-        exp_bit.append(f"{len(ctx['employment'])} employer(s) listed")
     if exp_bit:
         lines.append(". ".join(exp_bit) + ".")
+
+    tenure_line = _employment_breakdown(ctx)
+    if tenure_line:
+        lines.append(f"Employment: {tenure_line}.")
 
     certs = str(cif.get("technical_certifications") or "").strip()
     if certs:
@@ -528,6 +613,30 @@ def _fallback_summary(ctx: dict) -> str:
         lines.append(", ".join(ask_bit) + ".")
 
     return "\n".join(lines) or "No CIF data available to summarise yet."
+
+
+def _flag_subject(field: str) -> str:
+    """The bare field key a flag is about.
+
+    Rules use exact column names; the LLM improvises ("cif.notice_period_days",
+    "worked_in_levelshift_before/current_status"), so both are reduced to the
+    same key before they are compared.
+    """
+    key = str(field or "").strip().lower().replace(" ", "_")
+    key = key.rsplit(".", 1)[-1]        # cif.notice_period_days -> notice_period_days
+    return key.split("/", 1)[0]         # a/b -> a
+
+
+def _drop_duplicates(llm_flags: list[dict], rule_flags: list[dict]) -> list[dict]:
+    """Keep only the LLM flags a rule hasn't already raised.
+
+    The rules are deterministic and cite exact numbers, so where both fire on
+    the same field the rule is the better of the two. Without this HR sees the
+    same CTC gap twice, worded differently, which makes the list look padded
+    and buries the flags that are actually distinct.
+    """
+    covered = {_flag_subject(f["field"]) for f in rule_flags}
+    return [f for f in llm_flags if _flag_subject(f["field"]) not in covered]
 
 
 # ---------------------------------------------------------------------------
@@ -547,7 +656,8 @@ def generate(db: Session, candidate_id: int) -> dict:
         llm_flags = []
         generated_by = "rule-only"
 
-    flags = sorted(rule_flags + llm_flags, key=lambda f: _SEVERITY_ORDER.get(f["severity"], 1))
+    flags = sorted(rule_flags + _drop_duplicates(llm_flags, rule_flags),
+                    key=lambda f: _SEVERITY_ORDER.get(f["severity"], 1))
     return {
         "summary": summary,
         "flags": flags,

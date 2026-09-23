@@ -30,7 +30,8 @@ function applyAutoFilledFields(formEl, fields) {
     const el = formEl.querySelector(`[name="${name}"]`);
     if (!el || el.type === "file" || el.type === "checkbox") return;
     if (el.value) return;
-    el.value = info.value;
+    // The source row may predate the DD/MM/YYYY standard.
+    el.value = el.matches("[data-date]") ? toDisplayDate(info.value) : info.value;
     el.classList.add("auto-filled");
     const host = el.closest("div") || el.parentElement;
     if (host && !host.querySelector(".auto-filled-note")) {
@@ -38,6 +39,7 @@ function applyAutoFilledFields(formEl, fields) {
     }
     count++;
   });
+  attachDateInputs(formEl);
   return count;
 }
 

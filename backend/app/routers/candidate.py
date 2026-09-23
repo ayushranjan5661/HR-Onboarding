@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.deps import get_current_candidate
 from app import edit_access
+from app import date_format
+from app.date_format import normalize_field
 from app.form_definitions import (
     BGV_FIELDS,
     BGV_FILE_FIELDS,
@@ -351,10 +353,32 @@ def _discard_draft(db, candidate_id: int, ft: FormType) -> list[str]:
 
 
 def _apply_fields(obj, form, field_names: list[str]):
-    """Copy each present form value onto the matching model column."""
+    """Copy each present form value onto the matching model column.
+
+    Date columns are normalised to DD/MM/YYYY on the way in — the forms send
+    free text, so this is where the app's one date format is enforced."""
     for name in field_names:
         if name in form:
-            setattr(obj, name, form.get(name))
+            setattr(obj, name, normalize_field(name, form.get(name)))
+
+
+def _reject_invalid_dates(*groups) -> None:
+    """Refuse a submission carrying a date we cannot read.
+
+    Dates arrive as free text, so a US-shaped "09/22/2026" (month 22) would
+    otherwise be stored verbatim and only surface much later — in a Zoho push
+    or during BGV. Fail here instead, naming the fields, so the candidate can
+    fix it while the form is still in front of them.
+    """
+    bad: list[str] = []
+    for group in groups:
+        for values in (group if isinstance(group, list) else [group]):
+            bad.extend(date_format.invalid_labels(values))
+    if bad:
+        unique = list(dict.fromkeys(bad))
+        raise HTTPException(status_code=400, detail=(
+            f"Enter {', '.join(unique)} as DD/MM/YYYY, e.g. 15/08/1998. "
+            f"Check the day and month are the right way round."))
 
 
 def _rows_from_json(form, key: str, columns: list[str]) -> list[dict]:
@@ -365,7 +389,8 @@ def _rows_from_json(form, key: str, columns: list[str]) -> list[dict]:
         return []
     if not isinstance(rows, list):
         return []
-    return [{c: str(row.get(c, "") or "") for c in columns} for row in rows if isinstance(row, dict)]
+    return [{c: normalize_field(c, str(row.get(c, "") or "")) for c in columns}
+            for row in rows if isinstance(row, dict)]
 
 
 def _remove_files(paths: list[str]) -> None:
@@ -432,6 +457,13 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
 
     form = await request.form()
 
+    # Nothing is written until every date on the form reads as DD/MM/YYYY.
+    employment_rows = _rows_from_json(form, "employment_details", EMPLOYMENT_COLUMNS)
+    _reject_invalid_dates(
+        {f: form.get(f) for f in PROFILE_FIELDS + CIF_FIELDS if f in form},
+        employment_rows,
+    )
+
     # Shared profile fields
     profile = db.query(CandidateProfile).filter(CandidateProfile.candidate_id == current.id).first()
     if not profile:
@@ -445,6 +477,11 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
         cif = CIFDetails(candidate_id=current.id)
         db.add(cif)
     _apply_fields(cif, form, CIF_FIELDS)
+    # The ex-employee follow-ups only mean anything alongside a "Yes"; drop
+    # them otherwise so a changed answer can't leave a stale Employee ID.
+    if cif.worked_in_levelshift_before != "Yes":
+        cif.levelshift_employee_id = None
+        cif.levelshift_experience_yrs = None
 
     # Repeating tables -> one DB row per entry (replace any previous rows)
     db.query(EducationDetail).filter(EducationDetail.candidate_id == current.id).delete()
@@ -453,7 +490,7 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
             db.add(EducationDetail(candidate_id=current.id, section=section, **row))
 
     db.query(EmploymentDetail).filter(EmploymentDetail.candidate_id == current.id).delete()
-    for row in _rows_from_json(form, "employment_details", EMPLOYMENT_COLUMNS):
+    for row in employment_rows:
         db.add(EmploymentDetail(candidate_id=current.id, **row))
 
     db.query(ReferenceDetail).filter(ReferenceDetail.candidate_id == current.id).delete()
@@ -505,6 +542,11 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
     form = await request.form()
 
     if form_type == "BGV":
+        _reject_invalid_dates(
+            {f: form.get(f) for f in BGV_FIELDS if f in form},
+            *[_rows_from_json(form, key, columns)
+              for key, (_, columns) in BGV_TABLE_SECTIONS.items()],
+        )
         details = db.query(BGVDetails).filter(BGVDetails.candidate_id == current.id).first()
         if not details:
             details = BGVDetails(candidate_id=current.id)
@@ -692,6 +734,9 @@ def _apply_granted_field(db: Session, current: Candidate, perm: FieldEditPermiss
             raise HTTPException(status_code=400, detail="No submitted data for this form yet")
 
     new_value = None if raw_value is None else str(raw_value).strip()
+    if new_value:
+        _reject_invalid_dates({perm.field_name: new_value})
+        new_value = normalize_field(perm.field_name, new_value)
     old_value = getattr(row, perm.field_name)
     if (old_value or "") == (new_value or ""):
         raise HTTPException(

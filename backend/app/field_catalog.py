@@ -39,6 +39,8 @@ CATALOG = {
             ("any_backlogs", "Any Backlogs in the Education"),
             ("source", "Source"),
             ("worked_in_levelshift_before", "Worked in LevelShift Before"),
+            ("levelshift_employee_id", "Previous LevelShift Employee ID"),
+            ("levelshift_experience_yrs", "Years Worked at LevelShift"),
             ("total_experience_yrs", "Total Experience (Yrs)"),
             ("relevant_skill_exp_yrs", "Relevant Skill Exp. (Yrs)"),
             ("current_ctc_lpa", "Current CTC (LPA)"),

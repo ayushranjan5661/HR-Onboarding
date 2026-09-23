@@ -21,10 +21,12 @@ function fillFlatFields(formEl, fields) {
       el.checked = true;
       el.dispatchEvent(new Event("change", { bubbles: true }));
     } else {
-      el.value = value;
+      // Rows saved before dates were standardised still hold yyyy-mm-dd.
+      el.value = el.matches("[data-date]") ? toDisplayDate(value) : value;
       el.dispatchEvent(new Event("change", { bubbles: true }));
     }
   });
+  attachDateInputs(formEl);
 }
 
 // Show what is already on file next to each upload, and stop a previously

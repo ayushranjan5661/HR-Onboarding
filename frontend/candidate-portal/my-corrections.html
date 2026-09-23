@@ -41,6 +41,7 @@
   </div>
 
   <script src="../js/config.js?v=20260901b"></script>
+  <script src="../js/date-format.js?v=20260922d"></script>
   <script src="js/api.js?v=20260901b"></script>
   <script src="js/dialog.js?v=20260901b"></script>
   <script src="../js/field-labels.js?v=20260901b"></script>
@@ -68,6 +69,9 @@
       }
       if (LONG_TEXT_FIELDS.has(perm.field_name)) {
         return `<textarea id="value-${perm.id}" rows="3">${value}</textarea>`;
+      }
+      if (isDateField(perm.field_name)) {
+        return `<input type="text" data-date id="value-${perm.id}" value="${value}">`;
       }
       return `<input type="text" id="value-${perm.id}" value="${value}">`;
     }
@@ -147,6 +151,17 @@
         submitError.textContent = "Change at least one value before submitting.";
         return;
       }
+      // No <form> wraps these inputs, so the browser never runs its own
+      // validation here — check the date shape before sending it on.
+      const badDate = pending.find(c =>
+        c.value !== undefined && isDateField(c.perm.field_name)
+        && !isValidDisplayDate(c.value));
+      if (badDate) {
+        submitError.textContent =
+          `Enter ${labelFor(badDate.perm.field_name)} as ${DATE_FORMAT_LABEL} — e.g. 15/08/1998.`;
+        document.getElementById(`value-${badDate.perm.id}`).focus();
+        return;
+      }
       const reason = document.getElementById("overallReason").value.trim();
       if (reason.length < 5) {
         submitError.textContent = "Please say why you are making these changes.";
@@ -190,6 +205,7 @@
       const access = await apiFetch("/candidate/me/edit-access");
       currentPermissions = access.permissions || [];
       renderCorrections(currentPermissions);
+      attachDateInputs(document.getElementById("correctionList"));
       document.getElementById("overallReason").value = "";
       document.getElementById("submitError").textContent = "";
       document.getElementById("submitBar")

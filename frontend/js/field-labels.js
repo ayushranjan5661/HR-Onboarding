@@ -20,6 +20,7 @@ const CIF_FIELDS = [
   "position_applied_for", "skills_technologies",
   "alternate_email", "blood_group", "linkedin_link", "marital_status",
   "any_backlogs", "source", "worked_in_levelshift_before",
+  "levelshift_employee_id", "levelshift_experience_yrs",
   "total_experience_yrs", "relevant_skill_exp_yrs",
   "current_ctc_lpa", "expected_ctc_lpa", "additional_allowance",
   "variable_comp", "notice_period_days", "other_offers",
@@ -99,7 +100,7 @@ const FORM_FILE_FIELDS = {
 };
 
 // Repeating-row tables: table name (API) -> column order for display
-const EDUCATION_COLUMNS = ["qualification", "course_college", "cgpa_percent", "year_of_passing", "has_marksheet", "gaps"];
+const EDUCATION_COLUMNS = ["qualification", "college_name", "specialization", "cgpa_percent", "year_of_passing", "has_marksheet", "gaps"];
 const EMPLOYMENT_COLUMNS = ["company_name", "position_held", "from_date", "to_date", "currently_working",
                              "reason_for_leaving", "offer_letter", "relieving_letter_status", "experience_certificate", "gaps"];
 const REFERENCE_COLUMNS = ["employee_name", "email_id", "technology", "experience", "contact_number"];
@@ -123,7 +124,7 @@ const BGV_TABLE_TITLES = {
 };
 
 // Repeating sections, keyed the way the audit log names them
-// ("education.course_college") and the grant list identifies them.
+// ("education.college_name") and the grant list identifies them.
 const ROW_TABLE_TITLES = {
   education: "Education",
   employment: "Employment",
@@ -155,6 +156,8 @@ const FIELD_LABELS = {
   alternate_email: "Alternate E-Mail ID", linkedin_link: "LinkedIn Page Link",
   any_backlogs: "Any Backlogs in the Education", source: "Source",
   worked_in_levelshift_before: "Worked in LevelShift Before",
+  levelshift_employee_id: "Previous LevelShift Employee ID",
+  levelshift_experience_yrs: "Years Worked at LevelShift",
   total_experience_yrs: "Total Experience (Yrs)", relevant_skill_exp_yrs: "Relevant Skill Exp. (Yrs)",
   current_ctc_lpa: "Current CTC (LPA)", expected_ctc_lpa: "Expected CTC (LPA)",
   additional_allowance: "Additional Allowance (Rs)", variable_comp: "Variable Comp (Rs)",
@@ -166,7 +169,8 @@ const FIELD_LABELS = {
   hr_candidate_id: "HR: Candidate ID", hr_candidate_email: "HR: Candidate Email ID",
   profile_picture: "Candidate Profile Picture", signature: "Signature",
   // education / employment / reference columns
-  qualification: "Qualification", course_college: "Course / College", cgpa_percent: "% CGPA",
+  qualification: "Qualification", college_name: "College/University Name",
+  specialization: "Specialization", cgpa_percent: "% CGPA",
   year_of_passing: "Year of Passing", has_marksheet: "Has Mark Sheet", gaps: "Gaps",
   company_name: "Company", position_held: "Position Held", from_date: "From", to_date: "To",
   currently_working: "Currently Working", reason_for_leaving: "Reason for Leaving",
