@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
 from app.database import get_db
-from app.deps import get_current_hr
+from app.deps import get_current_staff, get_current_staff_allow_reset
 from app import edit_access
+from app import scope, staff_service
 from app import date_format
 from app.date_format import normalize_field
 from app.form_definitions import (BGV_FIELDS, BGV_FILE_FIELDS, BGV_TABLE_SECTIONS,
@@ -69,8 +70,40 @@ router = APIRouter(prefix="/hr", tags=["hr"])
 
 
 @router.get("/me")
-def me(current: HRUser = Depends(get_current_hr)):
-    return {"id": current.id, "name": current.name, "email": current.email}
+def me(current: HRUser = Depends(get_current_staff_allow_reset)):
+    return {"id": current.id, "name": current.name, "email": current.email,
+            "role": current.role, "manager_id": current.manager_id,
+            "must_reset_password": current.must_reset_password}
+
+
+@router.get("/assignable-staff")
+def assignable_staff(db: Session = Depends(get_db), current: HRUser = Depends(get_current_staff)):
+    """Who the caller may make the owner of a candidate: themselves for an
+    HR Executive, their team for a Manager, anyone for the Super Admin."""
+    return [{"id": u.id, "name": u.name, "role": u.role, "manager_id": u.manager_id}
+            for u in scope.assignable_staff(db, current)]
+
+
+def _owner_columns(db: Session, candidates: list) -> dict[int, dict]:
+    """Owner and Manager names for a list of candidates, in two queries."""
+    owner_ids = {c.assigned_hr_id for c in candidates if c.assigned_hr_id}
+    if not owner_ids:
+        return {}
+    owners = {u.id: u for u in db.query(HRUser).filter(HRUser.id.in_(owner_ids)).all()}
+    manager_ids = {u.manager_id for u in owners.values() if u.manager_id} - set(owners)
+    managers = ({u.id: u for u in db.query(HRUser).filter(HRUser.id.in_(manager_ids)).all()}
+                if manager_ids else {})
+    managers.update(owners)
+    out = {}
+    for oid, owner in owners.items():
+        if owner.role == "MANAGER":
+            mgr = owner
+        else:
+            mgr = managers.get(owner.manager_id) if owner.manager_id else None
+        out[oid] = {"assigned_hr_id": owner.id, "assigned_hr_name": owner.name,
+                    "manager_id": mgr.id if mgr else None,
+                    "manager_name": mgr.name if mgr else None}
+    return out
 
 
 def _candidate_login_url(candidate: Candidate) -> str:
@@ -137,9 +170,19 @@ def _row_dict(obj, columns: list[str], include_id: bool = True) -> dict:
 
 @router.post("/candidates", response_model=InviteCandidateResponse)
 def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_db),
-                      current: HRUser = Depends(get_current_hr)):
+                      current: HRUser = Depends(get_current_staff)):
     if db.query(Candidate).filter(Candidate.email == payload.email).first():
         raise HTTPException(status_code=400, detail="A candidate with this email already exists")
+
+    # Ownership: the caller, unless a Manager (or the Super Admin) hands the
+    # candidate to someone in their scope at invite time.
+    owner = current
+    if payload.assigned_hr_id and payload.assigned_hr_id != current.id:
+        owner = next((u for u in scope.assignable_staff(db, current)
+                      if u.id == payload.assigned_hr_id), None)
+        if owner is None:
+            raise HTTPException(status_code=400,
+                                 detail="You can only assign candidates to active staff in your team")
 
     temp_password = generate_temp_password()
     candidate = Candidate(
@@ -152,10 +195,15 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
         candidate_type=(CandidateType.FRESHER if payload.candidate_type == "FRESHER"
                          else CandidateType.EXPERIENCED),
         created_by_hr_id=current.id,
+        assigned_hr_id=owner.id,
     )
     _issue_invite_token(candidate)
     db.add(candidate)
     db.flush()
+    if owner.id != current.id:
+        staff_service.audit(db, current, "CANDIDATE_ASSIGNED", target_type="CANDIDATE",
+                            target=candidate, detail=f"Invited and assigned to {owner.name}",
+                            team_manager_id=staff_service.team_of(owner))
 
     db.add(CandidateProfile(candidate_id=candidate.id, full_name=payload.name, email=payload.email))
     db.add(FormSubmission(candidate_id=candidate.id, form_type=FormType.CIF, status=FormStatus.PENDING))
@@ -175,7 +223,7 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
 
 
 @router.get("/field-mappings")
-def field_mappings(refresh: bool = False, current: HRUser = Depends(get_current_hr)):
+def field_mappings(refresh: bool = False, current: HRUser = Depends(get_current_staff)):
     """What the cross-form mapping agent decided, and how. Pass refresh=true to
     re-run it (e.g. after changing a form's fields)."""
     from app.agents import prefill as prefill_agent
@@ -191,13 +239,11 @@ def field_mappings(refresh: bool = False, current: HRUser = Depends(get_current_
 
 @router.get("/candidates/{candidate_id}/insights")
 def candidate_insights(candidate_id: int, db: Session = Depends(get_db),
-                        current: HRUser = Depends(get_current_hr)):
+                        current: HRUser = Depends(get_current_staff)):
     """AI summary + anomaly flags for one candidate's CIF submission.
     Computed live on each call (candidate data changes; unlike the field
     mapper, there is nothing static here worth caching)."""
-    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
     if not candidate.cif_details:
         raise HTTPException(status_code=400, detail="Candidate has not submitted the CIF yet")
 
@@ -206,12 +252,19 @@ def candidate_insights(candidate_id: int, db: Session = Depends(get_db),
 
 
 @router.get("/candidates", response_model=list[CandidateListItem])
-def list_candidates(db: Session = Depends(get_db), current: HRUser = Depends(get_current_hr)):
-    return db.query(Candidate).order_by(Candidate.created_at.desc()).all()
+def list_candidates(db: Session = Depends(get_db), current: HRUser = Depends(get_current_staff)):
+    """Only what the caller may see: own candidates for an HR Executive, the
+    team's for a Manager, everyone's for the Super Admin."""
+    rows = (scope.filter_candidates(db.query(Candidate), db, current)
+              .order_by(Candidate.created_at.desc()).all())
+    owners = _owner_columns(db, rows)
+    return [CandidateListItem(id=c.id, name=c.name, email=c.email, stage=c.stage.value,
+                              created_at=c.created_at, **owners.get(c.assigned_hr_id, {}))
+            for c in rows]
 
 
 @router.get("/candidates/{candidate_id}", response_model=CandidateDetailOut)
-def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRUser = Depends(get_current_hr)):
+def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRUser = Depends(get_current_staff)):
     candidate = (
         db.query(Candidate)
         .options(
@@ -227,8 +280,8 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         .filter(Candidate.id == candidate_id)
         .first()
     )
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+    scope.check(db, candidate, current)
+    owner = _owner_columns(db, [candidate]).get(candidate.assigned_hr_id, {})
 
     from app.form_definitions import EDUCATION_COLUMNS, EMPLOYMENT_COLUMNS, REFERENCE_COLUMNS
 
@@ -239,6 +292,8 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         stage=candidate.stage.value,
         candidate_type=candidate.candidate_type.value,
         rejection_reason=candidate.rejection_reason,
+        assigned_hr_id=owner.get("assigned_hr_id"),
+        assigned_hr_name=owner.get("assigned_hr_name"),
         temp_password=decrypt_password(candidate.temp_password_enc),
         login_url=_candidate_login_url(candidate),
         profile=candidate.profile,
@@ -266,12 +321,10 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
 
 @router.post("/candidates/{candidate_id}/regenerate-link")
 def regenerate_invite_link(candidate_id: int, db: Session = Depends(get_db),
-                            current: HRUser = Depends(get_current_hr)):
+                            current: HRUser = Depends(get_current_staff)):
     """Issue a fresh one-click link, immediately invalidating the previous one.
     Use this if a link was sent to the wrong person or has expired."""
-    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
     _issue_invite_token(candidate)
     db.add(FieldEditLog(candidate_id=candidate_id, form_type="ACCOUNT", field_name="invite_token",
                          old_value="(previous link revoked)", new_value="(new link issued)",
@@ -283,13 +336,11 @@ def regenerate_invite_link(candidate_id: int, db: Session = Depends(get_db),
 
 @router.post("/candidates/{candidate_id}/reset-password")
 def reset_candidate_password(candidate_id: int, db: Session = Depends(get_db),
-                              current: HRUser = Depends(get_current_hr)):
+                              current: HRUser = Depends(get_current_staff)):
     """Issue a fresh temporary password for a candidate who lost theirs.
     Only the bcrypt hash is stored, so the new password appears exactly once —
     in this response. The previous password stops working immediately."""
-    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
     temp_password = generate_temp_password()
     candidate.password_hash = hash_password(temp_password)
     candidate.temp_password_enc = encrypt_password(temp_password)
@@ -303,11 +354,9 @@ def reset_candidate_password(candidate_id: int, db: Session = Depends(get_db),
 
 @router.delete("/candidates/{candidate_id}")
 def delete_candidate(candidate_id: int, db: Session = Depends(get_db),
-                      current: HRUser = Depends(get_current_hr)):
+                      current: HRUser = Depends(get_current_staff)):
     """Delete an invitation/candidate entirely: login, forms, uploaded files."""
-    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
 
     # Snapshots keep replaced files alive for the audit trail, so they have to
     # be swept up here too — the live documents alone no longer cover them.
@@ -361,14 +410,14 @@ def _get_detail_row(db: Session, form: str, candidate_id: int, field_name: str):
 
 @router.post("/candidates/{candidate_id}/changes")
 def apply_changes(candidate_id: int, payload: ChangeSetRequest, db: Session = Depends(get_db),
-                   current: HRUser = Depends(get_current_hr)):
+                   current: HRUser = Depends(get_current_staff)):
     """Apply everything one HR save touched — flat fields and repeating-section
     cells alike — as a single audited action.
 
     All of it lands in one transaction under one change-set id, so a partial
     failure changes nothing and the audit trail shows the save as one entry
     rather than a run of unrelated ones."""
-    edit_access.require_candidate(db, candidate_id)
+    scope.get_scoped_candidate(db, candidate_id, current)
     if not payload.fields and not payload.rows:
         raise HTTPException(status_code=400, detail="Nothing to change")
 
@@ -449,7 +498,7 @@ def _row_form_type(table: str) -> str:
 
 @router.delete("/rows/{table}/{row_id}")
 def delete_table_row(table: str, row_id: int, db: Session = Depends(get_db),
-                      current: HRUser = Depends(get_current_hr)):
+                      current: HRUser = Depends(get_current_staff)):
     """Delete one entry from a repeating section (education/employment/references)."""
     model = _ROW_TABLES.get(table)
     if not model:
@@ -457,6 +506,7 @@ def delete_table_row(table: str, row_id: int, db: Session = Depends(get_db),
     row = db.query(model).filter(model.id == row_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Row not found")
+    scope.get_scoped_candidate(db, row.candidate_id, current)
     db.add(FieldEditLog(candidate_id=row.candidate_id, form_type="CIF", field_name=f"{table}_row",
                          old_value=str({c.name: getattr(row, c.name) for c in model.__table__.columns}),
                          new_value=None, action="DELETE", edited_by_hr_id=current.id))
@@ -497,12 +547,12 @@ def _hr_names(db: Session) -> dict[int, str]:
 
 @router.get("/candidates/{candidate_id}/edit-access")
 def list_edit_access(candidate_id: int, db: Session = Depends(get_db),
-                      current: HRUser = Depends(get_current_hr)):
+                      current: HRUser = Depends(get_current_staff)):
     """What HR may open for this candidate, and what is already open.
 
     The grantable set covers every column of every form: the one-row detail
     fields, the uploads, and one entry at a time of each repeating section."""
-    edit_access.require_candidate(db, candidate_id)
+    scope.get_scoped_candidate(db, candidate_id, current)
     hr_names = _hr_names(db)
     permissions = (db.query(FieldEditPermission)
                      .filter(FieldEditPermission.candidate_id == candidate_id)
@@ -516,9 +566,9 @@ def list_edit_access(candidate_id: int, db: Session = Depends(get_db),
 
 @router.post("/candidates/{candidate_id}/edit-access")
 def grant_edit_access(candidate_id: int, payload: GrantEditAccessRequest,
-                       db: Session = Depends(get_db), current: HRUser = Depends(get_current_hr)):
+                       db: Session = Depends(get_db), current: HRUser = Depends(get_current_staff)):
     """Open one or more individual values for the candidate to correct."""
-    edit_access.require_candidate(db, candidate_id)
+    scope.get_scoped_candidate(db, candidate_id, current)
     if not payload.grants:
         raise HTTPException(status_code=400, detail="Select at least one field to open")
 
@@ -558,7 +608,7 @@ def grant_edit_access(candidate_id: int, payload: GrantEditAccessRequest,
 @router.post("/candidates/{candidate_id}/edit-access/revoke")
 def revoke_edit_access(candidate_id: int, payload: RevokeEditAccessRequest,
                         db: Session = Depends(get_db),
-                        current: HRUser = Depends(get_current_hr)):
+                        current: HRUser = Depends(get_current_staff)):
     """Withdraw access before the candidate has used it — one grant, several,
     or (with no `permission_ids`) everything still open.
 
@@ -566,7 +616,7 @@ def revoke_edit_access(candidate_id: int, payload: RevokeEditAccessRequest,
     the audit log; the candidate may already have seen the field open, and this
     is what says why it closed again. One call is one audited action, so
     closing five fields at once reads as one entry, not five."""
-    edit_access.require_candidate(db, candidate_id)
+    scope.get_scoped_candidate(db, candidate_id, current)
     active = edit_access.active_permissions(db, candidate_id)
 
     if payload.permission_ids:
@@ -603,9 +653,9 @@ def revoke_edit_access(candidate_id: int, payload: RevokeEditAccessRequest,
 
 @router.get("/candidates/{candidate_id}/audit", response_model=list[AuditEntryOut])
 def candidate_audit_trail(candidate_id: int, db: Session = Depends(get_db),
-                           current: HRUser = Depends(get_current_hr)):
+                           current: HRUser = Depends(get_current_staff)):
     """Every change made to this candidate's submitted data, newest first."""
-    candidate = edit_access.require_candidate(db, candidate_id)
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
     hr_names = _hr_names(db)
     entries = (db.query(FieldEditLog)
                  .filter(FieldEditLog.candidate_id == candidate_id)
@@ -640,12 +690,13 @@ def candidate_audit_trail(candidate_id: int, db: Session = Depends(get_db),
 
 @router.get("/document-snapshots/{snapshot_id}/download")
 def download_snapshot(snapshot_id: int, db: Session = Depends(get_db),
-                       current: HRUser = Depends(get_current_hr)):
+                       current: HRUser = Depends(get_current_staff)):
     """Open either side of a document change straight from the audit trail —
     the file that was replaced as well as the one that replaced it."""
     snap = db.query(DocumentSnapshot).filter(DocumentSnapshot.id == snapshot_id).first()
     if not snap:
         raise HTTPException(status_code=404, detail="That version is not on record")
+    scope.get_scoped_candidate(db, snap.candidate_id, current)
     path = upload_path(snap.stored_filename)
     if not os.path.isfile(path):
         raise HTTPException(
@@ -662,10 +713,8 @@ def download_snapshot(snapshot_id: int, db: Session = Depends(get_db),
 
 @router.post("/candidates/{candidate_id}/approve")
 def approve_candidate(candidate_id: int, payload: DecisionRequest, db: Session = Depends(get_db),
-                       current: HRUser = Depends(get_current_hr)):
-    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+                       current: HRUser = Depends(get_current_staff)):
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
     if candidate.stage != CandidateStage.CIF_SUBMITTED:
         raise HTTPException(status_code=400, detail="Candidate is not awaiting a decision")
 
@@ -697,10 +746,8 @@ def approve_candidate(candidate_id: int, payload: DecisionRequest, db: Session =
 
 @router.post("/candidates/{candidate_id}/reject")
 def reject_candidate(candidate_id: int, payload: DecisionRequest, db: Session = Depends(get_db),
-                      current: HRUser = Depends(get_current_hr)):
-    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+                      current: HRUser = Depends(get_current_staff)):
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
     if candidate.stage == CandidateStage.REJECTED:
         raise HTTPException(status_code=400, detail="Candidate is already rejected")
 
@@ -719,10 +766,8 @@ def reject_candidate(candidate_id: int, payload: DecisionRequest, db: Session = 
 
 @router.post("/candidates/{candidate_id}/mark-complete")
 def mark_onboarding_complete(candidate_id: int, db: Session = Depends(get_db),
-                              current: HRUser = Depends(get_current_hr)):
-    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+                              current: HRUser = Depends(get_current_staff)):
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
     if candidate.stage != CandidateStage.APPROVED_FOR_BGV:
         raise HTTPException(status_code=400, detail="Candidate is not in the BGV/Document stage")
     # The documents still have to be approved — that is the review this stage
@@ -752,14 +797,12 @@ _ZOHO_PUSH_STAGES = {CandidateStage.APPROVED_FOR_BGV, CandidateStage.ONBOARDING_
 
 @router.post("/candidates/{candidate_id}/zoho/push")
 def push_candidate_to_zoho(candidate_id: int, db: Session = Depends(get_db),
-                            current: HRUser = Depends(get_current_hr)):
+                            current: HRUser = Depends(get_current_staff)):
     """Publish this candidate into Zoho People. The first call inserts a
     Zoho draft record; every call after that updates the same record (never
     a second insert). Nothing is sent unless ZOHO_CANDIDATE_WRITE_FORM is
     configured in .env — see integrations/zoho/README.md."""
-    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
     if candidate.stage not in _ZOHO_PUSH_STAGES:
         raise HTTPException(
             status_code=400,
@@ -795,10 +838,11 @@ def push_candidate_to_zoho(candidate_id: int, db: Session = Depends(get_db),
 
 @router.post("/submissions/{submission_id}/review")
 def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: Session = Depends(get_db),
-                       current: HRUser = Depends(get_current_hr)):
+                       current: HRUser = Depends(get_current_staff)):
     submission = db.query(FormSubmission).filter(FormSubmission.id == submission_id).first()
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
+    scope.get_scoped_candidate(db, submission.candidate_id, current)
 
     # A review is a decision, not an arbitrary status write: LOCKED/PENDING/
     # SUBMITTED must never be reachable through this endpoint.
@@ -845,18 +889,37 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
 # Opening a form for the candidate
 #
 # A form is open when its FormSubmission row is PENDING and withheld when it
-# is LOCKED, which is what FormStatus.LOCKED has always meant. Today only BGV
-# reaches HR as a choice — the CIF opens at invite and Document Collection on
-# approval — but nothing here is BGV-specific.
+# is LOCKED, which is what FormStatus.LOCKED has always meant. Every form can
+# be sent and taken back by hand; the CIF still opens at invite and Document
+# Collection on approval, so the buttons are a correction, not the only route.
 # ---------------------------------------------------------------------------
+
+
+def _send_blocker(form: FormType, candidate: Candidate, db: Session) -> str | None:
+    """Why this form cannot be opened yet, or None when it can.
+
+    The onboarding runs CIF -> Document Collection -> BGV, and a form sent out
+    of turn would ask the candidate for details the step before it decides.
+    """
+    if form is FormType.DOCUMENT_COLLECTION:
+        if candidate.stage in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
+            return ("Approve this candidate's CIF before opening the "
+                    "Document Collection form.")
+    elif form is FormType.BGV:
+        docs = db.query(FormSubmission).filter(
+            FormSubmission.candidate_id == candidate.id,
+            FormSubmission.form_type == FormType.DOCUMENT_COLLECTION).first()
+        if docs is None or docs.status != FormStatus.APPROVED:
+            return ("Approve this candidate's Document Collection form before "
+                    "sending Background Verification.")
+    return None
+
 
 @router.post("/candidates/{candidate_id}/forms/{form_type}/send")
 def send_form(candidate_id: int, form_type: str, db: Session = Depends(get_db),
-               current: HRUser = Depends(get_current_hr)):
+               current: HRUser = Depends(get_current_staff)):
     """Open one form for the candidate to fill in."""
-    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
     try:
         form = FormType(form_type)
     except ValueError:
@@ -864,6 +927,9 @@ def send_form(candidate_id: int, form_type: str, db: Session = Depends(get_db),
     if candidate.stage == CandidateStage.REJECTED:
         raise HTTPException(status_code=400,
                              detail="This candidate is rejected — no form can be sent.")
+    blocker = _send_blocker(form, candidate, db)
+    if blocker:
+        raise HTTPException(status_code=400, detail=blocker)
 
     submission = db.query(FormSubmission).filter(
         FormSubmission.candidate_id == candidate_id,
@@ -890,11 +956,9 @@ def send_form(candidate_id: int, form_type: str, db: Session = Depends(get_db),
 
 @router.post("/candidates/{candidate_id}/forms/{form_type}/unsend")
 def unsend_form(candidate_id: int, form_type: str, db: Session = Depends(get_db),
-                 current: HRUser = Depends(get_current_hr)):
+                 current: HRUser = Depends(get_current_staff)):
     """Take back a form the candidate has not filled in yet."""
-    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
     try:
         form = FormType(form_type)
     except ValueError:
@@ -923,10 +987,11 @@ def unsend_form(candidate_id: int, form_type: str, db: Session = Depends(get_db)
 # ---------------------------------------------------------------------------
 
 @router.get("/documents/{document_id}/download")
-def download_document(document_id: int, db: Session = Depends(get_db), current: HRUser = Depends(get_current_hr)):
+def download_document(document_id: int, db: Session = Depends(get_db), current: HRUser = Depends(get_current_staff)):
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    scope.get_scoped_candidate(db, doc.candidate_id, current)
     path = upload_path(doc.stored_filename)
     # A DB row whose file is gone from disk must not become a 500: an
     # unhandled error is returned without CORS headers, so the browser
@@ -954,7 +1019,7 @@ _FORM_FILE_FIELDS = {
 def upload_document(candidate_id: int, form: str, field_key: str,
                      file: UploadFile = File(...), reason: str | None = Form(None),
                      db: Session = Depends(get_db),
-                     current: HRUser = Depends(get_current_hr)):
+                     current: HRUser = Depends(get_current_staff)):
     """Attach (or replace) one uploaded file on a candidate's form.
 
     Mirrors the candidate-side upload path: the new file is written and
@@ -962,9 +1027,7 @@ def upload_document(candidate_id: int, form: str, field_key: str,
     disk only after the transaction commits — a mid-request failure must not
     destroy the document already on record.
     """
-    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
     try:
         form_type = FormType(form)
     except ValueError:
@@ -1011,11 +1074,12 @@ def upload_document(candidate_id: int, form: str, field_key: str,
 @router.delete("/documents/{document_id}")
 def delete_document(document_id: int, reason: str | None = None,
                      db: Session = Depends(get_db),
-                     current: HRUser = Depends(get_current_hr)):
+                     current: HRUser = Depends(get_current_staff)):
     """Remove one uploaded file. The form then shows it as not submitted."""
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    scope.get_scoped_candidate(db, doc.candidate_id, current)
     # Pinned before deleting the row: the file stays on disk so the trail can
     # still show what was removed.
     snapshot = snapshot_document(db, doc)

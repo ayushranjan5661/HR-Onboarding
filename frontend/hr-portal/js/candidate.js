@@ -1,6 +1,7 @@
-requireAuth();
+requireAuth();   // every staff role reaches this page; the server scopes what it returns
 document.getElementById("whoami").textContent = getName();
 document.getElementById("whoamiAvatar").textContent = getName().charAt(0).toUpperCase();
+applyRoleNav();  // send Managers / Super Admin back to their own candidate list
 
 const candidateId = new URLSearchParams(window.location.search).get("id");
 let currentData = null;
@@ -381,7 +382,7 @@ function showLoadError(message) {
   notice.classList.remove("hidden");
   notice.innerHTML = `<strong style="color:#b91c1c;">${escapeHtml(message)}</strong>
     <div style="margin-top:8px;color:#6b7280;font-size:0.88rem;">
-      The candidate may have been deleted. <a href="dashboard.html">Back to all candidates</a>
+      The candidate may have been deleted. <a href="${roleCandidatesPage()}">Back to all candidates</a>
     </div>`;
 }
 
@@ -389,8 +390,11 @@ function render() {
   const c = currentData;
   document.getElementById("candName").textContent = `${c.name} — ${c.email}`;
   const typeLabel = c.candidate_type === "FRESHER" ? "Fresher / Trainee" : "Experienced";
+  const ownerTag = c.assigned_hr_name
+    ? `<span class="badge badge-pending" style="margin-right:6px;" title="Owner">Owner: ${escapeHtml(c.assigned_hr_name)}</span>`
+    : "";
   document.getElementById("candStage").innerHTML =
-    `<span class="badge badge-pending" style="margin-right:6px;">${typeLabel}</span>` + badge(c.stage);
+    ownerTag + `<span class="badge badge-pending" style="margin-right:6px;">${typeLabel}</span>` + badge(c.stage);
 
   // Login credentials issued to this candidate (HR-owned; candidate cannot change them)
   document.getElementById("credentialsBody").innerHTML = `
@@ -429,7 +433,15 @@ function render() {
   // No per-field buttons here — the CIF card has one Edit button for the whole form.
   const cifOpts = { editing: editModes.CIF };
   document.getElementById("profileFields").innerHTML = fieldRows("PROFILE", PROFILE_FIELDS, c.profile || {}, cifOpts);
-  document.getElementById("actions-CIF").innerHTML = formEditControls("CIF");
+  // The CIF card is static markup, so its title bar is filled in here: the
+  // same Send / Withdraw controls the follow-up cards get, plus a NOT SENT
+  // badge that says why a sent form has gone quiet on the candidate's side.
+  const cifSub = c.submissions.find(s => s.form_type === "CIF");
+  document.getElementById("actions-CIF").innerHTML =
+    (editModes.CIF ? "" : accessControls("CIF", cifSub, c)) + formEditControls("CIF");
+  document.getElementById("cifBadge").innerHTML =
+    cifSub && cifSub.status === "LOCKED"
+      ? `<span class="badge badge-locked">NOT SENT</span>` : "";
   renderOpenAccess();
 
   // ---- AI Summary & Flags: only once the candidate has actually submitted a CIF.
@@ -466,25 +478,20 @@ function render() {
     const sub = c.submissions.find(s => s.form_type === type);
     if (!sub) return;
     if (sub.status === "LOCKED") {
-      // Approving the documents no longer opens BGV by itself — HR decides
-      // whether this candidate needs it at all, so the card offers the send.
-      const docApproved = (c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION") || {})
-                            .status === "APPROVED";
-      const canSend = docApproved && c.stage !== "REJECTED";
+      const gate = sendGate(type, c);
       const wrap = document.createElement("div");
       wrap.className = "card section-card collapsed";
-      wrap.style.opacity = canSend ? "1" : "0.7";
+      wrap.style.opacity = gate.canSend ? "1" : "0.7";
       wrap.innerHTML = `<div class="section-title collapsible" onclick="toggleCollapse(this)">
           <h3>${cfg.title} <span class="badge badge-locked">NOT SENT</span></h3>
           <div class="section-title-actions" onclick="event.stopPropagation()">
-            ${canSend ? `<button class="btn btn-primary btn-small"
-              onclick="sendForm('${type}')">Send Form</button>` : ""}
+            ${accessControls(type, sub, c)}
           </div>
           <span class="chevron">&#9660;</span></div>
-        <p style="color:#6b7280;">${canSend
+        <p style="color:#6b7280;">${gate.canSend
           ? "The candidate cannot see this form until you send it. If you do not need it, "
             + "you can mark the onboarding complete without it."
-          : "Available once you approve their Document Collection form above."}</p>`;
+          : escapeHtml(gate.reason)}</p>`;
       document.getElementById("followupForms").appendChild(wrap);
       return;
     }
@@ -500,15 +507,11 @@ function render() {
     const reviewControls = canReview && !editing ? `
       <button class="btn btn-success btn-small" onclick="reviewSubmission(${sub.id}, 'APPROVED')">Approve</button>
       <button class="btn btn-danger btn-small" onclick="reviewSubmission(${sub.id}, 'REJECTED')">Reject</button>` : "";
-    // Sent but still untouched, so access can be taken back. Once submitted
-    // the card holds the candidate's work and the button goes away.
-    const accessControls = sub.status === "PENDING" && c.stage !== "REJECTED" ? `
-      <button class="btn btn-outline btn-small" onclick="unsendForm('${type}')">Withdraw</button>` : "";
     wrap.innerHTML = `
       <div class="section-title collapsible" onclick="toggleCollapse(this)">
         <h3>${cfg.title} <span class="badge badge-${sub.status.toLowerCase()}">${sub.status.replaceAll("_"," ")}</span></h3>
         <div class="section-title-actions" onclick="event.stopPropagation()">
-          ${submitted ? formEditControls(type) : ""}${reviewControls}${accessControls}
+          ${submitted ? formEditControls(type) : ""}${reviewControls}${accessControls(type, sub, c)}
         </div>
         <span class="chevron">&#9660;</span>
       </div>
@@ -641,6 +644,42 @@ async function copyLoginLink(btn) {
 // that turns every value — flat fields, repeating-table cells, attached
 // documents — into something editable. Save then PATCHes only what actually
 // changed, keeping the field_edit_log meaningful.
+
+// Whether HR may open one form for the candidate right now. The onboarding
+// runs CIF -> Document Collection -> BGV, so each form waits on the decision
+// before it; the same order is enforced server-side in hr._send_blocker.
+function sendGate(form, c) {
+  if (c.stage === "REJECTED") {
+    return { canSend: false, reason: "This application is rejected — no form can be sent." };
+  }
+  if (form === "DOCUMENT_COLLECTION" && (c.stage === "INVITED" || c.stage === "CIF_SUBMITTED")) {
+    return { canSend: false, reason: "Available once you approve their CIF above." };
+  }
+  if (form === "BGV") {
+    const docs = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
+    if (!docs || docs.status !== "APPROVED") {
+      return { canSend: false,
+               reason: "Available once you approve their Document Collection form above." };
+    }
+  }
+  return { canSend: true, reason: "" };
+}
+
+// Send / Withdraw for any of the three forms. A form that is not out yet can
+// be sent; one that is out but untouched can be taken back. Past that the card
+// holds the candidate's own work, so neither button applies.
+function accessControls(form, sub, c) {
+  const status = sub ? sub.status : "LOCKED";
+  if (status === "LOCKED") {
+    return sendGate(form, c).canSend
+      ? `<button class="btn btn-primary btn-small" onclick="sendForm('${form}')">Send Form</button>`
+      : "";
+  }
+  if (status === "PENDING" && c.stage !== "REJECTED") {
+    return `<button class="btn btn-outline btn-small" onclick="unsendForm('${form}')">Withdraw</button>`;
+  }
+  return "";
+}
 
 function formEditControls(form) {
   if (editModes[form]) {
@@ -1377,9 +1416,9 @@ async function markComplete() {
   }
 }
 
-// Opening a form for the candidate. Only BGV surfaces this today: the CIF
-// opens at invite and Document Collection on approval, while BGV is the one
-// HR may or may not want.
+// Opening and closing a form for the candidate. Every form carries these: the
+// CIF still opens at invite and Document Collection on approval, so the
+// buttons are there to correct that flow, not to drive it.
 async function unsendForm(formType) {
   const title = FORM_TITLES[formType] || formType;
   if (!await showConfirm(

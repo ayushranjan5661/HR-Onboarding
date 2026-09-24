@@ -446,6 +446,11 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
     # them, and makes every later change auditable.
     submission = db.query(FormSubmission).filter(FormSubmission.candidate_id == current.id,
                                                    FormSubmission.form_type == FormType.CIF).first()
+    # HR can withdraw a form they have sent (see hr.unsend_form), which puts it
+    # back to LOCKED. That is not "already submitted", so it gets its own reply.
+    if submission and submission.status == FormStatus.LOCKED:
+        raise HTTPException(status_code=400,
+                             detail="This form is not open for you right now.")
     if submission and submission.status != FormStatus.PENDING:
         raise HTTPException(
             status_code=400,

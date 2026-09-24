@@ -718,3 +718,33 @@ table .edit-input { min-width: 120px; margin: 0; padding: 6px 8px; font-size: 0.
 }
 .audit-empty-state strong { font-size: 0.92rem; }
 .audit-empty-state span { color: var(--muted); font-size: 0.84rem; }
+
+/* ---------------------------------------------------------------------
+   Staff hierarchy (Manager / Super Admin portals)
+--------------------------------------------------------------------- */
+.badge-role-master_admin { background: #1f2937; color: #f9fafb; }
+.badge-role-super_admin { background: #fdf2f8; color: #9d174d; }
+.badge-role-manager { background: #e0e7ff; color: #3730a3; }
+.badge-role-hr { background: #f1f2f8; color: var(--muted); }
+.badge-active { background: var(--success-bg); color: var(--success); }
+.badge-inactive { background: var(--danger-bg); color: var(--danger); }
+.badge-action { background: var(--brand-light); color: var(--brand-dark); text-transform: none; }
+.muted-text { color: var(--muted); font-size: 0.78rem; }
+.inline-select {
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 0.82rem; background: #fff; color: var(--text); max-width: 200px;
+}
+.inline-select:disabled { background: #f6f7fb; color: var(--muted); }
+.row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.row-actions .btn-small { padding: 5px 10px; font-size: 0.76rem; }
+.filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+.filters .search-input { flex: 1; min-width: 220px; }
+.filters select { padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; font-size: 0.86rem; }
+.section-gap { margin-top: 22px; }
+.temp-pass { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem;
+  background: var(--warn-bg); color: var(--warn); padding: 2px 6px; border-radius: 4px; }
+.pending-tag { color: var(--warn); font-size: 0.75rem; font-weight: 600; }
+tr.inactive-row td { opacity: 0.6; }
+.sidebar-nav .nav-section { color: rgba(255,255,255,0.45); font-size: 0.68rem; letter-spacing: 0.08em;
+  text-transform: uppercase; padding: 14px 14px 4px; }
+.user-role { display: block; color: rgba(255,255,255,0.55); font-size: 0.7rem; }

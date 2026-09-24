@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>HR Portal — Dashboard</title>
-<link rel="stylesheet" href="css/style.css?v=20260901b">
+<link rel="stylesheet" href="css/style.css?v=20260923a">
 </head>
 <body>
   <div class="app-shell">
@@ -17,6 +17,7 @@
           <span class="avatar" id="whoamiAvatar"></span>
           <span class="user-name" id="whoami"></span>
         </div>
+        <a class="back-link" href="../change-password.html" style="display:block;margin:0 0 8px 2px;font-size:0.78rem;">Change password</a>
         <button class="logout-btn" onclick="hrLogout()">Log out</button>
       </div>
     </aside>
@@ -113,9 +114,9 @@
   </div>
 
   <script src="../js/config.js?v=20260901b"></script>
-  <script src="js/api.js?v=20260901b"></script>
+  <script src="js/api.js?v=20260923b"></script>
   <script>
-    requireAuth();
+    requireAuth(["HR"]);   // Managers and the Super Admin have their own candidate pages
     document.getElementById("whoami").textContent = getName();
     document.getElementById("whoamiAvatar").textContent = getName().charAt(0).toUpperCase();
 
