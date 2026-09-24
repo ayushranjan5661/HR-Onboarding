@@ -53,6 +53,8 @@ class FormStatus(str, enum.Enum):
 class StaffRole(str, enum.Enum):
     """Staff hierarchy. Stored as a plain VARCHAR (not a Postgres enum) so
     init_db's column sync can add it to an existing table."""
+    MASTER_ADMIN = "MASTER_ADMIN"  # developer account, seeded from .env only: everything below,
+                                   # plus create/manage Super Admins and read every staff password
     SUPER_ADMIN = "SUPER_ADMIN"   # the seeded account: manages everyone, sees everything
     MANAGER = "MANAGER"           # leads a team of HR executives; sees the team's candidates
     HR = "HR"                     # invites and reviews their own candidates
@@ -85,6 +87,11 @@ class HRUser(Base):
     # candidate password) until the user replaces it on first login.
     temp_password_enc = Column(Text, nullable=True)
     must_reset_password = Column(Boolean, default=False, nullable=False)
+    # The password currently in force, encrypted with the same key as the
+    # candidate passwords, so the Master Admin can look it up. Written on
+    # every create, reset and self-service change; NULL for accounts whose
+    # password was last set before this column existed.
+    password_enc = Column(Text, nullable=True)
 
     manager = relationship("HRUser", remote_side=[id], foreign_keys=[manager_id],
                            post_update=True)

@@ -9,7 +9,7 @@ HR reviews those and closes out onboarding.
 - Backend: FastAPI + PostgreSQL (SQLAlchemy), JWT auth, two independent login
   systems (staff vs Candidate).
 - Frontend: static HTML/CSS/JS — four portals (Super Admin, Manager, HR,
-  Candidate), no build step.
+  Candidate), no build step. The Master Admin uses the Super Admin portal.
 
 ## Staff roles
 One staff table (`hr_users`), one login (`/auth/staff/login`); the account's
@@ -17,7 +17,8 @@ role decides the landing page and what the server lets it see.
 
 | Role | Who | Sees | Can do |
 | --- | --- | --- | --- |
-| `SUPER_ADMIN` | the seeded account | every candidate | create / deactivate / delete Managers and HR Executives, reset any staff password, move an HR between teams, reassign any candidate, global audit |
+| `MASTER_ADMIN` | developer account, seeded from `SEED_MASTER_*` in `.env` only | everything, plus the **current password** of every staff login | everything below, plus create / deactivate / delete / reset Super Admins. Cannot be created by the API, deleted or deactivated. Invisible to Super Admins |
+| `SUPER_ADMIN` | the seeded account (`SEED_HR_*`); more can be created by the Master Admin | every candidate | create / deactivate / delete Managers and HR Executives, reset their passwords, move an HR between teams, reassign any candidate, global audit |
 | `MANAGER` | team lead | own + team candidates | create / deactivate / delete HR Executives in own team, invite candidates for any team member, reassign within team, everything an HR can do on team candidates, team audit |
 | `HR` | HR Executive | candidates assigned to them | invite, review, approve / reject, send / withdraw forms, edit access |
 
@@ -34,9 +35,16 @@ Rules enforced server-side (`app/scope.py`, `app/staff_service.py`):
 - An HR with no Manager (rows from before teams existed) is visible only to
   the Super Admin until moved into a team.
 - Staff-hierarchy changes are written to `staff_audit_log`.
+- Every staff password in force is also kept encrypted (`hr_users.password_enc`,
+  same key scheme as candidate passwords) so the Master Admin can read it.
+  Written on create, reset, self-service change and seed; rows whose password
+  was last set before this existed show "Not recorded" until reset.
+- Only the Master Admin may act on a Super Admin (`/admin/staff/{id}` returns
+  404 to a Super Admin for admin rows, including the Master Admin's).
 
-Portals: `frontend/super-admin/`, `frontend/manager/`, `frontend/hr-portal/`.
-The candidate detail page (`hr-portal/candidate.html`) is shared by all three.
+Portals: `frontend/super-admin/` (Master Admin and Super Admin), `frontend/manager/`,
+`frontend/hr-portal/`. The candidate detail page (`hr-portal/candidate.html`) is
+shared by every staff role.
 - Files (Aadhaar/PAN/mark sheets/resume/etc.) are stored on disk under
   `backend/uploads/`, referenced from Postgres.
 
@@ -104,7 +112,7 @@ HR-Onboarding/
 ### Data model
 | Table | What it holds |
 | --- | --- |
-| `hr_users` | every staff login: `role`, `manager_id` (HR → Manager), `must_reset_password` |
+| `hr_users` | every staff login: `role`, `manager_id` (HR → Manager), `must_reset_password`, `password_enc` (Master Admin view) |
 | `staff_audit_log` | staff create / deactivate / delete / reset / move, candidate reassignment |
 | `candidates` | candidate login, stage, type, invite token |
 | `candidate_profiles` | identity fields shared by every form |

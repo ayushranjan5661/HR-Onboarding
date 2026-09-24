@@ -1,6 +1,6 @@
-"""Manager (and Super Admin): run a team of HR Executives and decide who owns
-which candidate. A Manager reaches only their own team; the Super Admin,
-using the same endpoints, reaches every team."""
+"""Manager (and the admins): run a team of HR Executives and decide who owns
+which candidate. A Manager reaches only their own team; the Super Admin and
+Master Admin, using the same endpoints, reach every team."""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -28,7 +28,7 @@ def _team_member(db: Session, staff_id: int, current: HRUser) -> HRUser:
 def list_team(db: Session = Depends(get_db), current: HRUser = Depends(get_current_manager_or_above)):
     """The caller's HR Executives (every HR Executive, for the Super Admin)."""
     q = db.query(HRUser).filter(HRUser.role == StaffRole.HR.value)
-    if not scope.is_super_admin(current):
+    if not scope.is_admin(current):
         q = q.filter(HRUser.manager_id == current.id)
     return staff_service.staff_out(db, q.order_by(HRUser.name).all(), include_temp_password=True)
 
@@ -40,7 +40,7 @@ def create_hr(payload: CreateStaffRequest, db: Session = Depends(get_db),
     team with manager_id."""
     if payload.role not in (StaffRole.HR.value, None, ""):
         raise HTTPException(status_code=403, detail="Only the Super Admin can create Managers")
-    if scope.is_super_admin(current):
+    if scope.is_admin(current):
         manager = staff_service.get_manager(db, payload.manager_id)
     else:
         if payload.manager_id not in (None, current.id):
@@ -59,7 +59,7 @@ def update_hr(staff_id: int, payload: UpdateStaffRequest, db: Session = Depends(
     """Rename or deactivate/reactivate one of the caller's HR Executives.
     Moving an HR Executive between teams is the Super Admin's call."""
     target = _team_member(db, staff_id, current)
-    if payload.manager_id is not None and not scope.is_super_admin(current):
+    if payload.manager_id is not None and not scope.is_admin(current):
         raise HTTPException(status_code=403, detail="Only the Super Admin can move an HR Executive to another team")
     if payload.name is not None:
         staff_service.rename(db, current, target, payload.name)
@@ -115,7 +115,7 @@ def team_audit(limit: int = 500, db: Session = Depends(get_db),
                current: HRUser = Depends(get_current_manager_or_above)):
     """Staff and ownership changes touching the caller's team, newest first."""
     q = db.query(StaffAuditLog)
-    if not scope.is_super_admin(current):
+    if not scope.is_admin(current):
         q = q.filter(or_(StaffAuditLog.team_manager_id == current.id,
                          StaffAuditLog.actor_id == current.id))
     return (q.order_by(StaffAuditLog.created_at.desc(), StaffAuditLog.id.desc())

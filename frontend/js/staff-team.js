@@ -1,32 +1,44 @@
-// Staff accounts page, shared by the Super Admin (mode "admin": Managers and
-// HR Executives, all teams) and a Manager (mode "manager": their own HR
-// Executives). The HTML shell provides the sidebar and an empty #pageContent.
+// Staff accounts page, shared by the admins (mode "admin": Managers and HR
+// Executives across all teams; the Master Admin also sees the Super Admins
+// and every account's current password) and a Manager (mode "manager":
+// their own HR Executives). The HTML shell provides the sidebar and an
+// empty #pageContent.
 
 async function initTeamPage(mode) {
   const isAdmin = mode === "admin";
-  requireAuth(isAdmin ? ["SUPER_ADMIN"] : ["MANAGER"]);
+  requireAuth(isAdmin ? ADMIN_ROLES : ["MANAGER"]);
   mountUserChip();
+  const isMaster = isMasterAdmin();
 
   const BASE = isAdmin ? "/admin/staff" : "/manager/team";
   const root = document.getElementById("pageContent");
   const loginLink = new URL("../index.html", location.href).href;
+  const passwordHeader = isMaster ? "Password" : "First password";
   let staff = [];
+  let myId = null;
 
   root.innerHTML = `
     <div class="page-header">
       <h2>${isAdmin ? "Staff Accounts" : "My Team"}</h2>
       <button class="btn btn-primary" id="addBtn">+ ${isAdmin ? "Add Staff" : "Add HR Executive"}</button>
     </div>
+    ${isMaster ? `
+    <div class="card section-card" id="adminsCard">
+      <div class="section-title"><h3>Super Admins</h3></div>
+      <table><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Owns</th><th>${passwordHeader}</th><th></th></tr></thead>
+      <tbody id="adminsBody"></tbody></table>
+      <div class="empty-state hidden" id="adminsEmpty">No Super Admins yet.</div>
+    </div>` : ""}
     ${isAdmin ? `
-    <div class="card section-card" id="managersCard">
+    <div class="card section-card ${isMaster ? "section-gap" : ""}" id="managersCard">
       <div class="section-title"><h3>Managers</h3></div>
-      <table><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Team</th><th>Owns</th><th>First password</th><th></th></tr></thead>
+      <table><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Team</th><th>Owns</th><th>${passwordHeader}</th><th></th></tr></thead>
       <tbody id="managersBody"></tbody></table>
       <div class="empty-state hidden" id="managersEmpty">No Managers yet.</div>
     </div>` : ""}
     <div class="card section-card ${isAdmin ? "section-gap" : ""}">
       <div class="section-title"><h3>HR Executives</h3></div>
-      <table><thead><tr><th>Name</th><th>Email</th><th>Status</th>${isAdmin ? "<th>Manager</th>" : ""}<th>Owns</th><th>First password</th><th></th></tr></thead>
+      <table><thead><tr><th>Name</th><th>Email</th><th>Status</th>${isAdmin ? "<th>Manager</th>" : ""}<th>Owns</th><th>${passwordHeader}</th><th></th></tr></thead>
       <tbody id="hrBody"></tbody></table>
       <div class="empty-state hidden" id="hrEmpty">No HR Executives yet.</div>
     </div>
@@ -47,6 +59,7 @@ async function initTeamPage(mode) {
           <select id="cRole">
             <option value="HR">HR Executive</option>
             <option value="MANAGER">Manager</option>
+            ${isMaster ? `<option value="SUPER_ADMIN">Super Admin</option>` : ""}
           </select>
           <div id="cManagerWrap">
             <label>Reports to</label>
@@ -69,14 +82,26 @@ async function initTeamPage(mode) {
 
   // --- data -----------------------------------------------------------------
   async function load() {
+    if (myId === null) myId = (await apiFetch("/hr/me")).id;
     staff = await apiFetch(BASE);
     render();
   }
 
+  function superAdmins() { return staff.filter(s => s.role === "SUPER_ADMIN"); }
   function managers() { return staff.filter(s => s.role === "MANAGER"); }
   function hrs() { return staff.filter(s => s.role === "HR"); }
 
   function passwordCell(s) {
+    if (isMaster) {
+      // The Master Admin sees the password in force. Accounts whose password
+      // was last set before it was recorded show nothing until a reset.
+      if (s.current_password) {
+        return `<span class="temp-pass">${escapeHtml(s.current_password)}</span>
+                <button type="button" class="cred-copy" title="Copy" data-copy="${escapeHtml(s.current_password)}">${COPY_ICON}</button>
+                ${s.must_reset_password ? `<div class="pending-tag">Not yet changed</div>` : ""}`;
+      }
+      return `<span class="muted-text" title="Set before passwords were recorded. Reset it to see it.">Not recorded</span>`;
+    }
     if (!s.must_reset_password) return `<span class="muted-text">Set by user</span>`;
     if (!s.temp_password) return `<span class="pending-tag">Change pending</span>`;
     return `<span class="temp-pass">${escapeHtml(s.temp_password)}</span>
@@ -84,7 +109,16 @@ async function initTeamPage(mode) {
             <div class="pending-tag">Not yet changed</div>`;
   }
 
+  // Whether the caller may act on this row at all. Only the Master Admin
+  // touches a Super Admin; nobody acts on their own row here.
+  function canManage(s) {
+    if (s.id === myId || s.role === "MASTER_ADMIN") return false;
+    if (s.role === "SUPER_ADMIN") return isMaster;
+    return true;
+  }
+
   function actionButtons(s) {
+    if (!canManage(s)) return `<span class="muted-text">${s.id === myId ? "You" : "—"}</span>`;
     const blocked = s.candidate_count > 0 || s.team_size > 0;
     const why = s.candidate_count > 0 ? `Still owns ${s.candidate_count} candidate(s). Reassign first.`
               : s.team_size > 0 ? `Still leads ${s.team_size} HR Executive(s). Move them first.` : "";
@@ -112,6 +146,11 @@ async function initTeamPage(mode) {
   }
 
   function render() {
+    if (isMaster) {
+      const a = superAdmins();
+      document.getElementById("adminsBody").innerHTML = a.map(row).join("");
+      document.getElementById("adminsEmpty").classList.toggle("hidden", a.length > 0);
+    }
     if (isAdmin) {
       const m = managers();
       document.getElementById("managersBody").innerHTML = m.map(row).join("");
@@ -219,6 +258,13 @@ async function initTeamPage(mode) {
     if (isAdmin && body.role === "HR") {
       const m = document.getElementById("cManager").value;
       body.manager_id = m ? Number(m) : null;
+    }
+    if (body.role === "SUPER_ADMIN") {
+      const ok = await confirmDialog({
+        title: "Create a Super Admin?", danger: false, confirmLabel: "Create Super Admin",
+        html: `A Super Admin manages every Manager, HR Executive and candidate. Only you can deactivate, delete or reset this account later.`,
+      });
+      if (!ok) return;
     }
     try {
       const data = await apiFetch(BASE, { method: "POST", body: JSON.stringify(body) });

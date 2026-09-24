@@ -89,10 +89,17 @@ class Settings(BaseSettings):
             path = Path(__file__).resolve().parents[1] / path
         return str(path)
 
-    # --- Seed HR admin (used by init_db.py, first run only) ---
+    # --- Seed Super Admin (used by init_db.py, first run only) ---
     SEED_HR_NAME: str = "HR Admin"
     SEED_HR_EMAIL: str = "hr@levelshift.com"
     SEED_HR_PASSWORD: str = "ChangeMe@123"
+
+    # --- Seed Master Admin: the developer account above the Super Admin. ---
+    # The only way this role comes into being; the API never creates one.
+    # Leave the password blank and init_db skips it.
+    SEED_MASTER_NAME: str = "Master Admin"
+    SEED_MASTER_EMAIL: str = "master@levelshift.com"
+    SEED_MASTER_PASSWORD: str = ""
 
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE,

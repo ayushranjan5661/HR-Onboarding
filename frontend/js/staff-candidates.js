@@ -1,10 +1,10 @@
-// Candidate list for a Manager (their team) or the Super Admin (everyone),
+// Candidate list for a Manager (their team) or the admins (everyone),
 // with owner, stage, reassignment and invite-with-owner. Opens the shared
 // candidate detail page for everything else.
 
 async function initCandidatesPage(mode) {
   const isAdmin = mode === "admin";
-  requireAuth(isAdmin ? ["SUPER_ADMIN"] : ["MANAGER"]);
+  requireAuth(isAdmin ? ADMIN_ROLES : ["MANAGER"]);
   mountUserChip();
 
   const root = document.getElementById("pageContent");

@@ -722,6 +722,7 @@ table .edit-input { min-width: 120px; margin: 0; padding: 6px 8px; font-size: 0.
 /* ---------------------------------------------------------------------
    Staff hierarchy (Manager / Super Admin portals)
 --------------------------------------------------------------------- */
+.badge-role-master_admin { background: #1f2937; color: #f9fafb; }
 .badge-role-super_admin { background: #fdf2f8; color: #9d174d; }
 .badge-role-manager { background: #e0e7ff; color: #3730a3; }
 .badge-role-hr { background: #f1f2f8; color: var(--muted); }

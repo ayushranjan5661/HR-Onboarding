@@ -20,7 +20,7 @@ class InviteTokenLoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    role: str                      # candidate | SUPER_ADMIN | MANAGER | HR
+    role: str                      # candidate | MASTER_ADMIN | SUPER_ADMIN | MANAGER | HR
     name: str
     must_reset_password: bool = False
 
@@ -31,7 +31,7 @@ class ChangePasswordRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Staff hierarchy (Super Admin / Manager / HR Executive)
+# Staff hierarchy (Master Admin / Super Admin / Manager / HR Executive)
 # ---------------------------------------------------------------------------
 
 class StaffOut(BaseModel):
@@ -44,6 +44,7 @@ class StaffOut(BaseModel):
     manager_name: Optional[str] = None
     must_reset_password: bool = False
     temp_password: Optional[str] = None   # one-time password, until they change it
+    current_password: Optional[str] = None  # Master Admin only: the password in force now
     candidate_count: int = 0              # candidates they currently own
     team_size: int = 0                    # Managers: HR Executives reporting to them
     created_at: Optional[datetime] = None
@@ -52,7 +53,7 @@ class StaffOut(BaseModel):
 class CreateStaffRequest(BaseModel):
     name: str
     email: EmailStr
-    role: str = "HR"                      # MANAGER | HR
+    role: str = "HR"                      # SUPER_ADMIN (Master Admin only) | MANAGER | HR
     manager_id: Optional[int] = None      # HR only: the team they join
 
 

@@ -115,6 +115,10 @@ def main():
         # the Super Admin.
         conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS role VARCHAR(20) "
                            "NOT NULL DEFAULT 'HR'"))
+        # Databases created before MASTER_ADMIN existed sized these to fit
+        # SUPER_ADMIN (11 chars); widen to the model's 20 either way.
+        conn.execute(text("ALTER TABLE hr_users ALTER COLUMN role TYPE VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE staff_audit_log ALTER COLUMN actor_role TYPE VARCHAR(20)"))
         conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS manager_id INTEGER"))
         conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS created_by_id INTEGER"))
         conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS temp_password_enc TEXT"))
@@ -149,24 +153,49 @@ def main():
 
     db = SessionLocal()
     try:
-        existing = db.query(HRUser).filter(HRUser.email == settings.SEED_HR_EMAIL).first()
-        if not existing:
-            db.add(HRUser(
-                name=settings.SEED_HR_NAME,
-                email=settings.SEED_HR_EMAIL,
-                password_hash=hash_password(settings.SEED_HR_PASSWORD),
-                role=StaffRole.SUPER_ADMIN.value,
-            ))
-            db.commit()
-            print(f"Tables created. Seeded Super Admin login -> {settings.SEED_HR_EMAIL} / {settings.SEED_HR_PASSWORD}")
-            print("Change this password after first login (set SEED_HR_* in .env before first run to customize).")
+        _seed_admin(db, role=StaffRole.SUPER_ADMIN, name=settings.SEED_HR_NAME,
+                    email=settings.SEED_HR_EMAIL, password=settings.SEED_HR_PASSWORD,
+                    env_prefix="SEED_HR_")
+        if settings.SEED_MASTER_PASSWORD:
+            _seed_admin(db, role=StaffRole.MASTER_ADMIN, name=settings.SEED_MASTER_NAME,
+                        email=settings.SEED_MASTER_EMAIL, password=settings.SEED_MASTER_PASSWORD,
+                        env_prefix="SEED_MASTER_")
         else:
-            if existing.role != StaffRole.SUPER_ADMIN.value:
-                existing.role = StaffRole.SUPER_ADMIN.value
-                db.commit()
-            print("Tables created/verified. Seed Super Admin already exists.")
+            print("No Master Admin seeded: set SEED_MASTER_EMAIL / SEED_MASTER_PASSWORD in .env "
+                  "and run again to create the developer account.")
     finally:
         db.close()
+
+
+def _seed_admin(db, *, role, name, email, password, env_prefix):
+    """Create the seeded admin login, or bring an existing row up to its
+    role. The seed password is also stored encrypted so the Master Admin's
+    password view covers the seeded accounts too (only while the row still
+    uses that password; a changed password is never overwritten)."""
+    from app.security import encrypt_password, verify_password
+
+    label = role.value.replace("_", " ").title()
+    existing = db.query(HRUser).filter(HRUser.email == email).first()
+    if not existing:
+        db.add(HRUser(name=name, email=email, role=role.value,
+                      password_hash=hash_password(password),
+                      password_enc=encrypt_password(password)))
+        db.commit()
+        print(f"Seeded {label} login -> {email} (password: {env_prefix}PASSWORD in .env)")
+        print("Change this password after first login.")
+        return
+    changed = False
+    # Never demote: a Master Admin row keeps its role even if its email is
+    # also given as the Super Admin seed.
+    if existing.role != role.value and existing.role != StaffRole.MASTER_ADMIN.value:
+        existing.role = role.value
+        changed = True
+    if existing.password_enc is None and verify_password(password, existing.password_hash):
+        existing.password_enc = encrypt_password(password)
+        changed = True
+    if changed:
+        db.commit()
+    print(f"Tables created/verified. Seed {label} already exists.")
 
 
 if __name__ == "__main__":

@@ -42,6 +42,13 @@ function mountUserChip() {
   if (who) who.textContent = getName();
   if (av) av.textContent = getName().charAt(0).toUpperCase();
   if (role) role.textContent = roleLabel(getRole());
+  // The super-admin/ pages are shared with the Master Admin: name the
+  // portal after whoever is actually in it.
+  if (isMasterAdmin()) {
+    const brand = document.getElementById("brandTitle");
+    if (brand) brand.textContent = "Master Admin";
+    document.title = document.title.replace("Super Admin", "Master Admin");
+  }
 }
 
 function selectOptions(items, selected, placeholder) {

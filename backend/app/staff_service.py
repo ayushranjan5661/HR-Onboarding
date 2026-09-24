@@ -16,9 +16,13 @@ from app.security import decrypt_password, encrypt_password, generate_temp_passw
 # Audit
 # ---------------------------------------------------------------------------
 
+def _is_master(user: HRUser) -> bool:
+    return user.role == StaffRole.MASTER_ADMIN.value
+
+
 def team_of(user: HRUser | None) -> int | None:
     """The Manager id a staff user's actions file under: their Manager for an
-    HR Executive, themselves for a Manager, nothing for the Super Admin."""
+    HR Executive, themselves for a Manager, nothing for the admins."""
     if user is None:
         return None
     if user.role == StaffRole.MANAGER.value:
@@ -43,9 +47,11 @@ def audit(db: Session, actor: HRUser, action: str, *, target_type: str,
 # Read helpers
 # ---------------------------------------------------------------------------
 
-def staff_out(db: Session, users: list[HRUser], include_temp_password: bool = False) -> list[StaffOut]:
+def staff_out(db: Session, users: list[HRUser], include_temp_password: bool = False,
+              include_current_password: bool = False) -> list[StaffOut]:
     """Serialise staff rows with their owned-candidate and team counts, in a
-    fixed number of queries whatever the list size."""
+    fixed number of queries whatever the list size. `include_current_password`
+    is for the Master Admin only: it decrypts the password now in force."""
     ids = [u.id for u in users]
     if not ids:
         return []
@@ -66,6 +72,8 @@ def staff_out(db: Session, users: list[HRUser], include_temp_password: bool = Fa
             must_reset_password=u.must_reset_password,
             temp_password=(decrypt_password(u.temp_password_enc)
                            if include_temp_password and u.must_reset_password else None),
+            current_password=(decrypt_password(u.password_enc)
+                              if include_current_password else None),
             candidate_count=owned.get(u.id, 0), team_size=teams.get(u.id, 0),
             created_at=u.created_at))
     return out
@@ -89,14 +97,20 @@ def get_manager(db: Session, manager_id: int | None) -> HRUser | None:
 
 def create_staff(db: Session, actor: HRUser, *, name: str, email: str, role: StaffRole,
                  manager: HRUser | None) -> tuple[HRUser, str]:
-    """Create a Manager or HR Executive with a system-generated password that
-    must be changed on first login. Returns the user and that password — the
-    only time it is handed out in clear."""
+    """Create a Super Admin (Master Admin only), Manager or HR Executive with
+    a system-generated password that must be changed on first login. Returns
+    the user and that password."""
     name = (name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Name is required")
+    if role == StaffRole.MASTER_ADMIN:
+        raise HTTPException(status_code=400,
+                             detail="The Master Admin is seeded from .env and cannot be created here")
     if role == StaffRole.SUPER_ADMIN:
-        raise HTTPException(status_code=400, detail="Only one Super Admin exists; it cannot be created here")
+        if not _is_master(actor):
+            raise HTTPException(status_code=403, detail="Only the Master Admin can create Super Admins")
+        if manager is not None:
+            raise HTTPException(status_code=400, detail="A Super Admin does not report to a Manager")
     if role == StaffRole.MANAGER and manager is not None:
         raise HTTPException(status_code=400, detail="A Manager does not report to another Manager")
     if db.query(HRUser).filter(HRUser.email == email).first():
@@ -108,6 +122,7 @@ def create_staff(db: Session, actor: HRUser, *, name: str, email: str, role: Sta
         manager_id=manager.id if manager else None,
         password_hash=hash_password(temp_password),
         temp_password_enc=encrypt_password(temp_password),
+        password_enc=encrypt_password(temp_password),
         must_reset_password=True, created_by_id=actor.id, is_active=True,
     )
     db.add(user)
@@ -123,18 +138,44 @@ def create_staff(db: Session, actor: HRUser, *, name: str, email: str, role: Sta
 def reset_password(db: Session, actor: HRUser, target: HRUser) -> str:
     """Issue a fresh one-time password. The old one stops working now, and
     the user has to pick their own on next login."""
+    _guard_admin_target(actor, target, "reset the password of")
     temp_password = generate_temp_password(12)
     target.password_hash = hash_password(temp_password)
     target.temp_password_enc = encrypt_password(temp_password)
+    target.password_enc = encrypt_password(temp_password)
     target.must_reset_password = True
     audit(db, actor, "STAFF_PASSWORD_RESET", target_type="STAFF", target=target,
           detail=f"Password reset for {target.email}", team_manager_id=team_of(target))
     return temp_password
 
 
+def record_own_password(user: HRUser, plain: str) -> None:
+    """A staff user chose their own password: keep the encrypted copy in
+    step so the Master Admin's view stays accurate."""
+    user.password_hash = hash_password(plain)
+    user.password_enc = encrypt_password(plain)
+    user.must_reset_password = False
+    user.temp_password_enc = None
+
+
+def _guard_admin_target(actor: HRUser, target: HRUser, verb: str) -> None:
+    """Nobody touches the Master Admin's account but the Master Admin, and
+    only the Master Admin touches a Super Admin's."""
+    if target.role == StaffRole.MASTER_ADMIN.value and target.id != actor.id:
+        raise HTTPException(status_code=403, detail=f"You cannot {verb} the Master Admin")
+    if target.role == StaffRole.SUPER_ADMIN.value and not _is_master(actor):
+        raise HTTPException(status_code=403, detail=f"Only the Master Admin can {verb} a Super Admin")
+
+
 def set_active(db: Session, actor: HRUser, target: HRUser, active: bool) -> None:
     if target.is_active == active:
         return
+    if not active:
+        if target.id == actor.id:
+            raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
+        if target.role == StaffRole.MASTER_ADMIN.value:
+            raise HTTPException(status_code=400, detail="The Master Admin account cannot be deactivated")
+        _guard_admin_target(actor, target, "deactivate")
     target.is_active = active
     audit(db, actor, "STAFF_ACTIVATED" if active else "STAFF_DEACTIVATED", target_type="STAFF",
           target=target, detail=f"{'Reactivated' if active else 'Deactivated'} {target.email}",
@@ -177,8 +218,9 @@ def delete_staff(db: Session, actor: HRUser, target: HRUser) -> None:
     or lead HR Executives — reassign those first, or deactivate instead."""
     if target.id == actor.id:
         raise HTTPException(status_code=400, detail="You cannot delete your own account")
-    if target.role == StaffRole.SUPER_ADMIN.value:
-        raise HTTPException(status_code=400, detail="The Super Admin account cannot be deleted")
+    if target.role == StaffRole.MASTER_ADMIN.value:
+        raise HTTPException(status_code=400, detail="The Master Admin account cannot be deleted")
+    _guard_admin_target(actor, target, "delete")
     owned = db.query(func.count(Candidate.id)).filter(Candidate.assigned_hr_id == target.id).scalar()
     if owned:
         raise HTTPException(

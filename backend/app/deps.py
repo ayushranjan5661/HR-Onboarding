@@ -42,7 +42,8 @@ def get_current_staff_allow_reset(token: str = Depends(staff_oauth2_scheme),
 
 
 def get_current_staff(token: str = Depends(staff_oauth2_scheme), db: Session = Depends(get_db)) -> HRUser:
-    """Any active staff user (Super Admin, Manager or HR Executive). A user
+    """Any active staff user (Master Admin, Super Admin, Manager or HR
+    Executive). A user
     flagged to reset their password can do nothing else until they have."""
     user = _load_staff(token, db)
     if user.must_reset_password:
@@ -68,8 +69,13 @@ def require_roles(*roles: StaffRole):
     return _guard
 
 
-get_current_super_admin = require_roles(StaffRole.SUPER_ADMIN)
-get_current_manager_or_above = require_roles(StaffRole.SUPER_ADMIN, StaffRole.MANAGER)
+get_current_master_admin = require_roles(StaffRole.MASTER_ADMIN)
+# Master Admin or Super Admin: the /admin endpoints. What each may target is
+# decided per row by app.scope.staff_in_scope.
+get_current_admin = require_roles(StaffRole.MASTER_ADMIN, StaffRole.SUPER_ADMIN)
+get_current_super_admin = get_current_admin   # old name
+get_current_manager_or_above = require_roles(StaffRole.MASTER_ADMIN, StaffRole.SUPER_ADMIN,
+                                             StaffRole.MANAGER)
 
 
 def get_current_candidate(token: str = Depends(candidate_oauth2_scheme), db: Session = Depends(get_db)) -> Candidate:

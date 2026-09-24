@@ -1,9 +1,9 @@
 // Staff audit trail: who created, deactivated, deleted, reset, moved or
-// reassigned what. Global for the Super Admin, team-scoped for a Manager.
+// reassigned what. Global for the admins, team-scoped for a Manager.
 
 async function initAuditPage(mode) {
   const isAdmin = mode === "admin";
-  requireAuth(isAdmin ? ["SUPER_ADMIN"] : ["MANAGER"]);
+  requireAuth(isAdmin ? ADMIN_ROLES : ["MANAGER"]);
   mountUserChip();
 
   const root = document.getElementById("pageContent");

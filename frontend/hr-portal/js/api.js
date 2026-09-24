@@ -1,4 +1,5 @@
-// Shared session + API helper for every staff portal (HR, Manager, Super Admin).
+// Shared session + API helper for every staff portal (HR, Manager, Super
+// Admin, Master Admin).
 // API_BASE comes from ../js/config.js, which every page loads first.
 //
 // One staff session, whatever the role. The role decides which portal the
@@ -41,19 +42,40 @@ function clearSession() {
 // Where each role lands after login. Every portal folder (hr-portal/,
 // manager/, super-admin/) sits one level under frontend/, so these relative
 // paths resolve the same from any of them.
+// The Master Admin (developer account) uses the Super Admin portal; the
+// pages show it more (Super Admins, every password) based on the role.
 const ROLE_HOME = {
+  MASTER_ADMIN: "../super-admin/users.html",
   SUPER_ADMIN: "../super-admin/users.html",
   MANAGER: "../manager/candidates.html",
   HR: "../hr-portal/dashboard.html",
 };
 const ROLE_CANDIDATES = {
+  MASTER_ADMIN: "../super-admin/candidates.html",
   SUPER_ADMIN: "../super-admin/candidates.html",
   MANAGER: "../manager/candidates.html",
   HR: "../hr-portal/dashboard.html",
 };
-const ROLE_LABEL = { SUPER_ADMIN: "Super Admin", MANAGER: "Manager", HR: "HR Executive" };
+const ROLE_LABEL = { MASTER_ADMIN: "Master Admin", SUPER_ADMIN: "Super Admin", MANAGER: "Manager", HR: "HR Executive" };
+// Roles allowed into the super-admin/ pages.
+const ADMIN_ROLES = ["MASTER_ADMIN", "SUPER_ADMIN"];
 
 function roleHome(role) { return ROLE_HOME[role || getRole()] || ROLE_HOME.HR; }
+
+// Send the user to another page, unless that page is this one: a role this
+// build does not know (or a stale cached script) would otherwise bounce the
+// page to itself forever. In that case the session is dropped and they log
+// in again, which fetches the current scripts.
+function bounceTo(target) {
+  const dest = new URL(target, location.href);
+  if (dest.pathname === location.pathname) {
+    clearSession();
+    window.location.href = "../index.html";
+    return;
+  }
+  window.location.href = target;
+}
+function isMasterAdmin() { return getRole() === "MASTER_ADMIN"; }
 function roleCandidatesPage(role) { return ROLE_CANDIDATES[role || getRole()] || ROLE_CANDIDATES.HR; }
 function roleLabel(role) { return ROLE_LABEL[role] || role || ""; }
 
@@ -71,14 +93,21 @@ function requireAuth(allowedRoles) {
       .then(me => {
         saveSession(getToken(), me.name, me.role);
         if (me.must_reset_password) { window.location.href = "../change-password.html?forced=1"; return; }
-        if (allowedRoles && !allowedRoles.includes(me.role)) window.location.href = roleHome(me.role);
+        if (!ROLE_HOME[me.role]) { clearSession(); window.location.href = "../index.html"; return; }
+        if (allowedRoles && !allowedRoles.includes(me.role)) bounceTo(roleHome(me.role));
         else window.location.reload();
       })
       .catch(() => { clearSession(); window.location.href = "../index.html"; });
     return;
   }
+  if (!ROLE_HOME[stored]) {
+    // A role this script does not know: never guess a home for it.
+    clearSession();
+    window.location.href = "../index.html";
+    return;
+  }
   if (allowedRoles && !allowedRoles.includes(stored)) {
-    window.location.href = roleHome(stored);
+    bounceTo(roleHome(stored));
   }
 }
 

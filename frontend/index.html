@@ -45,6 +45,7 @@
 
     // Where each staff role lands, relative to this page.
     const STAFF_HOME = {
+      MASTER_ADMIN: "super-admin/users.html",
       SUPER_ADMIN: "super-admin/users.html",
       MANAGER: "manager/candidates.html",
       HR: "hr-portal/dashboard.html",
@@ -166,7 +167,12 @@
             window.location.href = "change-password.html?forced=1";
             return;
           }
-          window.location.href = STAFF_HOME[data.role] || STAFF_HOME.HR;
+          if (!STAFF_HOME[data.role]) {
+            // Never guess a portal for a role this page does not know.
+            ["staff_token", "staff_name", "staff_role"].forEach(k => sessionStorage.removeItem(k));
+            throw new Error(`This login has a role this page does not recognise (${data.role}). Reload the page and try again.`);
+          }
+          window.location.href = STAFF_HOME[data.role];
         } else {
           sessionStorage.setItem("candidate_token", data.access_token);
           sessionStorage.setItem("candidate_name", data.name);

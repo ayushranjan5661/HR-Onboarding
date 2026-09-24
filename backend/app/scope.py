@@ -12,8 +12,17 @@ from sqlalchemy.orm import Query, Session
 from app.models import Candidate, HRUser, StaffRole
 
 
+def is_master_admin(user: HRUser) -> bool:
+    return user.role == StaffRole.MASTER_ADMIN.value
+
+
 def is_super_admin(user: HRUser) -> bool:
     return user.role == StaffRole.SUPER_ADMIN.value
+
+
+def is_admin(user: HRUser) -> bool:
+    """Master Admin or Super Admin: no candidate or team restriction."""
+    return user.role in (StaffRole.MASTER_ADMIN.value, StaffRole.SUPER_ADMIN.value)
 
 
 def is_manager(user: HRUser) -> bool:
@@ -29,7 +38,7 @@ def team_hr_ids(db: Session, manager: HRUser) -> set[int]:
 
 def visible_staff_ids(db: Session, current: HRUser) -> set[int] | None:
     """Staff whose candidates the caller may see. None means no restriction."""
-    if is_super_admin(current):
+    if is_admin(current):
         return None
     if is_manager(current):
         return {current.id} | team_hr_ids(db, current)
@@ -73,13 +82,16 @@ def get_scoped_candidate(db: Session, candidate_id: int, current: HRUser) -> Can
 
 
 def staff_in_scope(db: Session, target: HRUser | None, current: HRUser) -> bool:
-    """May the caller manage this staff account? The Super Admin anyone (the
-    caller checks self-targeting separately); a Manager only the HR
-    Executives in their own team."""
+    """May the caller manage this staff account? The Master Admin anyone; a
+    Super Admin the Managers and HR Executives (never another admin); a
+    Manager only the HR Executives in their own team. Self-targeting is the
+    caller's check."""
     if target is None:
         return False
-    if is_super_admin(current):
+    if is_master_admin(current):
         return True
+    if is_super_admin(current):
+        return target.role in (StaffRole.MANAGER.value, StaffRole.HR.value)
     if is_manager(current):
         return target.role == StaffRole.HR.value and target.manager_id == current.id
     return False

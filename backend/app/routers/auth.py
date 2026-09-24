@@ -3,12 +3,13 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app import staff_service
 from app.database import get_db
 from app.deps import get_current_candidate, get_current_staff, get_current_staff_allow_reset
 from app.models import Candidate, HRUser
 from app.schemas import (ChangePasswordRequest, InviteTokenLoginRequest, LoginRequest,
                          TokenResponse)
-from app.security import create_access_token, hash_password, verify_password
+from app.security import create_access_token, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -61,10 +62,9 @@ def staff_change_password(payload: ChangePasswordRequest, db: Session = Depends(
                              detail=f"New password must be at least {STAFF_PASSWORD_MIN_LENGTH} characters")
     if new == payload.current_password:
         raise HTTPException(status_code=400, detail="New password must differ from the current one")
-    current.password_hash = hash_password(new)
-    current.must_reset_password = False
-    # The generated password is no longer anyone's to look up.
-    current.temp_password_enc = None
+    # Hash for login, encrypted copy for the Master Admin's view; the
+    # generated first password is no longer anyone's to look up.
+    staff_service.record_own_password(current, new)
     db.commit()
     return {"detail": "Password changed", "role": current.role}
 
