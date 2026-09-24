@@ -86,7 +86,7 @@ def push_candidate(db: Session, candidate: Candidate) -> dict:
             f"server's uploads folder: {', '.join(files_missing)}.")
 
     try:
-        token = _zc.access_token()
+        token = _zc.access_token(force=True)  # fresh token on every publish click
     except _zc.ZohoUnreachable as exc:
         raise ZohoPushError(_network_message(exc)) from exc
     except _zc.ZohoError as exc:
