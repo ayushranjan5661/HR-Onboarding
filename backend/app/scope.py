@@ -47,11 +47,15 @@ def visible_staff_ids(db: Session, current: HRUser) -> set[int] | None:
 
 def assignable_staff(db: Session, current: HRUser) -> list[HRUser]:
     """Active staff the caller may make the owner of a candidate: an HR only
-    themselves, a Manager anyone in their team, the Super Admin anyone."""
+    themselves, a Manager anyone in their team, the Super Admin anyone below
+    the Master Admin, the Master Admin anyone."""
     q = db.query(HRUser).filter(HRUser.is_active.is_(True))
     ids = visible_staff_ids(db, current)
     if ids is not None:
         q = q.filter(HRUser.id.in_(ids))
+    if is_super_admin(current):
+        # The Master Admin outranks the Super Admin, who may not hand work up.
+        q = q.filter(HRUser.role != StaffRole.MASTER_ADMIN.value)
     return q.order_by(HRUser.role, HRUser.name).all()
 
 

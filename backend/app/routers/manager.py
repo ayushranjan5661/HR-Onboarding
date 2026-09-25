@@ -97,7 +97,7 @@ def assign_candidate(candidate_id: int, payload: AssignCandidateRequest, db: Ses
                      current: HRUser = Depends(get_current_manager_or_above)):
     """Hand a candidate to another owner. A Manager moves candidates within
     their team (to an HR Executive or to themselves); the Super Admin moves
-    them anywhere."""
+    them to anyone except the Master Admin; the Master Admin anywhere."""
     candidate = scope.get_scoped_candidate(db, candidate_id, current)
     allowed = {u.id: u for u in scope.assignable_staff(db, current)}
     new_owner = allowed.get(payload.assigned_hr_id)
