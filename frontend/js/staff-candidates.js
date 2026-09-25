@@ -85,7 +85,7 @@ async function initCandidatesPage(mode) {
   }
 
   function ownerLabel(u) {
-    return u.id === myId ? `${u.name} (me)` : `${u.name}${u.role === "MANAGER" ? " · Manager" : ""}`;
+    return u.id === myId ? `${u.name} (me)` : `${u.name} · ${roleLabel(u.role)}`;
   }
 
   function fillFilters() {

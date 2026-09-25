@@ -79,7 +79,8 @@ def me(current: HRUser = Depends(get_current_staff_allow_reset)):
 @router.get("/assignable-staff")
 def assignable_staff(db: Session = Depends(get_db), current: HRUser = Depends(get_current_staff)):
     """Who the caller may make the owner of a candidate: themselves for an
-    HR Executive, their team for a Manager, anyone for the Super Admin."""
+    HR Executive, their team for a Manager, anyone below the Master Admin for
+    the Super Admin, anyone for the Master Admin."""
     return [{"id": u.id, "name": u.name, "role": u.role, "manager_id": u.manager_id}
             for u in scope.assignable_staff(db, current)]
 

@@ -1,7 +1,8 @@
 """Master Admin and Super Admin: the whole staff hierarchy and the global
 audit trail. Candidate lists and actions come from the /hr endpoints, which
 already show both admins everything; candidate reassignment across teams goes
-through /manager/candidates/{id}/assign, which is unrestricted for them.
+through /manager/candidates/{id}/assign, which is unrestricted for them,
+except that the Super Admin may not assign a candidate to the Master Admin.
 
 The Master Admin (developer account, seeded from .env) additionally sees the
 password in force on every account, and is the only one who may create,
