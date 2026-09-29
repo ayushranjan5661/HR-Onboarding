@@ -1451,7 +1451,7 @@ document.getElementById("approveBtn").addEventListener("click", async () => {
   if (!currentData) return;  // page never loaded — don't act on a stale id
   if (!await showConfirm("The Document Collection form will be unlocked. Once you approve "
       + "those documents you can send the BGV form, or finish the onboarding without it.",
-      { title: "Approve this candidate?", confirmText: "Approve" })) return;
+      { title: "Mark this candidate as shortlisted?", confirmText: "Shortlisted" })) return;
   try {
     await apiFetch(`/hr/candidates/${candidateId}/approve`, { method: "POST", body: JSON.stringify({}) });
     await load();

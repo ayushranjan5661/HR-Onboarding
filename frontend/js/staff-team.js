@@ -1,7 +1,7 @@
 // Staff accounts page, shared by the admins (mode "admin": Managers and HR
-// Executives across all teams; the Master Admin also sees the Super Admins
-// and every account's current password) and a Manager (mode "manager":
-// their own HR Executives). The HTML shell provides the sidebar and an
+// Executives across all teams; a Super Admin also sees the Admins, and the
+// Master Admin sees the Super Admins, the Admins and every account's current
+// password) and a Manager (mode "manager": their own HR Executives). The HTML shell provides the sidebar and an
 // empty #pageContent.
 
 async function initTeamPage(mode) {
@@ -9,6 +9,8 @@ async function initTeamPage(mode) {
   requireAuth(isAdmin ? ADMIN_ROLES : ["MANAGER"]);
   mountUserChip();
   const isMaster = isMasterAdmin();
+  // Master Admin and Super Admins create and manage Admins.
+  const managesAdmins = isMaster || isSuperAdmin();
 
   const BASE = isAdmin ? "/admin/staff" : "/manager/team";
   const root = document.getElementById("pageContent");
@@ -19,8 +21,8 @@ async function initTeamPage(mode) {
 
   root.innerHTML = `
     <div class="page-header">
-      <h2>${isAdmin ? "Staff Accounts" : "My Team"}</h2>
-      <button class="btn btn-primary" id="addBtn">+ ${isAdmin ? "Add Staff" : "Add HR Executive"}</button>
+      <h2>${isAdmin ? "Employee Accounts" : "My Team"}</h2>
+      <button class="btn btn-primary" id="addBtn">+ ${isAdmin ? "Add Employee" : "Add HR Executive"}</button>
     </div>
     ${isMaster ? `
     <div class="card section-card" id="adminsCard">
@@ -29,8 +31,15 @@ async function initTeamPage(mode) {
       <tbody id="adminsBody"></tbody></table>
       <div class="empty-state hidden" id="adminsEmpty">No Super Admins yet.</div>
     </div>` : ""}
+    ${managesAdmins ? `
+    <div class="card section-card ${isMaster ? "section-gap" : ""}" id="plainAdminsCard">
+      <div class="section-title"><h3>Admins</h3></div>
+      <table><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Owns</th><th>${passwordHeader}</th><th></th></tr></thead>
+      <tbody id="plainAdminsBody"></tbody></table>
+      <div class="empty-state hidden" id="plainAdminsEmpty">No Admins yet.</div>
+    </div>` : ""}
     ${isAdmin ? `
-    <div class="card section-card ${isMaster ? "section-gap" : ""}" id="managersCard">
+    <div class="card section-card ${managesAdmins ? "section-gap" : ""}" id="managersCard">
       <div class="section-title"><h3>Managers</h3></div>
       <table><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Team</th><th>Owns</th><th>${passwordHeader}</th><th></th></tr></thead>
       <tbody id="managersBody"></tbody></table>
@@ -45,7 +54,7 @@ async function initTeamPage(mode) {
 
     <div class="modal-backdrop hidden" id="createModal">
       <div class="modal">
-        <h3 id="createTitle">${isAdmin ? "Add a staff account" : "Add an HR Executive"}</h3>
+        <h3 id="createTitle">${isAdmin ? "Add an employee account" : "Add an HR Executive"}</h3>
         <p style="color:var(--muted);font-size:0.85rem;margin-top:-6px;">
           A password is generated and shown once. They must replace it on first login.
         </p>
@@ -59,6 +68,7 @@ async function initTeamPage(mode) {
           <select id="cRole">
             <option value="HR">HR Executive</option>
             <option value="MANAGER">Manager</option>
+            ${managesAdmins ? `<option value="ADMIN">Admin</option>` : ""}
             ${isMaster ? `<option value="SUPER_ADMIN">Super Admin</option>` : ""}
           </select>
           <div id="cManagerWrap">
@@ -88,6 +98,7 @@ async function initTeamPage(mode) {
   }
 
   function superAdmins() { return staff.filter(s => s.role === "SUPER_ADMIN"); }
+  function plainAdmins() { return staff.filter(s => s.role === "ADMIN"); }
   function managers() { return staff.filter(s => s.role === "MANAGER"); }
   function hrs() { return staff.filter(s => s.role === "HR"); }
 
@@ -110,10 +121,12 @@ async function initTeamPage(mode) {
   }
 
   // Whether the caller may act on this row at all. Only the Master Admin
-  // touches a Super Admin; nobody acts on their own row here.
+  // touches a Super Admin, only the Master Admin or a Super Admin touches an
+  // Admin; nobody acts on their own row here.
   function canManage(s) {
     if (s.id === myId || s.role === "MASTER_ADMIN") return false;
     if (s.role === "SUPER_ADMIN") return isMaster;
+    if (s.role === "ADMIN") return managesAdmins;
     return true;
   }
 
@@ -150,6 +163,11 @@ async function initTeamPage(mode) {
       const a = superAdmins();
       document.getElementById("adminsBody").innerHTML = a.map(row).join("");
       document.getElementById("adminsEmpty").classList.toggle("hidden", a.length > 0);
+    }
+    if (managesAdmins) {
+      const a = plainAdmins();
+      document.getElementById("plainAdminsBody").innerHTML = a.map(row).join("");
+      document.getElementById("plainAdminsEmpty").classList.toggle("hidden", a.length > 0);
     }
     if (isAdmin) {
       const m = managers();
@@ -206,7 +224,7 @@ async function initTeamPage(mode) {
         const ok = await confirmDialog({
           title: `Move ${s.name} to another team`, danger: false, confirmLabel: "Move",
           html: `<label>New Manager</label><select id="moveSelect" class="inline-select" style="max-width:100%;width:100%;">
-                   <option value="0" ${!s.manager_id ? "selected" : ""}>No team (visible only to Super Admin)</option>${options}</select>
+                   <option value="0" ${!s.manager_id ? "selected" : ""}>No team (visible only to admins)</option>${options}</select>
                  <div class="muted-text" style="margin-top:8px;">Their ${s.candidate_count} candidate(s) move with them.</div>`,
         });
         if (!ok) return;
@@ -258,6 +276,13 @@ async function initTeamPage(mode) {
     if (isAdmin && body.role === "HR") {
       const m = document.getElementById("cManager").value;
       body.manager_id = m ? Number(m) : null;
+    }
+    if (body.role === "ADMIN") {
+      const ok = await confirmDialog({
+        title: "Create an Admin?", danger: false, confirmLabel: "Create Admin",
+        html: `An Admin manages every Manager, HR Executive and candidate. Only a Super Admin or the Master Admin can deactivate, delete or reset this account later.`,
+      });
+      if (!ok) return;
     }
     if (body.role === "SUPER_ADMIN") {
       const ok = await confirmDialog({

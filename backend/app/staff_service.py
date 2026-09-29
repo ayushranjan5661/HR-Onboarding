@@ -20,6 +20,10 @@ def _is_master(user: HRUser) -> bool:
     return user.role == StaffRole.MASTER_ADMIN.value
 
 
+def _is_master_or_super(user: HRUser) -> bool:
+    return user.role in (StaffRole.MASTER_ADMIN.value, StaffRole.SUPER_ADMIN.value)
+
+
 def team_of(user: HRUser | None) -> int | None:
     """The Manager id a staff user's actions file under: their Manager for an
     HR Executive, themselves for a Manager, nothing for the admins."""
@@ -97,7 +101,8 @@ def get_manager(db: Session, manager_id: int | None) -> HRUser | None:
 
 def create_staff(db: Session, actor: HRUser, *, name: str, email: str, role: StaffRole,
                  manager: HRUser | None) -> tuple[HRUser, str]:
-    """Create a Super Admin (Master Admin only), Manager or HR Executive with
+    """Create a Super Admin (Master Admin only), Admin (Master or Super Admin
+    only), Manager or HR Executive with
     a system-generated password that must be changed on first login. Returns
     the user and that password."""
     name = (name or "").strip()
@@ -111,10 +116,16 @@ def create_staff(db: Session, actor: HRUser, *, name: str, email: str, role: Sta
             raise HTTPException(status_code=403, detail="Only the Master Admin can create Super Admins")
         if manager is not None:
             raise HTTPException(status_code=400, detail="A Super Admin does not report to a Manager")
+    if role == StaffRole.ADMIN:
+        if not _is_master_or_super(actor):
+            raise HTTPException(status_code=403,
+                                 detail="Only the Master Admin or a Super Admin can create Admins")
+        if manager is not None:
+            raise HTTPException(status_code=400, detail="An Admin does not report to a Manager")
     if role == StaffRole.MANAGER and manager is not None:
         raise HTTPException(status_code=400, detail="A Manager does not report to another Manager")
     if db.query(HRUser).filter(HRUser.email == email).first():
-        raise HTTPException(status_code=400, detail="A staff account with this email already exists")
+        raise HTTPException(status_code=400, detail="An employee account with this email already exists")
 
     temp_password = generate_temp_password(12)
     user = HRUser(
@@ -159,12 +170,16 @@ def record_own_password(user: HRUser, plain: str) -> None:
 
 
 def _guard_admin_target(actor: HRUser, target: HRUser, verb: str) -> None:
-    """Nobody touches the Master Admin's account but the Master Admin, and
-    only the Master Admin touches a Super Admin's."""
+    """Nobody touches the Master Admin's account but the Master Admin, only
+    the Master Admin touches a Super Admin's, and only the Master Admin or a
+    Super Admin touches an Admin's."""
     if target.role == StaffRole.MASTER_ADMIN.value and target.id != actor.id:
         raise HTTPException(status_code=403, detail=f"You cannot {verb} the Master Admin")
     if target.role == StaffRole.SUPER_ADMIN.value and not _is_master(actor):
         raise HTTPException(status_code=403, detail=f"Only the Master Admin can {verb} a Super Admin")
+    if target.role == StaffRole.ADMIN.value and not _is_master_or_super(actor):
+        raise HTTPException(status_code=403,
+                             detail=f"Only the Master Admin or a Super Admin can {verb} an Admin")
 
 
 def set_active(db: Session, actor: HRUser, target: HRUser, active: bool) -> None:
@@ -257,7 +272,7 @@ def delete_staff(db: Session, actor: HRUser, target: HRUser) -> None:
 
 def assign_candidate(db: Session, actor: HRUser, candidate: Candidate, new_owner: HRUser) -> None:
     if not new_owner.is_active:
-        raise HTTPException(status_code=400, detail="That staff account is deactivated")
+        raise HTTPException(status_code=400, detail="That employee account is deactivated")
     if candidate.assigned_hr_id == new_owner.id:
         return
     old = (db.query(HRUser).filter(HRUser.id == candidate.assigned_hr_id).first()

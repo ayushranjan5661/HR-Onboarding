@@ -15,14 +15,14 @@ async function initAuditPage(mode) {
       <button class="btn btn-outline" id="refreshBtn">Refresh</button>
     </div>
     <p style="color:var(--muted);font-size:0.88rem;margin-top:-10px;">
-      Staff account and candidate ownership changes${isAdmin ? " across every team" : " touching your team"}, newest first.
+      Employee account and candidate ownership changes${isAdmin ? " across every team" : " touching your team"}, newest first.
       Edits to a candidate's submitted data are on that candidate's own page.
     </p>
     <div class="filters">
       <input type="text" class="search-input" id="searchInput" placeholder="Search by person, action or detail...">
       <select id="typeFilter">
         <option value="">All actions</option>
-        <option value="STAFF">Staff accounts</option>
+        <option value="STAFF">Employee accounts</option>
         <option value="CANDIDATE">Candidate ownership</option>
       </select>
     </div>

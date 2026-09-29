@@ -30,7 +30,7 @@ function saveSession(token, name, role) {
 }
 
 function getToken() { return sessionStorage.getItem(TOKEN_KEY); }
-function getName() { return sessionStorage.getItem(NAME_KEY) || "Staff"; }
+function getName() { return sessionStorage.getItem(NAME_KEY) || "Employee"; }
 function getRole() { return sessionStorage.getItem(ROLE_KEY) || "HR"; }
 
 function clearSession() {
@@ -47,18 +47,20 @@ function clearSession() {
 const ROLE_HOME = {
   MASTER_ADMIN: "../super-admin/users.html",
   SUPER_ADMIN: "../super-admin/users.html",
+  ADMIN: "../super-admin/users.html",
   MANAGER: "../manager/candidates.html",
   HR: "../hr-portal/dashboard.html",
 };
 const ROLE_CANDIDATES = {
   MASTER_ADMIN: "../super-admin/candidates.html",
   SUPER_ADMIN: "../super-admin/candidates.html",
+  ADMIN: "../super-admin/candidates.html",
   MANAGER: "../manager/candidates.html",
   HR: "../hr-portal/dashboard.html",
 };
-const ROLE_LABEL = { MASTER_ADMIN: "Master Admin", SUPER_ADMIN: "Super Admin", MANAGER: "Manager", HR: "HR Executive" };
+const ROLE_LABEL = { MASTER_ADMIN: "Master Admin", SUPER_ADMIN: "Super Admin", ADMIN: "Admin", MANAGER: "Manager", HR: "HR Executive" };
 // Roles allowed into the super-admin/ pages.
-const ADMIN_ROLES = ["MASTER_ADMIN", "SUPER_ADMIN"];
+const ADMIN_ROLES = ["MASTER_ADMIN", "SUPER_ADMIN", "ADMIN"];
 
 function roleHome(role) { return ROLE_HOME[role || getRole()] || ROLE_HOME.HR; }
 
@@ -76,6 +78,7 @@ function bounceTo(target) {
   window.location.href = target;
 }
 function isMasterAdmin() { return getRole() === "MASTER_ADMIN"; }
+function isSuperAdmin() { return getRole() === "SUPER_ADMIN"; }
 function roleCandidatesPage(role) { return ROLE_CANDIDATES[role || getRole()] || ROLE_CANDIDATES.HR; }
 function roleLabel(role) { return ROLE_LABEL[role] || role || ""; }
 

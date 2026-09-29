@@ -103,7 +103,7 @@ def assign_candidate(candidate_id: int, payload: AssignCandidateRequest, db: Ses
     new_owner = allowed.get(payload.assigned_hr_id)
     if not new_owner:
         raise HTTPException(status_code=400,
-                             detail="You can only assign candidates to active staff in your team")
+                             detail="You can only assign candidates to active employees in your team")
     staff_service.assign_candidate(db, current, candidate, new_owner)
     db.commit()
     return {"detail": f"{candidate.name} is now assigned to {new_owner.name}.",

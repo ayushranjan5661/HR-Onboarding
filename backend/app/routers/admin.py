@@ -1,13 +1,18 @@
-"""Master Admin and Super Admin: the whole staff hierarchy and the global
-audit trail. Candidate lists and actions come from the /hr endpoints, which
-already show both admins everything; candidate reassignment across teams goes
+"""Master Admin, Super Admin and Admin: the whole staff hierarchy and the
+global audit trail. Candidate lists and actions come from the /hr endpoints,
+which already show the admins everything; candidate reassignment across teams goes
 through /manager/candidates/{id}/assign, which is unrestricted for them,
-except that the Super Admin may not assign a candidate to the Master Admin.
+except that nobody may assign a candidate to an admin ranked above them.
+
+Hierarchy: Master Admin > Super Admin > Admin > Manager > HR Executive.
+A Super Admin creates, deactivates, deletes and resets Admins. An Admin has
+every Super Admin power over Managers, HR Executives and candidates, but
+never sees or touches the Master Admin, a Super Admin, or another Admin.
 
 The Master Admin (developer account, seeded from .env) additionally sees the
 password in force on every account, and is the only one who may create,
 deactivate, delete or reset a Super Admin. A Super Admin never sees the
-Master Admin's row at all."""
+Master Admin's row at all, and an Admin never sees a Super Admin's."""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -27,7 +32,7 @@ def _target(db: Session, staff_id: int, current: HRUser) -> HRUser:
     confirm the Master Admin's id."""
     user = db.query(HRUser).filter(HRUser.id == staff_id).first()
     if not user or not (user.id == current.id or scope.staff_in_scope(db, user, current)):
-        raise HTTPException(status_code=404, detail="Staff account not found")
+        raise HTTPException(status_code=404, detail="Employee account not found")
     return user
 
 
@@ -42,8 +47,12 @@ def list_staff(db: Session = Depends(get_db), current: HRUser = Depends(get_curr
     and team counts. One-time passwords are shown until changed; the Master
     Admin also sees the password currently in force on every account."""
     q = db.query(HRUser)
-    if not scope.is_master_admin(current):
-        q = q.filter(HRUser.role != StaffRole.MASTER_ADMIN.value)
+    above = scope.ROLES_ABOVE.get(current.role, ())
+    if above:
+        q = q.filter(HRUser.role.notin_(above))
+    if scope.is_plain_admin(current):
+        # Other Admins are peers, not staff this Admin manages.
+        q = q.filter((HRUser.role != StaffRole.ADMIN.value) | (HRUser.id == current.id))
     return _out(db, q.order_by(HRUser.role, HRUser.name).all(), current)
 
 
@@ -52,11 +61,12 @@ def create_staff(payload: CreateStaffRequest, db: Session = Depends(get_db),
                  current: HRUser = Depends(get_current_admin)):
     """Create a Manager, or an HR Executive under a Manager. An HR Executive
     may be created without a team; they are then visible only here until
-    moved under a Manager. The Master Admin may also create Super Admins."""
+    moved under a Manager. A Super Admin may also create Admins, and the
+    Master Admin both Super Admins and Admins."""
     try:
         role = StaffRole(payload.role)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Role must be SUPER_ADMIN, MANAGER or HR")
+        raise HTTPException(status_code=400, detail="Role must be SUPER_ADMIN, ADMIN, MANAGER or HR")
     manager = staff_service.get_manager(db, payload.manager_id) if role == StaffRole.HR else None
     if role == StaffRole.MANAGER and payload.manager_id:
         raise HTTPException(status_code=400, detail="A Manager does not report to another Manager")
@@ -102,7 +112,7 @@ def delete_staff(staff_id: int, db: Session = Depends(get_db),
     target = _target(db, staff_id, current)
     staff_service.delete_staff(db, current, target)
     db.commit()
-    return {"detail": "Staff account deleted"}
+    return {"detail": "Employee account deleted"}
 
 
 @router.get("/audit", response_model=list[StaffAuditOut])

@@ -3,7 +3,7 @@
 One rule, applied everywhere a candidate is read or written from the staff
 side: an HR Executive sees the candidates assigned to them, a Manager sees
 every candidate owned by anyone in their team (themselves included), and the
-Super Admin sees all. Anything outside scope answers 404, never 403, so a
+admins (Master Admin, Super Admin, Admin) see all. Anything outside scope answers 404, never 403, so a
 guessed id does not even confirm the record exists.
 """
 from fastapi import HTTPException
@@ -20,9 +20,23 @@ def is_super_admin(user: HRUser) -> bool:
     return user.role == StaffRole.SUPER_ADMIN.value
 
 
+def is_plain_admin(user: HRUser) -> bool:
+    return user.role == StaffRole.ADMIN.value
+
+
 def is_admin(user: HRUser) -> bool:
-    """Master Admin or Super Admin: no candidate or team restriction."""
-    return user.role in (StaffRole.MASTER_ADMIN.value, StaffRole.SUPER_ADMIN.value)
+    """Master Admin, Super Admin or Admin: no candidate or team restriction."""
+    return user.role in (StaffRole.MASTER_ADMIN.value, StaffRole.SUPER_ADMIN.value,
+                         StaffRole.ADMIN.value)
+
+
+# The roles ranked above each admin: they may not hand a candidate to them,
+# and do not see them in the staff list.
+ROLES_ABOVE = {
+    StaffRole.MASTER_ADMIN.value: (),
+    StaffRole.SUPER_ADMIN.value: (StaffRole.MASTER_ADMIN.value,),
+    StaffRole.ADMIN.value: (StaffRole.MASTER_ADMIN.value, StaffRole.SUPER_ADMIN.value),
+}
 
 
 def is_manager(user: HRUser) -> bool:
@@ -47,15 +61,16 @@ def visible_staff_ids(db: Session, current: HRUser) -> set[int] | None:
 
 def assignable_staff(db: Session, current: HRUser) -> list[HRUser]:
     """Active staff the caller may make the owner of a candidate: an HR only
-    themselves, a Manager anyone in their team, the Super Admin anyone below
-    the Master Admin, the Master Admin anyone."""
+    themselves, a Manager anyone in their team, an admin anyone not ranked
+    above them (the Master Admin anyone)."""
     q = db.query(HRUser).filter(HRUser.is_active.is_(True))
     ids = visible_staff_ids(db, current)
     if ids is not None:
         q = q.filter(HRUser.id.in_(ids))
-    if is_super_admin(current):
-        # The Master Admin outranks the Super Admin, who may not hand work up.
-        q = q.filter(HRUser.role != StaffRole.MASTER_ADMIN.value)
+    above = ROLES_ABOVE.get(current.role, ())
+    if above:
+        # Nobody hands work up the hierarchy.
+        q = q.filter(HRUser.role.notin_(above))
     return q.order_by(HRUser.role, HRUser.name).all()
 
 
@@ -87,14 +102,16 @@ def get_scoped_candidate(db: Session, candidate_id: int, current: HRUser) -> Can
 
 def staff_in_scope(db: Session, target: HRUser | None, current: HRUser) -> bool:
     """May the caller manage this staff account? The Master Admin anyone; a
-    Super Admin the Managers and HR Executives (never another admin); a
-    Manager only the HR Executives in their own team. Self-targeting is the
-    caller's check."""
+    Super Admin the Admins, Managers and HR Executives; an Admin the Managers
+    and HR Executives (never another admin); a Manager only the HR
+    Executives in their own team. Self-targeting is the caller's check."""
     if target is None:
         return False
     if is_master_admin(current):
         return True
     if is_super_admin(current):
+        return target.role in (StaffRole.ADMIN.value, StaffRole.MANAGER.value, StaffRole.HR.value)
+    if is_plain_admin(current):
         return target.role in (StaffRole.MANAGER.value, StaffRole.HR.value)
     if is_manager(current):
         return target.role == StaffRole.HR.value and target.manager_id == current.id

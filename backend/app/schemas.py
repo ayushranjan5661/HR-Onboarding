@@ -20,7 +20,7 @@ class InviteTokenLoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    role: str                      # candidate | MASTER_ADMIN | SUPER_ADMIN | MANAGER | HR
+    role: str                      # candidate | MASTER_ADMIN | SUPER_ADMIN | ADMIN | MANAGER | HR
     name: str
     must_reset_password: bool = False
 
@@ -53,7 +53,7 @@ class StaffOut(BaseModel):
 class CreateStaffRequest(BaseModel):
     name: str
     email: EmailStr
-    role: str = "HR"                      # SUPER_ADMIN (Master Admin only) | MANAGER | HR
+    role: str = "HR"                      # SUPER_ADMIN (Master Admin only) | ADMIN (Master/Super Admin) | MANAGER | HR
     manager_id: Optional[int] = None      # HR only: the team they join
 
 

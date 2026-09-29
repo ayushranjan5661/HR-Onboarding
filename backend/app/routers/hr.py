@@ -183,7 +183,7 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
                       if u.id == payload.assigned_hr_id), None)
         if owner is None:
             raise HTTPException(status_code=400,
-                                 detail="You can only assign candidates to active staff in your team")
+                                 detail="You can only assign candidates to active employees in your team")
 
     temp_password = generate_temp_password()
     candidate = Candidate(

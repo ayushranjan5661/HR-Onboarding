@@ -27,10 +27,10 @@ def _load_staff(token: str | None, db: Session) -> HRUser:
         raise _unauthorized()
     payload = decode_access_token(token)
     if not payload or payload.get("role") not in _STAFF_TOKEN_ROLES:
-        raise _unauthorized("Invalid or expired staff session")
+        raise _unauthorized("Invalid or expired employee session")
     user = db.query(HRUser).filter(HRUser.id == int(payload["sub"]), HRUser.is_active.is_(True)).first()
     if not user:
-        raise _unauthorized("Staff account not found or deactivated")
+        raise _unauthorized("Employee account not found or deactivated")
     return user
 
 
@@ -42,7 +42,7 @@ def get_current_staff_allow_reset(token: str = Depends(staff_oauth2_scheme),
 
 
 def get_current_staff(token: str = Depends(staff_oauth2_scheme), db: Session = Depends(get_db)) -> HRUser:
-    """Any active staff user (Master Admin, Super Admin, Manager or HR
+    """Any active staff user (Master Admin, Super Admin, Admin, Manager or HR
     Executive). A user
     flagged to reset their password can do nothing else until they have."""
     user = _load_staff(token, db)
@@ -70,12 +70,12 @@ def require_roles(*roles: StaffRole):
 
 
 get_current_master_admin = require_roles(StaffRole.MASTER_ADMIN)
-# Master Admin or Super Admin: the /admin endpoints. What each may target is
-# decided per row by app.scope.staff_in_scope.
-get_current_admin = require_roles(StaffRole.MASTER_ADMIN, StaffRole.SUPER_ADMIN)
+# Master Admin, Super Admin or Admin: the /admin endpoints. What each may
+# target is decided per row by app.scope.staff_in_scope.
+get_current_admin = require_roles(StaffRole.MASTER_ADMIN, StaffRole.SUPER_ADMIN, StaffRole.ADMIN)
 get_current_super_admin = get_current_admin   # old name
 get_current_manager_or_above = require_roles(StaffRole.MASTER_ADMIN, StaffRole.SUPER_ADMIN,
-                                             StaffRole.MANAGER)
+                                             StaffRole.ADMIN, StaffRole.MANAGER)
 
 
 def get_current_candidate(token: str = Depends(candidate_oauth2_scheme), db: Session = Depends(get_db)) -> Candidate:
