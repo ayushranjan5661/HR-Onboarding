@@ -55,7 +55,10 @@ class StaffRole(str, enum.Enum):
     init_db's column sync can add it to an existing table."""
     MASTER_ADMIN = "MASTER_ADMIN"  # developer account, seeded from .env only: everything below,
                                    # plus create/manage Super Admins and read every staff password
-    SUPER_ADMIN = "SUPER_ADMIN"   # the seeded account: manages everyone, sees everything
+    SUPER_ADMIN = "SUPER_ADMIN"   # the seeded account: manages everyone, sees everything,
+                                  # and creates/manages Admins
+    ADMIN = "ADMIN"               # created by a Super Admin: every Super Admin feature over
+                                  # Managers, HR Executives and candidates, but not over admins
     MANAGER = "MANAGER"           # leads a team of HR executives; sees the team's candidates
     HR = "HR"                     # invites and reviews their own candidates
 

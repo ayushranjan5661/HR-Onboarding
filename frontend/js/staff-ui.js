@@ -42,12 +42,13 @@ function mountUserChip() {
   if (who) who.textContent = getName();
   if (av) av.textContent = getName().charAt(0).toUpperCase();
   if (role) role.textContent = roleLabel(getRole());
-  // The super-admin/ pages are shared with the Master Admin: name the
-  // portal after whoever is actually in it.
-  if (isMasterAdmin()) {
+  // The super-admin/ pages are shared with the Master Admin and Admins:
+  // name the portal after whoever is actually in it.
+  if (["MASTER_ADMIN", "ADMIN"].includes(getRole())) {
+    const label = roleLabel(getRole());
     const brand = document.getElementById("brandTitle");
-    if (brand) brand.textContent = "Master Admin";
-    document.title = document.title.replace("Super Admin", "Master Admin");
+    if (brand) brand.textContent = label;
+    document.title = document.title.replace("Super Admin", label);
   }
 }
 
@@ -186,7 +187,7 @@ function renderAudit(container, entries) {
       <td><div class="name-cell"><span class="row-avatar">${escapeHtml(initials(e.actor_name))}</span>
         <div>${escapeHtml(e.actor_name || "—")}<div class="muted-text">${escapeHtml(roleLabel(e.actor_role))}</div></div></div></td>
       <td><span class="badge badge-action">${escapeHtml(actionLabel(e.action))}</span></td>
-      <td>${escapeHtml(e.target_name || "—")}<div class="muted-text">${e.target_type === "CANDIDATE" ? "Candidate" : "Staff"}</div></td>
+      <td>${escapeHtml(e.target_name || "—")}<div class="muted-text">${e.target_type === "CANDIDATE" ? "Candidate" : "Employee"}</div></td>
       <td style="color:var(--muted);font-size:0.85rem;">${escapeHtml(e.detail || "")}</td>
     </tr>`).join("")}</tbody></table>`;
 }

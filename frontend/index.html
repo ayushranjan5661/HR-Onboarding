@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LevelShift Onboarding — Login</title>
-<link rel="stylesheet" href="hr-portal/css/style.css?v=20260923a">
+<link rel="stylesheet" href="hr-portal/css/style.css?v=20260929b">
 </head>
 <body>
   <div class="login-wrap">
@@ -13,10 +13,10 @@
     <div class="login-shell">
       <div class="login-card">
         <h1>Welcome back</h1>
-        <p class="sub">One login for staff and candidates. Pick your role below.</p>
+        <p class="sub">One login for employees and candidates. Pick your role below.</p>
 
         <div class="role-tabs" id="roleTabs">
-          <button type="button" class="role-tab active" id="tabStaff" onclick="setRole('staff')">Staff</button>
+          <button type="button" class="role-tab active" id="tabStaff" onclick="setRole('staff')">Employee</button>
           <button type="button" class="role-tab" id="tabCandidate" onclick="setRole('candidate')">Candidate</button>
         </div>
 
@@ -47,6 +47,7 @@
     const STAFF_HOME = {
       MASTER_ADMIN: "super-admin/users.html",
       SUPER_ADMIN: "super-admin/users.html",
+      ADMIN: "super-admin/users.html",
       MANAGER: "manager/candidates.html",
       HR: "hr-portal/dashboard.html",
     };
