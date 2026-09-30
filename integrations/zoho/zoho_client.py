@@ -66,6 +66,11 @@ from export_zoho_payload import build_full_payload, collect_values  # noqa: E402
 
 from app.config import settings                                          # noqa: E402
 from app.database import SessionLocal                                    # noqa: E402
+from app.utils import dns_fallback                                       # noqa: E402
+
+# Run as a script, Python's own DNS is blocked on managed machines; see
+# backend/app/utils/dns_fallback.py. A no-op when the server imported us.
+dns_fallback.install()
 from app.models import Candidate                                         # noqa: E402
 
 # Zoho names the email field Email_ID on the stock Candidate form; a customised

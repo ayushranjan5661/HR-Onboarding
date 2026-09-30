@@ -63,6 +63,7 @@ from app.schemas import (
 )
 from app.security import (decrypt_password, encrypt_password, generate_invite_token,
                             generate_temp_password, hash_password)
+from app.agents import doc_validator
 from app.services import zoho_push
 from app.utils.file_storage import save_upload, snapshot_document, upload_path
 
@@ -136,6 +137,8 @@ def _document_out(doc: Document) -> DocumentOut:
         original_filename=doc.original_filename, content_type=doc.content_type,
         file_available=os.path.isfile(upload_path(doc.stored_filename)),
         uploaded_at=doc.uploaded_at,
+        ai_status=doc.ai_status, ai_doc_type=doc.ai_doc_type,
+        ai_confidence=doc.ai_confidence, ai_id_match=doc.ai_id_match, ai_note=doc.ai_note,
     )
 
 
@@ -250,6 +253,39 @@ def candidate_insights(candidate_id: int, db: Session = Depends(get_db),
 
     from app.agents import insights as insights_agent
     return insights_agent.generate(db, candidate_id)
+
+
+@router.post("/candidates/{candidate_id}/documents/recheck")
+def recheck_documents(candidate_id: int, only_unchecked: bool = False,
+                      db: Session = Depends(get_db),
+                      current: HRUser = Depends(get_current_staff)):
+    """Run the document check over everything this candidate has on record.
+
+    Uploads are checked as they arrive, so this exists for files that predate
+    the check, for after the scoring rules have been tuned, and for when HR
+    simply wants a fresh look. Verdicts are recorded; nothing is refused."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    if not doc_validator.enabled():
+        raise HTTPException(status_code=400, detail="The document check is switched off "
+                                                    "or OCR is not installed on the server.")
+    profile = doc_validator.profile_dict(candidate.profile)
+    docs = db.query(Document).filter(Document.candidate_id == candidate_id).all()
+    checked = skipped = 0
+    for doc in docs:
+        if only_unchecked and doc.ai_status:
+            skipped += 1
+            continue
+        path = upload_path(doc.stored_filename)
+        if not os.path.isfile(path):
+            skipped += 1
+            continue
+        verdict = doc_validator.validate_path(path, doc.content_type, doc.original_filename,
+                                              doc.field_key, profile)
+        doc_validator.apply_to(doc, verdict)
+        checked += 1
+    db.commit()
+    return {"detail": f"{checked} document(s) checked" + (f", {skipped} skipped" if skipped else ""),
+            "checked": checked, "skipped": skipped}
 
 
 @router.get("/candidates", response_model=list[CandidateListItem])
@@ -727,22 +763,21 @@ def approve_candidate(candidate_id: int, payload: DecisionRequest, db: Session =
         cif.reviewed_at = datetime.now(timezone.utc)
         cif.reviewed_by_hr_id = current.id
 
-    # Sequential flow: Document Collection opens now; BGV stays locked until
-    # HR approves those documents. Common fields are pulled live from
-    # CandidateProfile, so there is nothing to copy — just flip the status.
-    for form_type, status in ((FormType.DOCUMENT_COLLECTION, FormStatus.PENDING),
-                               (FormType.BGV, FormStatus.LOCKED)):
+    # Sequential flow, but nothing is sent automatically: approving the CIF
+    # makes Document Collection *sendable*, and it stays withdrawn (LOCKED)
+    # until HR presses Send (/candidates/{id}/forms/DOCUMENT_COLLECTION/send).
+    # BGV likewise waits for the documents to be approved and then a Send.
+    for form_type in (FormType.DOCUMENT_COLLECTION, FormType.BGV):
         existing = db.query(FormSubmission).filter(FormSubmission.candidate_id == candidate_id,
                                                      FormSubmission.form_type == form_type).first()
         if not existing:
-            db.add(FormSubmission(candidate_id=candidate_id, form_type=form_type, status=status))
-        elif form_type == FormType.DOCUMENT_COLLECTION and existing.status == FormStatus.LOCKED:
-            existing.status = FormStatus.PENDING
+            db.add(FormSubmission(candidate_id=candidate_id, form_type=form_type,
+                                  status=FormStatus.LOCKED))
 
     candidate.stage = CandidateStage.APPROVED_FOR_BGV
     db.commit()
-    return {"detail": "Candidate approved. The Document Collection form is now unlocked. "
-                       "BGV is sent separately, once you have approved those documents."}
+    return {"detail": "Candidate approved. Send the Document Collection form when you are ready — "
+                       "it is not sent automatically."}
 
 
 @router.post("/candidates/{candidate_id}/reject")
@@ -891,8 +926,8 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
 #
 # A form is open when its FormSubmission row is PENDING and withheld when it
 # is LOCKED, which is what FormStatus.LOCKED has always meant. Every form can
-# be sent and taken back by hand; the CIF still opens at invite and Document
-# Collection on approval, so the buttons are a correction, not the only route.
+# be sent and taken back by hand. Only the CIF opens by itself (at invite);
+# Document Collection and BGV stay LOCKED until HR presses Send.
 # ---------------------------------------------------------------------------
 
 
@@ -1052,6 +1087,12 @@ def upload_document(candidate_id: int, form: str, field_key: str,
         new_doc = Document(candidate_id=candidate_id, form_type=form_type, field_key=field_key,
                             original_filename=original, stored_filename=stored,
                             content_type=file.content_type)
+        # HR is deliberately replacing this file, so the verdict is recorded
+        # for the checklist but never refuses the upload.
+        verdict = doc_validator.validate_path(
+            upload_path(stored), file.content_type, file.filename or "", field_key,
+            doc_validator.profile_dict(candidate.profile))
+        doc_validator.apply_to(new_doc, verdict)
         db.add(new_doc)
         db.flush()
         new_snapshot = snapshot_document(db, new_doc)
@@ -1069,7 +1110,7 @@ def upload_document(candidate_id: int, form: str, field_key: str,
         except OSError:
             pass
         raise
-    return {"detail": "Document uploaded"}
+    return {"detail": "Document uploaded", "check": verdict.as_dict()}
 
 
 @router.delete("/documents/{document_id}")

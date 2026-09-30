@@ -67,17 +67,10 @@ def _validate_file_type(filename: str, content_type: str | None, contents: bytes
         )
 
 
-def save_upload(file: UploadFile, candidate_id: int, form_type: str, field_key: str) -> tuple[str, str]:
-    """Saves an uploaded file to disk and returns (original_filename, stored_filename).
-
-    Files are stored with a neutral .dat extension: the original filename and
-    content type live in the documents table and are restored on download.
-    (Endpoint-protection software on managed Windows machines intermittently
-    denies unknown processes writing media extensions like .jpg — storing
-    neutral names sidesteps that entirely.)
-    """
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-
+def read_upload(file: UploadFile) -> bytes:
+    """Read an upload into memory, enforcing the size cap and the type
+    allowlist. Used on its own by the pre-upload document check, which needs
+    the bytes but must not store anything."""
     # Read in chunks and stop at the cap — never buffer an arbitrarily large
     # body into memory just to find out it is over the limit.
     max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
@@ -88,6 +81,20 @@ def save_upload(file: UploadFile, candidate_id: int, form_type: str, field_key: 
             raise HTTPException(status_code=413, detail=f"File too large (max {settings.MAX_UPLOAD_MB} MB)")
     contents = bytes(buf)
     _validate_file_type(file.filename or "", file.content_type, contents)
+    return contents
+
+
+def save_upload(file: UploadFile, candidate_id: int, form_type: str, field_key: str) -> tuple[str, str]:
+    """Saves an uploaded file to disk and returns (original_filename, stored_filename).
+
+    Files are stored with a neutral .dat extension: the original filename and
+    content type live in the documents table and are restored on download.
+    (Endpoint-protection software on managed Windows machines intermittently
+    denies unknown processes writing media extensions like .jpg — storing
+    neutral names sidesteps that entirely.)
+    """
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    contents = read_upload(file)
 
     stored_name = f"{candidate_id}_{form_type}_{field_key}_{secrets.token_hex(6)}.dat"
     path = os.path.join(settings.UPLOAD_DIR, stored_name)

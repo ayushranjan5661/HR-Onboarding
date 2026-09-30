@@ -237,6 +237,13 @@ class DocumentOut(BaseModel):
     content_type: Optional[str] = None   # lets the portal preview inline
     file_available: bool = True          # False if the file vanished from disk
     uploaded_at: datetime
+    # Document-validation verdict (app/agents/doc_validator.py); all None on
+    # rows that were never checked.
+    ai_status: Optional[str] = None
+    ai_doc_type: Optional[str] = None
+    ai_confidence: Optional[int] = None
+    ai_id_match: Optional[bool] = None
+    ai_note: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -200,7 +200,7 @@ def _llm_propose(target_form: str, kind: str) -> list[dict]:
         text = payload["choices"][0]["message"]["content"].strip()
     except (urllib.error.URLError, urllib.error.HTTPError, KeyError,
             json.JSONDecodeError, TimeoutError, OSError) as exc:
-        print(f"[field_mapper] LLM unavailable ({type(exc).__name__}); using heuristics")
+        print(f"[field_mapper] LLM unavailable ({type(exc).__name__}: {getattr(exc, 'reason', exc)}); using heuristics")
         return []
 
     text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.M).strip()
