@@ -221,6 +221,48 @@ function docActions(formType, fieldKey, doc, editing, fileAvailable = true) {
   return buttons.length ? `<div class="field-actions">${buttons.join("")}</div>` : "";
 }
 
+// What the OCR document check made of the file (score 0-100). A MATCH is
+// shown quietly; anything else is the reason this line exists — a PAN card
+// in the Aadhaar slot should be obvious from the checklist, not from opening
+// the file.
+const _DOC_CHECK_STYLE = {
+  MATCH:     { color: "#15803d", icon: "✅", label: "Document check" },
+  UNCERTAIN: { color: "#b45309", icon: "⚠️", label: "Document check — please verify" },
+  MISMATCH:  { color: "#b91c1c", icon: "❌", label: "Document check — wrong document?" },
+};
+
+function docCheckBadge(doc) {
+  const style = _DOC_CHECK_STYLE[doc.ai_status];
+  if (!style) {
+    // Uploaded before the check existed, or the file could not be read.
+    // Say so rather than leave a gap HR might read as "fine".
+    const why = doc.ai_status === "UNVERIFIED" ? escapeHtml(doc.ai_note || "Could not be checked.")
+                                                : "Not checked yet — use “Re-check documents”.";
+    return `<div style="color:#6b7280;font-size:0.8rem;margin-top:2px;">◌ Document check: ${why}</div>`;
+  }
+  const conf = doc.ai_confidence != null ? ` (score ${doc.ai_confidence}%)` : "";
+  return `<div style="color:${style.color};font-size:0.8rem;margin-top:2px;">
+    ${style.icon} ${style.label}: ${escapeHtml(doc.ai_note || "")}${conf}</div>`;
+}
+
+// Re-run the OCR check over every document this candidate has on record —
+// for uploads that predate the check, or after the rules were tuned.
+async function recheckDocs(btn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  try {
+    const res = await apiFetch(`/hr/candidates/${candidateId}/documents/recheck`, { method: "POST" });
+    await load();
+    await showAlert(res.detail, { title: "Documents re-checked" });
+  } catch (err) {
+    await showError("Could not re-check documents: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
 function renderDocs(allDocs, formType, opts = {}) {
   const { editing = false } = opts;
   const expected = FORM_FILE_FIELDS[formType] || [];
@@ -243,7 +285,7 @@ function renderDocs(allDocs, formType, opts = {}) {
       return `
         <div class="field-row">
           <div class="fname">${labelFor(fieldKey)}</div>
-          <div class="fval">✅ Submitted — ${escapeHtml(doc.original_filename)}</div>
+          <div class="fval">✅ Submitted — ${escapeHtml(doc.original_filename)}${docCheckBadge(doc)}</div>
           ${docActions(formType, fieldKey, doc, editing)}
         </div>`;
     }
@@ -254,7 +296,15 @@ function renderDocs(allDocs, formType, opts = {}) {
         ${docActions(formType, fieldKey, null, editing)}
       </div>`;
   }).join("");
-  return `<h4 style="margin:16px 0 4px;font-size:0.85rem;color:#6b7280;">UPLOADED DOCUMENTS</h4>${rows}`;
+  // Heading and the re-check action share one row; the button is a sibling
+  // of the heading, not inside it, so heading styles never swallow it.
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin:16px 0 4px;">
+      <h4 style="margin:0;font-size:0.85rem;color:#6b7280;">UPLOADED DOCUMENTS</h4>
+      <button type="button" class="btn btn-outline btn-small" onclick="recheckDocs(this)"
+        title="Run the OCR document check again on every file this candidate has uploaded">
+        ↻ Re-check documents</button>
+    </div>${rows}`;
 }
 
 
@@ -1449,8 +1499,9 @@ async function sendForm(formType) {
 
 document.getElementById("approveBtn").addEventListener("click", async () => {
   if (!currentData) return;  // page never loaded — don't act on a stale id
-  if (!await showConfirm("The Document Collection form will be unlocked. Once you approve "
-      + "those documents you can send the BGV form, or finish the onboarding without it.",
+  if (!await showConfirm("Nothing is sent to the candidate yet — press Send on the Document "
+      + "Collection form when you are ready. Once you approve those documents you can send "
+      + "the BGV form, or finish the onboarding without it.",
       { title: "Mark this candidate as shortlisted?", confirmText: "Shortlisted" })) return;
   try {
     await apiFetch(`/hr/candidates/${candidateId}/approve`, { method: "POST", body: JSON.stringify({}) });

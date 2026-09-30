@@ -52,6 +52,7 @@ from app.models import (
     FormType,
     ReferenceDetail,
 )
+from app.agents import doc_validator
 from app.agents import prefill as prefill_agent
 from app.schemas import MyStatusOut
 from app.utils.file_storage import (save_bytes, save_upload, snapshot_document,
@@ -256,6 +257,7 @@ async def save_draft(form_type: str, request: Request, db: Session = Depends(get
                 continue
             original, stored = save_upload(upload, current.id, f"DRAFT_{form_type}", field_key)
             written_paths.append(upload_path(stored))
+            verdict = _check_document(current, stored, upload, field_key)
             for old in db.query(FormDraftDocument).filter(
                     FormDraftDocument.candidate_id == current.id,
                     FormDraftDocument.form_type == ft,
@@ -263,9 +265,11 @@ async def save_draft(form_type: str, request: Request, db: Session = Depends(get
                 replaced_paths.append(upload_path(old.stored_filename))
                 db.delete(old)
             db.flush()   # release the (candidate, form, field) unique slot
-            db.add(FormDraftDocument(candidate_id=current.id, form_type=ft, field_key=field_key,
-                                      original_filename=original, stored_filename=stored,
-                                      content_type=upload.content_type))
+            row = FormDraftDocument(candidate_id=current.id, form_type=ft, field_key=field_key,
+                                    original_filename=original, stored_filename=stored,
+                                    content_type=upload.content_type)
+            doc_validator.apply_to(row, verdict)
+            db.add(row)
     except Exception:
         db.rollback()
         _remove_files(written_paths)
@@ -332,9 +336,11 @@ def _promote_draft_documents(db, candidate_id: int, ft: FormType, provided: set[
         except OSError:
             continue   # drafted file vanished; nothing to promote
         stored = save_bytes(data, candidate_id, ft.value, draft_doc.field_key)
-        db.add(Document(candidate_id=candidate_id, form_type=ft, field_key=draft_doc.field_key,
-                         original_filename=draft_doc.original_filename,
-                         stored_filename=stored, content_type=draft_doc.content_type))
+        doc = Document(candidate_id=candidate_id, form_type=ft, field_key=draft_doc.field_key,
+                       original_filename=draft_doc.original_filename,
+                       stored_filename=stored, content_type=draft_doc.content_type)
+        doc_validator.copy_between(draft_doc, doc)   # same bytes: the draft's verdict stands
+        db.add(doc)
         promoted.append(draft_doc.field_key)
     return promoted
 
@@ -401,6 +407,22 @@ def _remove_files(paths: list[str]) -> None:
             pass
 
 
+def _check_document(current: Candidate, stored: str, upload, field_key: str) -> doc_validator.Verdict:
+    """Run the document-validation agent on a file that has just been written.
+
+    In "block" mode a confident mismatch is refused here, as a 400 the page
+    shows under the field. The caller's cleanup removes the written file — the
+    check runs before any row for it exists, so there is nothing else to undo.
+    """
+    verdict = doc_validator.validate_path(
+        upload_path(stored), upload.content_type, upload.filename or "", field_key,
+        doc_validator.profile_dict(current.profile))
+    if verdict.blocked:
+        label = field_key.replace("_", " ")
+        raise HTTPException(status_code=400, detail=f"{label}: {verdict.note}")
+    return verdict
+
+
 def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> list[str]:
     """Only fields with a newly chosen file are touched — on an edit, anything
     the candidate leaves blank keeps the file already on record.
@@ -409,7 +431,10 @@ def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> li
     AFTER the transaction commits: deleting them here would destroy the old
     upload for good if a later field failed validation and rolled the request
     back. If anything raises mid-way, files already written for this request
-    are removed so the failed attempt leaves no orphans."""
+    are removed so the failed attempt leaves no orphans.
+
+    Each new file goes through the document check; its verdict is stored on
+    the row for HR. The candidate is never shown it."""
     replaced_paths: list[str] = []
     written_paths: list[str] = []
     try:
@@ -420,6 +445,7 @@ def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> li
             # Validate and store the new file before touching the old one.
             original, stored = save_upload(upload, current.id, form_type, field_key)
             written_paths.append(upload_path(stored))
+            verdict = _check_document(current, stored, upload, field_key)
             # Replacing a file: drop the previous rows so we don't accumulate
             # duplicates; the old files on disk go only after commit.
             for old in db.query(Document).filter(
@@ -428,9 +454,11 @@ def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> li
                     Document.field_key == field_key).all():
                 replaced_paths.append(upload_path(old.stored_filename))
                 db.delete(old)
-            db.add(Document(candidate_id=current.id, form_type=FormType(form_type), field_key=field_key,
-                             original_filename=original, stored_filename=stored,
-                             content_type=upload.content_type))
+            doc = Document(candidate_id=current.id, form_type=FormType(form_type), field_key=field_key,
+                           original_filename=original, stored_filename=stored,
+                           content_type=upload.content_type)
+            doc_validator.apply_to(doc, verdict)
+            db.add(doc)
     except Exception:
         _remove_files(written_paths)
         raise
@@ -772,6 +800,11 @@ def _apply_granted_document(db: Session, current: Candidate, perm: FieldEditPerm
     # open what the document used to contain.
     original, stored = save_upload(upload, current.id, perm.form_type, perm.field_name)
     written = [upload_path(stored)]
+    try:
+        verdict = _check_document(current, stored, upload, perm.field_name)
+    except HTTPException:
+        _remove_files(written)   # refused before any row exists; nothing else to undo
+        raise
 
     replaced = db.query(Document).filter(Document.candidate_id == current.id,
                                           Document.form_type == ft,
@@ -785,6 +818,7 @@ def _apply_granted_document(db: Session, current: Candidate, perm: FieldEditPerm
     new_doc = Document(candidate_id=current.id, form_type=ft, field_key=perm.field_name,
                         original_filename=original, stored_filename=stored,
                         content_type=upload.content_type)
+    doc_validator.apply_to(new_doc, verdict)
     db.add(new_doc)
     db.flush()
     new_snapshot = snapshot_document(db, new_doc)

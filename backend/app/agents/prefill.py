@@ -19,7 +19,7 @@ import time
 
 from sqlalchemy.orm import Session
 
-from app.agents import field_mapper
+from app.agents import doc_validator, field_mapper
 from app.config import settings
 from app.models import (
     BGVDetails,
@@ -181,8 +181,13 @@ def carry_documents(db: Session, candidate_id: int, target_form: str,
         except OSError:
             continue                      # source file gone; nothing to carry
         stored = save_bytes(data, candidate_id, target_form, target)
-        db.add(Document(candidate_id=candidate_id, form_type=FormType(target_form),
-                         field_key=target, original_filename=src.original_filename,
-                         stored_filename=stored, content_type=src.content_type))
+        doc = Document(candidate_id=candidate_id, form_type=FormType(target_form),
+                       field_key=target, original_filename=src.original_filename,
+                       stored_filename=stored, content_type=src.content_type)
+        # Same bytes as the source, so its verdict travels with it. (The
+        # mapping only pairs like-for-like fields, so the expected type is
+        # the same on both sides.)
+        doc_validator.copy_between(src, doc)
+        db.add(doc)
         carried.append(target)
     return carried

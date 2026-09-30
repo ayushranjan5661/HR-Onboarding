@@ -1,3 +1,10 @@
+from app.utils import dns_fallback
+
+# Before anything opens a connection: this machine's endpoint protection
+# blocks Python's own DNS when the server runs as a program, which broke
+# every Azure OpenAI and Zoho call. See app/utils/dns_fallback.py.
+dns_fallback.install()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 

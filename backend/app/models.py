@@ -397,6 +397,16 @@ class Document(Base):
     content_type = Column(String(100), nullable=True)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # What the document-validation agent made of the file (see
+    # app/agents/doc_validator.py). Null on rows from before the check existed
+    # and on fields the agent does not cover.
+    ai_status = Column(String(20), nullable=True)      # MATCH | MISMATCH | UNCERTAIN | UNVERIFIED
+    ai_doc_type = Column(String(40), nullable=True)    # e.g. "PAN", "MARKSHEET_10"
+    ai_confidence = Column(Integer, nullable=True)     # 0-100
+    ai_id_match = Column(Boolean, nullable=True)       # number on the card vs. the profile
+    ai_note = Column(Text, nullable=True)              # the one-line message shown to people
+    ai_checked_at = Column(DateTime(timezone=True), nullable=True)
+
     candidate = relationship("Candidate", back_populates="documents")
 
 
@@ -455,6 +465,15 @@ class FormDraftDocument(Base):
     stored_filename = Column(String(255), nullable=False)
     content_type = Column(String(100), nullable=True)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Same verdict columns as Document; carried across when the draft is
+    # promoted so the file is not sent to the model a second time.
+    ai_status = Column(String(20), nullable=True)
+    ai_doc_type = Column(String(40), nullable=True)
+    ai_confidence = Column(Integer, nullable=True)
+    ai_id_match = Column(Boolean, nullable=True)
+    ai_note = Column(Text, nullable=True)
+    ai_checked_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (UniqueConstraint("candidate_id", "form_type", "field_key",
                                         name="uq_draft_doc_candidate_form_field"),)
