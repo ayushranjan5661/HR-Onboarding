@@ -1,0 +1,102 @@
+{
+  "_readme": "local field key -> Zoho People field API name on the \"Candidate\" form (formLinkName Candidate). Used by the HR portal's \"Publish to Zoho Candidate Form\" button via app/services/zoho_push.py (target \"candidate\"). Taken from the HR-supplied sheet \"Candidate Form Fields & Api Name\" and every API name re-verified live against GET forms/Candidate/components on 2026-10-01. Leave a value as \"\" to skip that field. The other button (Confirmation_Process_Form) uses field_map.json — the two maps are independent.",
+  "_form": "Candidate",
+  "map": {
+    "full_name": "Full_Name",
+    "email": "Email_ID",
+    "contact_number": "Mobile",
+    "alternate_number": "Alternate_Mobile_Number",
+    "date_of_birth": "Date_of_Birth",
+    "gender": "Gender1",
+    "current_address": "Current_Address",
+    "permanent_address": "Permanent_Address",
+    "pan_number": "PAN_card_numer",
+    "aadhaar_number": "Aadhar_number",
+    "position_applied_for": "",
+    "skills_technologies": "Skillset",
+    "alternate_email": "Personel_Email",
+    "blood_group": "Blood_Group",
+    "linkedin_link": "LinkedIn_Profile_URL",
+    "marital_status": "Marital_Status",
+    "any_backlogs": "",
+    "source": "Source_Of_Hire",
+    "worked_in_levelshift_before": "",
+    "levelshift_employee_id": "",
+    "levelshift_experience_yrs": "",
+    "total_experience_yrs": "Total_years_of_experience",
+    "relevant_skill_exp_yrs": "Relevant_Years_Of_Experience1",
+    "current_ctc_lpa": "",
+    "expected_ctc_lpa": "",
+    "additional_allowance": "",
+    "variable_comp": "",
+    "notice_period_days": "",
+    "other_offers": "",
+    "technical_certifications": ""
+  },
+  "_unmapped_readme": "Left \"\" because the sheet gives no Candidate-form field for them: position_applied_for, any_backlogs, worked_in_levelshift_before, levelshift_employee_id, levelshift_experience_yrs, expected_ctc_lpa, additional_allowance, variable_comp, notice_period_days, other_offers. technical_certifications is free text locally but the sheet points it at Certifications_Zip_File, a File_Upload field — text cannot go there, so it is skipped.",
+  "_date_fields": ["date_of_birth"],
+  "_email_fields": ["email", "alternate_email"],
+  "_numeric_fields_readme": "Zoho types: Aadhar_number Number(12), Relevant_Years_Of_Experience1 Decimal. Reduced to the bare number before sending (\"1234 5678 9012\" -> \"123456789012\").",
+  "_numeric_fields": ["aadhaar_number", "relevant_skill_exp_yrs"],
+  "_blood_group_fields": ["blood_group"],
+  "_value_map_readme": "local option text -> exact Candidate-form picklist option (read live 2026-10-01). Gender1: Male/Female/Others. Source_Of_Hire options: Direct, CareerSite, Advertisement, Added by User, Indeedresume, Newspaper, Partner, Search Engine, Imported by parser, Gapps, SearchEngine, Facebook, Twitter, External Referral, Vendor, Employee Referral, Campus — Job Portal/Social Media/Walk-in/Other have no exact match and are best guesses; change them here if HR prefers others.",
+  "_value_map": {
+    "gender": {
+      "Other": "Others"
+    },
+    "source": {
+      "Job Portal": "CareerSite",
+      "Employee Referral": "Employee Referral",
+      "Social Media": "Advertisement",
+      "Campus": "Campus",
+      "Walk-in": "Direct",
+      "Other": "Direct",
+      "_default": "Direct"
+    }
+  },
+  "_subforms_readme": "Salary_Drawn_Last is NOT a flat field: it is a column of the Candidate form's \"Experience\" tabular section (Zoho answers 7022 \"Input is expected in JSONArray for tabular field\" otherwise). So the candidate's employment rows are sent as that table (columns flat in inputData, one array element per row — same recipe as field_map.json's _subforms_write_status), and the CIF's Current CTC is put on the current-job row (currently_working = Yes, else the first row) via _fill_from_profile. Sent as the bare number in LPA, as entered — not converted to rupees. A candidate with no employment rows sends no Experience table and no salary.",
+  "_subforms": {
+    "work_experience": {
+      "_zoho_section": "Experience",
+      "map": {
+        "company_name": "Company",
+        "position_held": "Occupation_Title",
+        "from_date": "From1",
+        "to_date": "To1",
+        "currently_working": "I_currently_work_here",
+        "reason_for_leaving": "Reason_for_Leaving_the_Job",
+        "current_ctc_lpa": "Salary_Drawn_Last"
+      },
+      "_fill_from_profile": {
+        "current_ctc_lpa": "current_row"
+      }
+    }
+  },
+  "files": {
+    "_readme": "local Document.field_key -> Candidate-form File_Upload/Image field. Uploaded via forms/Candidate/uploadFile and sent as the encryptedfilepath (see upload_files() in zoho_client.py). profile_picture and passport_size_photo both target Photo; when a candidate has both, profile_picture wins (zoho_push dedupes per Zoho field, last one in key order). The sheet maps \"Aadhar Card\" to Aadhar_number, which is a Number field — the document goes to Aadhar_Card_self_attested instead and the number itself goes to Aadhar_number via the flat map. Signature, UG/PG consolidated marksheets and other-education documents have no Candidate-form field in the sheet.",
+    "map": {
+      "profile_picture": "Photo",
+      "passport_size_photo": "Photo",
+      "signature": "",
+      "additional_certifications": "Additional_Certifications_if_any",
+      "cc_offer_letter": "Experience_letter1",
+      "cc_role_change_letter": "Salary_Role_change_letter",
+      "cc_experience_letter": "Experience_letter",
+      "cc_relieving_letter": "Relieving_letter",
+      "cc_pay_slips": "Last_3_months_pay_slips_Zip_File",
+      "marksheet_10": "th_Certificate",
+      "marksheet_12_diploma": "th_Certificate1",
+      "ug_consolidated_marksheet": "",
+      "ug_certificate": "UG_Certificates_Zip_File",
+      "pg_consolidated_marksheet": "",
+      "pg_certificate": "PG_Certificates_Zip_File",
+      "other_edu_marksheet": "",
+      "other_edu_certificate": "",
+      "pan_card": "Pan_Card_self_attested",
+      "aadhar_card": "Aadhar_Card_self_attested",
+      "passport_copy": "Passport_Copy_self_attested",
+      "address_proof": "Address_proof_self_attested",
+      "id_proof": "ID_proof_self_attested"
+    }
+  }
+}
