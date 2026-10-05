@@ -20,9 +20,73 @@ class InviteTokenLoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    role: str
+    role: str                      # candidate | MASTER_ADMIN | SUPER_ADMIN | ADMIN | MANAGER | HR
     name: str
     must_reset_password: bool = False
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+# ---------------------------------------------------------------------------
+# Staff hierarchy (Master Admin / Super Admin / Manager / HR Executive)
+# ---------------------------------------------------------------------------
+
+class StaffOut(BaseModel):
+    id: int
+    name: str
+    email: str
+    role: str
+    is_active: bool
+    manager_id: Optional[int] = None
+    manager_name: Optional[str] = None
+    must_reset_password: bool = False
+    temp_password: Optional[str] = None   # one-time password, until they change it
+    current_password: Optional[str] = None  # Master Admin only: the password in force now
+    candidate_count: int = 0              # candidates they currently own
+    team_size: int = 0                    # Managers: HR Executives reporting to them
+    created_at: Optional[datetime] = None
+
+
+class CreateStaffRequest(BaseModel):
+    name: str
+    email: EmailStr
+    role: str = "HR"                      # SUPER_ADMIN (Master Admin only) | ADMIN (Master/Super Admin) | MANAGER | HR
+    manager_id: Optional[int] = None      # HR only: the team they join
+
+
+class UpdateStaffRequest(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+    # HR Executives only: move to another Manager. Send 0 to leave them unassigned.
+    manager_id: Optional[int] = None
+
+
+class CreatedStaffResponse(BaseModel):
+    staff: StaffOut
+    temp_password: str
+
+
+class AssignCandidateRequest(BaseModel):
+    assigned_hr_id: int
+
+
+class StaffAuditOut(BaseModel):
+    id: int
+    actor_id: Optional[int] = None
+    actor_name: Optional[str] = None
+    actor_role: Optional[str] = None
+    action: str
+    target_type: str
+    target_id: Optional[int] = None
+    target_name: Optional[str] = None
+    detail: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +97,9 @@ class InviteCandidateRequest(BaseModel):
     name: str
     email: EmailStr
     candidate_type: str = "EXPERIENCED"   # EXPERIENCED | FRESHER
+    # Who owns the candidate. Defaults to the caller; a Manager may pick one
+    # of their HR Executives, the Super Admin anyone.
+    assigned_hr_id: Optional[int] = None
 
 
 class InviteCandidateResponse(BaseModel):
@@ -48,6 +115,10 @@ class CandidateListItem(BaseModel):
     email: str
     stage: str
     created_at: datetime
+    assigned_hr_id: Optional[int] = None
+    assigned_hr_name: Optional[str] = None
+    manager_id: Optional[int] = None      # the owner's Manager (or the owner, if a Manager)
+    manager_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -166,6 +237,13 @@ class DocumentOut(BaseModel):
     content_type: Optional[str] = None   # lets the portal preview inline
     file_available: bool = True          # False if the file vanished from disk
     uploaded_at: datetime
+    # Document-validation verdict (app/agents/doc_validator.py); all None on
+    # rows that were never checked.
+    ai_status: Optional[str] = None
+    ai_doc_type: Optional[str] = None
+    ai_confidence: Optional[int] = None
+    ai_id_match: Optional[bool] = None
+    ai_note: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -213,6 +291,8 @@ class CandidateDetailOut(BaseModel):
     stage: str
     candidate_type: str = "EXPERIENCED"
     rejection_reason: Optional[str] = None
+    assigned_hr_id: Optional[int] = None
+    assigned_hr_name: Optional[str] = None
     temp_password: Optional[str] = None   # decrypted on demand for HR view
     login_url: Optional[str] = None
     profile: Optional[CandidateProfileOut] = None

@@ -1,6 +1,7 @@
-requireAuth();
+requireAuth();   // every staff role reaches this page; the server scopes what it returns
 document.getElementById("whoami").textContent = getName();
 document.getElementById("whoamiAvatar").textContent = getName().charAt(0).toUpperCase();
+applyRoleNav();  // send Managers / Super Admin back to their own candidate list
 
 const candidateId = new URLSearchParams(window.location.search).get("id");
 let currentData = null;
@@ -220,6 +221,48 @@ function docActions(formType, fieldKey, doc, editing, fileAvailable = true) {
   return buttons.length ? `<div class="field-actions">${buttons.join("")}</div>` : "";
 }
 
+// What the OCR document check made of the file (score 0-100). A MATCH is
+// shown quietly; anything else is the reason this line exists — a PAN card
+// in the Aadhaar slot should be obvious from the checklist, not from opening
+// the file.
+const _DOC_CHECK_STYLE = {
+  MATCH:     { color: "#15803d", icon: "✅", label: "Document check" },
+  UNCERTAIN: { color: "#b45309", icon: "⚠️", label: "Document check — please verify" },
+  MISMATCH:  { color: "#b91c1c", icon: "❌", label: "Document check — wrong document?" },
+};
+
+function docCheckBadge(doc) {
+  const style = _DOC_CHECK_STYLE[doc.ai_status];
+  if (!style) {
+    // Uploaded before the check existed, or the file could not be read.
+    // Say so rather than leave a gap HR might read as "fine".
+    const why = doc.ai_status === "UNVERIFIED" ? escapeHtml(doc.ai_note || "Could not be checked.")
+                                                : "Not checked yet — use “Re-check documents”.";
+    return `<div style="color:#6b7280;font-size:0.8rem;margin-top:2px;">◌ Document check: ${why}</div>`;
+  }
+  const conf = doc.ai_confidence != null ? ` (score ${doc.ai_confidence}%)` : "";
+  return `<div style="color:${style.color};font-size:0.8rem;margin-top:2px;">
+    ${style.icon} ${style.label}: ${escapeHtml(doc.ai_note || "")}${conf}</div>`;
+}
+
+// Re-run the OCR check over every document this candidate has on record —
+// for uploads that predate the check, or after the rules were tuned.
+async function recheckDocs(btn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  try {
+    const res = await apiFetch(`/hr/candidates/${candidateId}/documents/recheck`, { method: "POST" });
+    await load();
+    await showAlert(res.detail, { title: "Documents re-checked" });
+  } catch (err) {
+    await showError("Could not re-check documents: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
 function renderDocs(allDocs, formType, opts = {}) {
   const { editing = false } = opts;
   const expected = FORM_FILE_FIELDS[formType] || [];
@@ -242,7 +285,7 @@ function renderDocs(allDocs, formType, opts = {}) {
       return `
         <div class="field-row">
           <div class="fname">${labelFor(fieldKey)}</div>
-          <div class="fval">✅ Submitted — ${escapeHtml(doc.original_filename)}</div>
+          <div class="fval">✅ Submitted — ${escapeHtml(doc.original_filename)}${docCheckBadge(doc)}</div>
           ${docActions(formType, fieldKey, doc, editing)}
         </div>`;
     }
@@ -253,7 +296,15 @@ function renderDocs(allDocs, formType, opts = {}) {
         ${docActions(formType, fieldKey, null, editing)}
       </div>`;
   }).join("");
-  return `<h4 style="margin:16px 0 4px;font-size:0.85rem;color:#6b7280;">UPLOADED DOCUMENTS</h4>${rows}`;
+  // Heading and the re-check action share one row; the button is a sibling
+  // of the heading, not inside it, so heading styles never swallow it.
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin:16px 0 4px;">
+      <h4 style="margin:0;font-size:0.85rem;color:#6b7280;">UPLOADED DOCUMENTS</h4>
+      <button type="button" class="btn btn-outline btn-small" onclick="recheckDocs(this)"
+        title="Run the OCR document check again on every file this candidate has uploaded">
+        ↻ Re-check documents</button>
+    </div>${rows}`;
 }
 
 
@@ -381,7 +432,7 @@ function showLoadError(message) {
   notice.classList.remove("hidden");
   notice.innerHTML = `<strong style="color:#b91c1c;">${escapeHtml(message)}</strong>
     <div style="margin-top:8px;color:#6b7280;font-size:0.88rem;">
-      The candidate may have been deleted. <a href="dashboard.html">Back to all candidates</a>
+      The candidate may have been deleted. <a href="${roleCandidatesPage()}">Back to all candidates</a>
     </div>`;
 }
 
@@ -389,8 +440,11 @@ function render() {
   const c = currentData;
   document.getElementById("candName").textContent = `${c.name} — ${c.email}`;
   const typeLabel = c.candidate_type === "FRESHER" ? "Fresher / Trainee" : "Experienced";
+  const ownerTag = c.assigned_hr_name
+    ? `<span class="badge badge-pending" style="margin-right:6px;" title="Owner">Owner: ${escapeHtml(c.assigned_hr_name)}</span>`
+    : "";
   document.getElementById("candStage").innerHTML =
-    `<span class="badge badge-pending" style="margin-right:6px;">${typeLabel}</span>` + badge(c.stage);
+    ownerTag + `<span class="badge badge-pending" style="margin-right:6px;">${typeLabel}</span>` + badge(c.stage);
 
   // Login credentials issued to this candidate (HR-owned; candidate cannot change them)
   document.getElementById("credentialsBody").innerHTML = `
@@ -429,7 +483,15 @@ function render() {
   // No per-field buttons here — the CIF card has one Edit button for the whole form.
   const cifOpts = { editing: editModes.CIF };
   document.getElementById("profileFields").innerHTML = fieldRows("PROFILE", PROFILE_FIELDS, c.profile || {}, cifOpts);
-  document.getElementById("actions-CIF").innerHTML = formEditControls("CIF");
+  // The CIF card is static markup, so its title bar is filled in here: the
+  // same Send / Withdraw controls the follow-up cards get, plus a NOT SENT
+  // badge that says why a sent form has gone quiet on the candidate's side.
+  const cifSub = c.submissions.find(s => s.form_type === "CIF");
+  document.getElementById("actions-CIF").innerHTML =
+    (editModes.CIF ? "" : accessControls("CIF", cifSub, c)) + formEditControls("CIF");
+  document.getElementById("cifBadge").innerHTML =
+    cifSub && cifSub.status === "LOCKED"
+      ? `<span class="badge badge-locked">NOT SENT</span>` : "";
   renderOpenAccess();
 
   // ---- AI Summary & Flags: only once the candidate has actually submitted a CIF.
@@ -466,14 +528,20 @@ function render() {
     const sub = c.submissions.find(s => s.form_type === type);
     if (!sub) return;
     if (sub.status === "LOCKED") {
+      const gate = sendGate(type, c);
       const wrap = document.createElement("div");
       wrap.className = "card section-card collapsed";
-      wrap.style.opacity = "0.7";
+      wrap.style.opacity = gate.canSend ? "1" : "0.7";
       wrap.innerHTML = `<div class="section-title collapsible" onclick="toggleCollapse(this)">
-          <h3>${cfg.title} <span class="badge badge-locked">LOCKED</span></h3>
+          <h3>${cfg.title} <span class="badge badge-locked">NOT SENT</span></h3>
+          <div class="section-title-actions" onclick="event.stopPropagation()">
+            ${accessControls(type, sub, c)}
+          </div>
           <span class="chevron">&#9660;</span></div>
-        <p style="color:#6b7280;">Unlocks for the candidate once you approve their
-        Document Collection form above.</p>`;
+        <p style="color:#6b7280;">${gate.canSend
+          ? "The candidate cannot see this form until you send it. If you do not need it, "
+            + "you can mark the onboarding complete without it."
+          : escapeHtml(gate.reason)}</p>`;
       document.getElementById("followupForms").appendChild(wrap);
       return;
     }
@@ -493,7 +561,7 @@ function render() {
       <div class="section-title collapsible" onclick="toggleCollapse(this)">
         <h3>${cfg.title} <span class="badge badge-${sub.status.toLowerCase()}">${sub.status.replaceAll("_"," ")}</span></h3>
         <div class="section-title-actions" onclick="event.stopPropagation()">
-          ${submitted ? formEditControls(type) : ""}${reviewControls}
+          ${submitted ? formEditControls(type) : ""}${reviewControls}${accessControls(type, sub, c)}
         </div>
         <span class="chevron">&#9660;</span>
       </div>
@@ -513,15 +581,24 @@ function render() {
     if (card) card.classList.remove("collapsed");
   });
 
-  // ---- Mark onboarding complete once both follow-ups are approved ----
+  // ---- Mark onboarding complete: documents approved is the only requirement ----
+  // BGV is optional, so the card appears as soon as the documents pass and
+  // says where BGV stands rather than waiting for it.
   if (c.stage === "APPROVED_FOR_BGV") {
-    const bgv = c.submissions.find(s => s.form_type === "BGV");
     const doc = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
-    if (bgv && doc && bgv.status === "APPROVED" && doc.status === "APPROVED") {
+    if (doc && doc.status === "APPROVED") {
+      const bgv = c.submissions.find(s => s.form_type === "BGV");
+      const bgvNote =
+        !bgv || bgv.status === "LOCKED"
+          ? "BGV has not been sent. Complete the onboarding now if you do not need it."
+        : bgv.status === "APPROVED"
+          ? "BGV is approved."
+          : `BGV is ${bgv.status.replaceAll("_", " ").toLowerCase()}. `
+            + "You can still complete the onboarding without it.";
       const wrap = document.createElement("div");
       wrap.className = "card section-card";
       wrap.innerHTML = `<div class="section-title"><h3>Onboarding</h3></div>
-        <p style="color:#6b7280;">Both BGV and Document Collection are approved.</p>
+        <p style="color:#6b7280;">Document Collection is approved. ${bgvNote}</p>
         <button class="btn btn-success" onclick="markComplete()">Mark Onboarding Complete</button>`;
       document.getElementById("followupForms").appendChild(wrap);
     }
@@ -617,6 +694,42 @@ async function copyLoginLink(btn) {
 // that turns every value — flat fields, repeating-table cells, attached
 // documents — into something editable. Save then PATCHes only what actually
 // changed, keeping the field_edit_log meaningful.
+
+// Whether HR may open one form for the candidate right now. The onboarding
+// runs CIF -> Document Collection -> BGV, so each form waits on the decision
+// before it; the same order is enforced server-side in hr._send_blocker.
+function sendGate(form, c) {
+  if (c.stage === "REJECTED") {
+    return { canSend: false, reason: "This application is rejected — no form can be sent." };
+  }
+  if (form === "DOCUMENT_COLLECTION" && (c.stage === "INVITED" || c.stage === "CIF_SUBMITTED")) {
+    return { canSend: false, reason: "Available once you approve their CIF above." };
+  }
+  if (form === "BGV") {
+    const docs = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
+    if (!docs || docs.status !== "APPROVED") {
+      return { canSend: false,
+               reason: "Available once you approve their Document Collection form above." };
+    }
+  }
+  return { canSend: true, reason: "" };
+}
+
+// Send / Withdraw for any of the three forms. A form that is not out yet can
+// be sent; one that is out but untouched can be taken back. Past that the card
+// holds the candidate's own work, so neither button applies.
+function accessControls(form, sub, c) {
+  const status = sub ? sub.status : "LOCKED";
+  if (status === "LOCKED") {
+    return sendGate(form, c).canSend
+      ? `<button class="btn btn-primary btn-small" onclick="sendForm('${form}')">Send Form</button>`
+      : "";
+  }
+  if (status === "PENDING" && c.stage !== "REJECTED") {
+    return `<button class="btn btn-outline btn-small" onclick="unsendForm('${form}')">Withdraw</button>`;
+  }
+  return "";
+}
 
 function formEditControls(form) {
   if (editModes[form]) {
@@ -1353,12 +1466,43 @@ async function markComplete() {
   }
 }
 
+// Opening and closing a form for the candidate. Every form carries these: the
+// CIF still opens at invite and Document Collection on approval, so the
+// buttons are there to correct that flow, not to drive it.
+async function unsendForm(formType) {
+  const title = FORM_TITLES[formType] || formType;
+  if (!await showConfirm(
+        `Withdraw the ${title} form? The candidate will no longer see it, and anything `
+        + `they have typed but not submitted stays as an unsent draft.`,
+        { confirmText: "Withdraw" })) return;
+  try {
+    await apiFetch(`/hr/candidates/${candidateId}/forms/${formType}/unsend`, { method: "POST" });
+    await load();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function sendForm(formType) {
+  const title = FORM_TITLES[formType] || formType;
+  if (!await showConfirm(`Send the ${title} form to this candidate?`,
+                          { confirmText: "Send Form" })) return;
+  try {
+    await apiFetch(`/hr/candidates/${candidateId}/forms/${formType}/send`, { method: "POST" });
+    await load();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
 // Deleting an invitation is done from the dashboard list, not here.
 
 document.getElementById("approveBtn").addEventListener("click", async () => {
   if (!currentData) return;  // page never loaded — don't act on a stale id
-  if (!await showConfirm("The Document Collection form will be unlocked. BGV opens once you approve their documents.",
-      { title: "Approve this candidate?", confirmText: "Approve" })) return;
+  if (!await showConfirm("Nothing is sent to the candidate yet — press Send on the Document "
+      + "Collection form when you are ready. Once you approve those documents you can send "
+      + "the BGV form, or finish the onboarding without it.",
+      { title: "Mark this candidate as shortlisted?", confirmText: "Shortlisted" })) return;
   try {
     await apiFetch(`/hr/candidates/${candidateId}/approve`, { method: "POST", body: JSON.stringify({}) });
     await load();
@@ -1367,21 +1511,50 @@ document.getElementById("approveBtn").addEventListener("click", async () => {
   }
 });
 
+// Rejecting ends the application for good, so it asks for the same
+// type-the-name confirmation the dashboard uses before deleting a candidate —
+// a misplaced click on a red button should not be able to close someone out.
+function closeRejectModal() {
+  document.getElementById("rejectModal").classList.add("hidden");
+}
+
 document.getElementById("rejectBtn").addEventListener("click", () => {
   if (!currentData) return;  // page never loaded — don't act on a stale id
+  document.getElementById("rejectCandName").textContent = currentData.name;
+  document.getElementById("rejectCandNameConfirm").textContent = currentData.name;
+  const input = document.getElementById("rejectConfirmInput");
+  input.value = "";
+  document.getElementById("rejectReason").value = "";
+  document.getElementById("confirmRejectBtn").disabled = true;
   document.getElementById("rejectModal").classList.remove("hidden");
+  input.focus();
+});
+
+document.getElementById("rejectConfirmInput").addEventListener("input", (e) => {
+  document.getElementById("confirmRejectBtn").disabled =
+    !currentData || e.target.value !== currentData.name;
 });
 
 document.getElementById("confirmRejectBtn").addEventListener("click", async () => {
+  // Re-check rather than trust the disabled attribute: currentData can have
+  // been reloaded under a stale modal.
+  if (!currentData ||
+      document.getElementById("rejectConfirmInput").value !== currentData.name) return;
+  const btn = document.getElementById("confirmRejectBtn");
+  btn.disabled = true;
+  btn.textContent = "Rejecting...";
   try {
     await apiFetch(`/hr/candidates/${candidateId}/reject`, {
       method: "POST",
       body: JSON.stringify({ reason: document.getElementById("rejectReason").value }),
     });
-    document.getElementById("rejectModal").classList.add("hidden");
+    closeRejectModal();
     await load();
   } catch (err) {
     showError(err.message);
+    btn.disabled = false;
+  } finally {
+    btn.textContent = "Reject Candidate";
   }
 });
 

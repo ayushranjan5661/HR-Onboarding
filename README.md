@@ -7,8 +7,44 @@ HR reviews those and closes out onboarding.
 
 ## Stack
 - Backend: FastAPI + PostgreSQL (SQLAlchemy), JWT auth, two independent login
-  systems (HR vs Candidate).
-- Frontend: static HTML/CSS/JS — two separate portals, no build step.
+  systems (staff vs Candidate).
+- Frontend: static HTML/CSS/JS — four portals (Super Admin, Manager, HR,
+  Candidate), no build step. The Master Admin uses the Super Admin portal.
+
+## Staff roles
+One staff table (`hr_users`), one login (`/auth/staff/login`); the account's
+role decides the landing page and what the server lets it see.
+
+| Role | Who | Sees | Can do |
+| --- | --- | --- | --- |
+| `MASTER_ADMIN` | developer account, seeded from `SEED_MASTER_*` in `.env` only | everything, plus the **current password** of every staff login | everything below, plus create / deactivate / delete / reset Super Admins. Cannot be created by the API, deleted or deactivated. Invisible to Super Admins |
+| `SUPER_ADMIN` | the seeded account (`SEED_HR_*`); more can be created by the Master Admin | every candidate | create / deactivate / delete Managers and HR Executives, reset their passwords, move an HR between teams, reassign any candidate, global audit |
+| `MANAGER` | team lead | own + team candidates | create / deactivate / delete HR Executives in own team, invite candidates for any team member, reassign within team, everything an HR can do on team candidates, team audit |
+| `HR` | HR Executive | candidates assigned to them | invite, review, approve / reject, send / withdraw forms, edit access |
+
+Rules enforced server-side (`app/scope.py`, `app/staff_service.py`):
+- A candidate outside the caller's scope answers **404** on every `/hr` route,
+  including the ones keyed by submission / document / row id.
+- Ownership is `candidates.assigned_hr_id` (moves on reassignment);
+  `created_by_hr_id` records who invited and never changes.
+- Deleting a staff user is blocked while they own candidates or lead HRs.
+  Reassign / move first, or deactivate.
+- New staff get a generated password shown once; they must change it on first
+  login (`must_reset_password` → every other call returns
+  `403 PASSWORD_RESET_REQUIRED`).
+- An HR with no Manager (rows from before teams existed) is visible only to
+  the Super Admin until moved into a team.
+- Staff-hierarchy changes are written to `staff_audit_log`.
+- Every staff password in force is also kept encrypted (`hr_users.password_enc`,
+  same key scheme as candidate passwords) so the Master Admin can read it.
+  Written on create, reset, self-service change and seed; rows whose password
+  was last set before this existed show "Not recorded" until reset.
+- Only the Master Admin may act on a Super Admin (`/admin/staff/{id}` returns
+  404 to a Super Admin for admin rows, including the Master Admin's).
+
+Portals: `frontend/super-admin/` (Master Admin and Super Admin), `frontend/manager/`,
+`frontend/hr-portal/`. The candidate detail page (`hr-portal/candidate.html`) is
+shared by every staff role.
 - Files (Aadhaar/PAN/mark sheets/resume/etc.) are stored on disk under
   `backend/uploads/`, referenced from Postgres.
 
@@ -34,15 +70,18 @@ HR-Onboarding/
 │  │  ├─ agents/
 │  │  │  ├─ field_mapper.py    LLM — which fields mean the same thing across forms
 │  │  │  ├─ prefill.py         turns those mappings into pre-filled values + carried documents
-│  │  │  └─ insights.py        LLM — CIF summary and anomaly flags for HR
+│  │  │  ├─ insights.py        LLM — CIF summary and anomaly flags for HR
+│  │  │  ├─ doc_validator.py   OCR + keyword scoring — is each upload the document its field asks for?
+│  │  │  └─ doc_lexicon.py     the words it looks for, in every Indian script + every state board
+│  ├─ tessdata/                Tesseract language packs: English + 13 Indian languages (~30 MB)
 │  │  └─ utils/
 │  │     └─ file_storage.py    upload validation, safe storage, document snapshots
 │  ├─ uploads/                 candidate files + retained versions (gitignored)
-│  ├─ init_db.py               creates tables, runs light migrations, seeds the first HR login
+│  ├─ init_db.py               creates tables, runs light migrations, seeds the Super Admin login
 │  ├─ requirements.txt
 │  └─ .env.example
 ├─ frontend/                   static — no build step; serve this folder as ONE site
-│  ├─ index.html               the only login page; HR / Candidate role toggle
+│  ├─ index.html               the only login page; Staff / Candidate toggle, routes staff by role
 │  ├─ js/
 │  │  ├─ config.js             API_BASE — the single place the backend URL is set
 │  │  └─ field-labels.js       field labels + section titles, shared by both portals
@@ -76,7 +115,8 @@ HR-Onboarding/
 ### Data model
 | Table | What it holds |
 | --- | --- |
-| `hr_users` | HR logins |
+| `hr_users` | every staff login: `role`, `manager_id` (HR → Manager), `must_reset_password`, `password_enc` (Master Admin view) |
+| `staff_audit_log` | staff create / deactivate / delete / reset / move, candidate reassignment |
 | `candidates` | candidate login, stage, type, invite token |
 | `candidate_profiles` | identity fields shared by every form |
 | `form_submissions` | one row per form: status, submitted/reviewed timestamps |
@@ -117,8 +157,8 @@ Serve the whole `frontend/` folder as ONE static site (single entry point):
 cd frontend
 python -m http.server 5500
 ```
-Open **http://127.0.0.1:5500/index.html** — one login page with an HR /
-Candidate role toggle.
+Open **http://127.0.0.1:5500/index.html** — one login page with a Staff /
+Candidate toggle. Staff land in the portal for their role.
 
 **Ports must match in three places** — a mismatch shows up in the browser as
 a bare "Failed to fetch" on login:
@@ -158,13 +198,14 @@ The link looks like `index.html?token=<43 random chars>&next=form`.
   explanation rather than a dead end.
 3. Back in the HR portal, open the candidate → review every submitted field,
    edit or delete anything, then **Approve** or **Reject**.
-4. On **Approve**, only the **Document Collection** form unlocks. Details
-   already on file (name/email/contact/PAN/etc.) are pulled from the CIF, so
-   the candidate fills only what is unique to that form.
+4. **Approve** makes the **Document Collection** form sendable, but it stays
+   withdrawn until HR presses **Send** on it — nothing reaches the candidate
+   automatically. Details already on file (name/email/contact/PAN/etc.) are
+   pulled from the CIF, so the candidate fills only what is unique to that form.
 5. Candidate submits their documents → HR reviews them. **Approving the
-   Document Collection is what unlocks the BGV form** — the stages are
-   sequential, so BGV cannot be started or submitted before then. Rejecting
-   the documents leaves BGV locked.
+   Document Collection is what allows the BGV form to be sent** (again with
+   **Send**) — the stages are sequential, so BGV cannot be started or
+   submitted before then. Rejecting the documents leaves BGV locked.
 6. Candidate submits BGV → HR approves it → HR marks onboarding complete.
 
 ### Form sequence
@@ -295,6 +336,47 @@ on curated + heuristic rules only.
 
 `backend/app/field_catalog.py` is generated — regenerate it with
 `scratchpad/gen_catalog.py` after changing any form definition.
+
+## Document check (OCR + keyword scoring)
+
+Candidates attach the wrong file to a slot more often than you would think —
+a PAN card under "Aadhaar", a signature under "PAN", a transfer certificate as
+the "10th marksheet". `backend/app/agents/doc_validator.py` reads every upload
+and records a score on the document row (`ai_status`, `ai_doc_type`,
+`ai_confidence` = score 0-100, `ai_note`, `ai_id_match`).
+
+**Nothing leaves the server.** Identity documents are sensitive, so the check
+is entirely local — no AI service is involved:
+
+| Step | What it does |
+|---|---|
+| Extract | A PDF's own text layer when it has one (e-Aadhaar, bank statements); otherwise Tesseract OCR on the image / rasterised pages in **one pass with English plus every major Indian script** (Devanagari, Bengali/Assamese, Odia, Gurmukhi, Gujarati, Tamil, Telugu, Kannada, Malayalam, Urdu; ~0.8 s a page). Candidates' Aadhaar cards and board certificates are bilingual, and the regional half is read too. `.docx` text is read directly. |
+| Score | Each document type in `RULES` is a list of weighted keyword/pattern rules drawn from `doc_lexicon.py` — "Aadhaar", "Government of India", "date of birth", "marks", "Class 10/12" in every script, plus every state board by name and by what it calls its exams (SSC, SSLC, HSLC, Matric, Madhyamik, Intermediate, PUC, Plus Two, HS …). Regional words match on stems because OCR reorders vowel signs. — "Income Tax Department", a PAN-shaped number, "Class X", a board name, "Net Pay"… A type's score is the share of its weight that matched (0-100); negative weights let a 12th marksheet lose points as a 10th one. Photos and signatures have no text, so they are scored from pixel statistics (ink coverage, brightness, colour). |
+| Decide | Score for the field's expected type ≥ `DOC_VALIDATION_MATCH_SCORE` (80) → `MATCH`; < `DOC_VALIDATION_MISMATCH_SCORE` (40) → `MISMATCH`, naming the type that scored best; in between → `UNCERTAIN` for HR. A PAN/Aadhaar number found in the text is checked for shape (regex / Verhoeff checksum) and compared with the profile. Anything unreadable (OCR missing, legacy .doc, blank scan) is `UNVERIFIED`/`UNCERTAIN` and always accepted. |
+
+The note stored with each verdict says *why* ("Looks like a PAN card (score
+92%: Income Tax Department, PAN-format number, Government of India)"), so HR
+can judge the check as well as the document.
+
+Where it runs: on Save Draft, on Submit, on an HR-granted re-upload, and on
+HR's own Attach/Replace. **Verdicts are for HR only** — the candidate portal
+never shows them and the candidate API never returns them (the one exception
+is `block` mode, where a refused upload has to say why). Drafts and
+carried-over documents keep their verdict rather than being re-read.
+
+Documents uploaded before the check existed have no score; the **Re-check
+documents** button on the HR candidate page scores everything that candidate
+has on record, and `python recheck_documents.py` (add `--all` after tuning
+the rules) does it for the whole database.
+
+Setup: `winget install UB-Mannheim.TesseractOCR` (or set `TESSERACT_CMD`);
+language packs ship in `backend/tessdata`. `DOC_VALIDATION_MODE` in `.env`:
+`off`, `warn` (default — record and show to the candidate and HR, never
+refuse) or `block` (refuse a `MISMATCH`). Start in `warn`, look at what HR
+sees on the candidate page for a few weeks, tune the rule weights, then
+switch to `block`.
+
+Tests for the scoring layer: `cd backend && ../myenv/Scripts/python.exe -m pytest tests -q`.
 
 ## Security notes
 - Passwords are bcrypt-hashed; HR and candidate sessions use separate JWTs

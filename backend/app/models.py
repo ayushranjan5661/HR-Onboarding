@@ -50,11 +50,27 @@ class FormStatus(str, enum.Enum):
     REJECTED = "REJECTED"
 
 
+class StaffRole(str, enum.Enum):
+    """Staff hierarchy. Stored as a plain VARCHAR (not a Postgres enum) so
+    init_db's column sync can add it to an existing table."""
+    MASTER_ADMIN = "MASTER_ADMIN"  # developer account, seeded from .env only: everything below,
+                                   # plus create/manage Super Admins and read every staff password
+    SUPER_ADMIN = "SUPER_ADMIN"   # the seeded account: manages everyone, sees everything,
+                                  # and creates/manages Admins
+    ADMIN = "ADMIN"               # created by a Super Admin: every Super Admin feature over
+                                  # Managers, HR Executives and candidates, but not over admins
+    MANAGER = "MANAGER"           # leads a team of HR executives; sees the team's candidates
+    HR = "HR"                     # invites and reviews their own candidates
+
+
 # ---------------------------------------------------------------------------
 # HR users
 # ---------------------------------------------------------------------------
 
 class HRUser(Base):
+    """Every staff login: Super Admin, Manager and HR Executive share this
+    table (and the same auth code); `role` says which, and `manager_id` puts
+    an HR Executive under exactly one Manager."""
     __tablename__ = "hr_users"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -63,6 +79,51 @@ class HRUser(Base):
     password_hash = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    role = Column(String(20), nullable=False, default=StaffRole.HR.value)
+    # HR Executives only: the Manager whose team they belong to. NULL for
+    # Managers and the Super Admin — and for HRs created before teams existed,
+    # who are then visible only to the Super Admin until moved under a Manager.
+    manager_id = Column(Integer, ForeignKey("hr_users.id"), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("hr_users.id"), nullable=True)
+    # System-generated first password, kept encrypted (same scheme as the
+    # candidate password) until the user replaces it on first login.
+    temp_password_enc = Column(Text, nullable=True)
+    must_reset_password = Column(Boolean, default=False, nullable=False)
+    # The password currently in force, encrypted with the same key as the
+    # candidate passwords, so the Master Admin can look it up. Written on
+    # every create, reset and self-service change; NULL for accounts whose
+    # password was last set before this column existed.
+    password_enc = Column(Text, nullable=True)
+
+    manager = relationship("HRUser", remote_side=[id], foreign_keys=[manager_id],
+                           post_update=True)
+
+    @property
+    def role_enum(self) -> "StaffRole":
+        return StaffRole(self.role or StaffRole.HR.value)
+
+
+class StaffAuditLog(Base):
+    """Who did what to the staff hierarchy and to candidate ownership: create,
+    deactivate, delete, reset password, move HR, assign candidate. Actor and
+    target names are stored as text as well as by id so the trail survives
+    the row being deleted later."""
+    __tablename__ = "staff_audit_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    actor_id = Column(Integer, nullable=True)
+    actor_name = Column(String(150), nullable=True)
+    actor_role = Column(String(20), nullable=True)
+    action = Column(String(40), nullable=False)
+    target_type = Column(String(20), nullable=False)   # STAFF | CANDIDATE
+    target_id = Column(Integer, nullable=True)
+    target_name = Column(String(150), nullable=True)
+    detail = Column(Text, nullable=True)
+    # Which Manager's team the action belongs to, so a Manager's audit page
+    # can be filtered without joins. NULL for actions outside any team.
+    team_manager_id = Column(Integer, nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +152,10 @@ class Candidate(Base):
     candidate_type = Column(Enum(CandidateType), default=CandidateType.EXPERIENCED, nullable=False)
     rejection_reason = Column(Text, nullable=True)
 
+    # Who invited the candidate (never changes) vs who owns them now (moves
+    # on reassignment). Visibility is decided by the owner.
     created_by_hr_id = Column(Integer, ForeignKey("hr_users.id"), nullable=True)
+    assigned_hr_id = Column(Integer, ForeignKey("hr_users.id"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -333,6 +397,16 @@ class Document(Base):
     content_type = Column(String(100), nullable=True)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # What the document-validation agent made of the file (see
+    # app/agents/doc_validator.py). Null on rows from before the check existed
+    # and on fields the agent does not cover.
+    ai_status = Column(String(20), nullable=True)      # MATCH | MISMATCH | UNCERTAIN | UNVERIFIED
+    ai_doc_type = Column(String(40), nullable=True)    # e.g. "PAN", "MARKSHEET_10"
+    ai_confidence = Column(Integer, nullable=True)     # 0-100
+    ai_id_match = Column(Boolean, nullable=True)       # number on the card vs. the profile
+    ai_note = Column(Text, nullable=True)              # the one-line message shown to people
+    ai_checked_at = Column(DateTime(timezone=True), nullable=True)
+
     candidate = relationship("Candidate", back_populates="documents")
 
 
@@ -392,6 +466,15 @@ class FormDraftDocument(Base):
     content_type = Column(String(100), nullable=True)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # Same verdict columns as Document; carried across when the draft is
+    # promoted so the file is not sent to the model a second time.
+    ai_status = Column(String(20), nullable=True)
+    ai_doc_type = Column(String(40), nullable=True)
+    ai_confidence = Column(Integer, nullable=True)
+    ai_id_match = Column(Boolean, nullable=True)
+    ai_note = Column(Text, nullable=True)
+    ai_checked_at = Column(DateTime(timezone=True), nullable=True)
+
     __table_args__ = (UniqueConstraint("candidate_id", "form_type", "field_key",
                                         name="uq_draft_doc_candidate_form_field"),)
 
@@ -429,7 +512,7 @@ class FieldEditPermission(Base):
     status = Column(String(20), nullable=False, default=EditPermissionStatus.ACTIVE.value)
     hr_note = Column(Text, nullable=True)          # why HR opened it, shown to the candidate
 
-    granted_by_hr_id = Column(Integer, ForeignKey("hr_users.id"), nullable=False)
+    granted_by_hr_id = Column(Integer, ForeignKey("hr_users.id"), nullable=True)
     granted_at = Column(DateTime(timezone=True), server_default=func.now())
     # When the candidate used it, or HR revoked it.
     resolved_at = Column(DateTime(timezone=True), nullable=True)

@@ -456,6 +456,10 @@ def _llm_review(ctx: dict) -> dict | None:
     key = settings.AZURE_OPENAI_API_KEY
     deployment = settings.AZURE_OPENAI_DEPLOYMENT
     if not (endpoint and key and deployment):
+        missing = [n for n, v in (("endpoint", endpoint), ("api key", key),
+                                  ("deployment", deployment)) if not v]
+        print(f"[insights] Azure OpenAI not configured (missing {', '.join(missing)}); "
+              f"using rule-only fallback")
         return None
 
     # PII minimisation: only narrative/decision-relevant fields reach the model.
@@ -486,7 +490,7 @@ def _llm_review(ctx: dict) -> dict | None:
         text = payload["choices"][0]["message"]["content"].strip()
     except (urllib.error.URLError, urllib.error.HTTPError, KeyError,
             json.JSONDecodeError, TimeoutError, OSError) as exc:
-        print(f"[insights] LLM unavailable ({type(exc).__name__}); using rule-only fallback")
+        print(f"[insights] LLM unavailable ({type(exc).__name__}: {getattr(exc, 'reason', exc)}); using rule-only fallback")
         return None
 
     text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.M).strip()
@@ -566,6 +570,15 @@ def _employment_breakdown(ctx: dict) -> str:
     return f"{line} - {total} total" if line and total and len(bits) > 1 else line
 
 
+def _lpa(value) -> str:
+    """A CTC for display. Candidates often type the unit themselves
+    ("13 LPA"), so it is only appended when it isn't already there."""
+    text = str(value or "").strip()
+    if not text:
+        return "?"
+    return text if re.search(r"lpa|lakh|lac", text, re.I) else f"{text} LPA"
+
+
 def _fallback_summary(ctx: dict) -> str:
     """Used only when the LLM is unavailable — a plain templated digest so
     HR always sees something instead of an error. Built as short lines
@@ -605,8 +618,8 @@ def _fallback_summary(ctx: dict) -> str:
 
     ask_bit = []
     if cif.get("current_ctc_lpa") or cif.get("expected_ctc_lpa"):
-        ask_bit.append(f"CTC: {cif.get('current_ctc_lpa') or '?'} LPA current, "
-                        f"{cif.get('expected_ctc_lpa') or '?'} LPA expected")
+        ask_bit.append(f"CTC: {_lpa(cif.get('current_ctc_lpa'))} current, "
+                        f"{_lpa(cif.get('expected_ctc_lpa'))} expected")
     if cif.get("notice_period_days"):
         ask_bit.append(f"notice period {cif['notice_period_days']} days")
     if ask_bit:

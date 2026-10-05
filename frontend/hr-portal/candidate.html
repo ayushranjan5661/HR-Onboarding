@@ -19,6 +19,7 @@
           <span class="avatar" id="whoamiAvatar"></span>
           <span class="user-name" id="whoami"></span>
         </div>
+        <a class="back-link" href="../change-password.html" style="display:block;margin:0 0 8px 2px;font-size:0.78rem;">Change password</a>
         <button class="logout-btn" onclick="hrLogout()">Log out</button>
       </div>
     </aside>
@@ -40,11 +41,12 @@
         <div class="card section-card hidden" id="decisionCard">
           <div class="section-title"><h3>Final Interview Decision</h3></div>
           <p style="color:#6b7280;font-size:0.88rem;">
-            Review the CIF details below. Approve to unlock the Background Verification
-            and Document Collection forms for this candidate, or reject to close the application.
+            Review the CIF details below. Mark as shortlisted to open the Document Collection form for
+            this candidate, or reject to close the application. Background Verification is
+            sent separately, only if you need it.
           </p>
           <div class="decision-bar">
-            <button class="btn btn-success" id="approveBtn">Approve</button>
+            <button class="btn btn-success" id="approveBtn">Shortlisted</button>
             <button class="btn btn-danger" id="rejectBtn">Reject</button>
           </div>
         </div>
@@ -65,7 +67,7 @@
 
         <div class="card section-card collapsed" id="cifCard">
           <div class="section-title collapsible" onclick="toggleCollapse(this)">
-            <h3>Candidate Details (CIF)</h3>
+            <h3>Candidate Details (CIF) <span id="cifBadge"></span></h3>
             <!-- One Edit button for the whole form, filled in by render();
                  stopPropagation so clicking it doesn't also collapse the card. -->
             <div class="section-title-actions" id="actions-CIF" onclick="event.stopPropagation()"></div>
@@ -117,11 +119,17 @@
   <div class="modal-backdrop hidden" id="rejectModal">
     <div class="modal">
       <h3>Reject Candidate</h3>
+      <p style="color:var(--muted);font-size:0.85rem;">
+        This closes <strong id="rejectCandName"></strong>'s application and ends their
+        onboarding. They can no longer submit forms. <strong>This cannot be undone.</strong>
+      </p>
       <label>Reason (optional, visible only to HR)</label>
       <textarea id="rejectReason" rows="3"></textarea>
+      <label>Type <strong id="rejectCandNameConfirm"></strong> to confirm</label>
+      <input type="text" id="rejectConfirmInput" autocomplete="off" placeholder="Candidate name">
       <div class="modal-actions">
-        <button class="btn btn-outline" onclick="document.getElementById('rejectModal').classList.add('hidden')">Cancel</button>
-        <button class="btn btn-danger" id="confirmRejectBtn">Confirm Reject</button>
+        <button type="button" class="btn btn-outline" onclick="closeRejectModal()">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirmRejectBtn" disabled>Reject Candidate</button>
       </div>
     </div>
   </div>
@@ -187,9 +195,9 @@
   </div>
 
   <script src="../js/config.js?v=20260907a"></script>
-  <script src="js/api.js?v=20260907a"></script>
-  <script src="../js/field-labels.js?v=20260907a"></script>
+  <script src="js/api.js?v=20260929c"></script>
+  <script src="../js/field-labels.js?v=20260923b"></script>
   <script src="../js/date-format.js?v=20260922d"></script>
-  <script src="js/candidate.js?v=20260922e"></script>
+  <script src="js/candidate.js?v=20260930c"></script>
 </body>
 </html>

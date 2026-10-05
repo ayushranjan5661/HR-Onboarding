@@ -55,8 +55,9 @@ CATALOG = {
             ("declaration_accepted", "Declaration accepted"),
             ("declaration_place", "Place"),
             ("declaration_date", "Date"),
-            ("hr_candidate_id", "HR: Candidate ID"),
-            ("hr_candidate_email", "HR: Candidate Email ID"),
+            # hr_candidate_id / hr_candidate_email are HR-only bookkeeping that
+            # no form collects — leaving them out keeps the mapper from trying
+            # to fill a field nobody reads.
         ],
         "document": [
             ("profile_picture", "Candidate Profile Picture"),
