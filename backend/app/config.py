@@ -118,6 +118,10 @@ class Settings(BaseSettings):
     # the payload has round-tripped against that form via the CLI (see
     # integrations/zoho/README.md). Leave blank to keep the button disabled.
     ZOHO_CANDIDATE_WRITE_FORM: str = ""
+    # The second button, "Publish to Zoho Candidate Form", writes ONLY here
+    # (normally "Candidate"), with integrations/zoho/field_map_candidate.json.
+    # Blank keeps that button refusing, independent of the one above.
+    ZOHO_CANDIDATE_PROFILE_WRITE_FORM: str = ""
     ZOHO_TIMEOUT: int = 30
 
     # --- File uploads ---

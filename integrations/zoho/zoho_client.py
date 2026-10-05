@@ -483,8 +483,8 @@ def has_errors(response):
 # main
 # --------------------------------------------------------------------------
 
-def load_file_map():
-    with open(os.path.join(HERE, "field_map.json"), encoding="utf-8") as fh:
+def load_file_map(map_file="field_map.json"):
+    with open(os.path.join(HERE, map_file), encoding="utf-8") as fh:
         return json.load(fh).get("files", {}).get("map", {})
 
 

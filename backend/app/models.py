@@ -169,6 +169,12 @@ class Candidate(Base):
     zoho_status = Column(String(20), nullable=True)
     zoho_synced_at = Column(DateTime(timezone=True), nullable=True)
     zoho_last_error = Column(Text, nullable=True)
+    # Same four, for the separate push to Zoho's "Candidate" form (the
+    # "Publish to Zoho Candidate Form" button) — its own record, own state.
+    zoho_cand_record_id = Column(String(50), nullable=True)
+    zoho_cand_status = Column(String(20), nullable=True)
+    zoho_cand_synced_at = Column(DateTime(timezone=True), nullable=True)
+    zoho_cand_last_error = Column(Text, nullable=True)
 
     profile = relationship("CandidateProfile", uselist=False, back_populates="candidate", cascade="all, delete-orphan")
     submissions = relationship("FormSubmission", back_populates="candidate", cascade="all, delete-orphan")

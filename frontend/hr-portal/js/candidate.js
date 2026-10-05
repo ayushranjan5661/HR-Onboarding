@@ -426,6 +426,7 @@ function showLoadError(message) {
   document.getElementById("cifCard").classList.add("hidden");
   document.getElementById("auditCard").classList.add("hidden");
   document.getElementById("zohoCard").classList.add("hidden");
+  document.getElementById("zohoCandCard").classList.add("hidden");
   document.getElementById("openAccessBanner").innerHTML = "";
   document.getElementById("followupForms").innerHTML = "";
   const notice = document.getElementById("rejectedNotice");
@@ -440,11 +441,8 @@ function render() {
   const c = currentData;
   document.getElementById("candName").textContent = `${c.name} — ${c.email}`;
   const typeLabel = c.candidate_type === "FRESHER" ? "Fresher / Trainee" : "Experienced";
-  const ownerTag = c.assigned_hr_name
-    ? `<span class="badge badge-pending" style="margin-right:6px;" title="Owner">Owner: ${escapeHtml(c.assigned_hr_name)}</span>`
-    : "";
   document.getElementById("candStage").innerHTML =
-    ownerTag + `<span class="badge badge-pending" style="margin-right:6px;">${typeLabel}</span>` + badge(c.stage);
+    `<span class="badge badge-pending" style="margin-right:6px;">${typeLabel}</span>` + badge(c.stage);
 
   // Login credentials issued to this candidate (HR-owned; candidate cannot change them)
   document.getElementById("credentialsBody").innerHTML = `
@@ -607,52 +605,75 @@ function render() {
   // ---- Zoho People publish ----
   const zohoEligible = c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE";
   document.getElementById("zohoCard").classList.toggle("hidden", !zohoEligible);
-  if (zohoEligible) renderZoho(c);
+  document.getElementById("zohoCandCard").classList.toggle("hidden", !zohoEligible);
+  if (zohoEligible) {
+    renderZoho(c, "confirmation");
+    renderZoho(c, "candidate");
+  }
 
   // Edit-mode date cells are rebuilt on every render, so re-wire them here.
   attachDateInputs();
 }
 
-function renderZoho(c) {
-  const pushed = !!c.zoho_record_id;
+// The two Zoho forms HR can publish to — see backend zoho_push.TARGETS.
+// `prefix` is the field prefix of that target's sync state on the candidate.
+const ZOHO_TARGETS = {
+  confirmation: {
+    prefix: "zoho_", bodyId: "zohoBody", btnId: "zohoPushBtn",
+    path: "zoho/push", label: "Zoho People",
+  },
+  candidate: {
+    prefix: "zoho_cand_", bodyId: "zohoCandBody", btnId: "zohoCandPushBtn",
+    path: "zoho/candidate-form/push", label: "Zoho Candidate Form",
+  },
+};
+
+function renderZoho(c, target) {
+  const t = ZOHO_TARGETS[target];
+  const recordId = c[t.prefix + "record_id"];
+  const status = c[t.prefix + "status"];
+  const syncedAt = c[t.prefix + "synced_at"];
+  const lastError = c[t.prefix + "last_error"];
+  const pushed = !!recordId;
   const statusLine = !pushed
-    ? "Not yet published to Zoho People."
-    : `Zoho record <code>${escapeHtml(c.zoho_record_id)}</code> — `
-      + (c.zoho_status === "DRAFT"
+    ? `Not yet published to ${t.label}.`
+    : `Zoho record <code>${escapeHtml(recordId)}</code> — `
+      + (status === "DRAFT"
           ? "created as a draft there; open it in Zoho to review before treating it as final."
           : "last synced")
-      + (c.zoho_synced_at ? ` (${new Date(c.zoho_synced_at).toLocaleString()}).` : ".");
-  const errorLine = c.zoho_last_error
-    ? `<div style="color:var(--danger);margin-top:6px;font-size:0.85rem;">Last attempt failed: ${escapeHtml(c.zoho_last_error)}</div>`
+      + (syncedAt ? ` (${new Date(syncedAt).toLocaleString()}).` : ".");
+  const errorLine = lastError
+    ? `<div style="color:var(--danger);margin-top:6px;font-size:0.85rem;">Last attempt failed: ${escapeHtml(lastError)}</div>`
     : "";
-  document.getElementById("zohoBody").innerHTML = `
+  document.getElementById(t.bodyId).innerHTML = `
     <p style="color:#6b7280;font-size:0.88rem;">${statusLine}</p>
     ${errorLine}
-    <button class="btn btn-primary" id="zohoPushBtn" onclick="pushToZoho()">
-      ${pushed ? "Re-sync to Zoho People" : "Publish to Zoho People"}
+    <button class="btn btn-primary" id="${t.btnId}" onclick="pushToZoho('${target}')">
+      ${pushed ? `Re-sync to ${t.label}` : `Publish to ${t.label}`}
     </button>`;
 }
 
-async function pushToZoho() {
-  const alreadyPushed = !!(currentData && currentData.zoho_record_id);
+async function pushToZoho(target = "confirmation") {
+  const t = ZOHO_TARGETS[target];
+  const alreadyPushed = !!(currentData && currentData[t.prefix + "record_id"]);
   const msg = alreadyPushed
-    ? "Push this candidate's latest data to the existing Zoho People record?"
-    : "Create this candidate as a draft record in Zoho People? You'll be able to "
+    ? `Push this candidate's latest data to the existing ${t.label} record?`
+    : `Create this candidate as a draft record in ${t.label}? You'll be able to `
       + "review it there before treating it as final.";
   if (!await showConfirm(msg, {
-        title: "Publish to Zoho People",
+        title: `Publish to ${t.label}`,
         confirmText: alreadyPushed ? "Re-sync" : "Publish",
       })) return;
 
-  const btn = document.getElementById("zohoPushBtn");
+  const btn = document.getElementById(t.btnId);
   btn.disabled = true;
   btn.textContent = "Publishing…";
   try {
-    const result = await apiFetch(`/hr/candidates/${candidateId}/zoho/push`, {
+    const result = await apiFetch(`/hr/candidates/${candidateId}/${t.path}`, {
       method: "POST", body: JSON.stringify({}),
     });
     await load();
-    await showAlert(result.detail, { title: "Published to Zoho People" });
+    await showAlert(result.detail, { title: `Published to ${t.label}` });
   } catch (err) {
     await showAlert(err.message, { title: "Zoho push failed", danger: true });
     await load();
