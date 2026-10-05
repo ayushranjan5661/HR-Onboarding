@@ -28,7 +28,8 @@ if _INTEGRATIONS_ZOHO not in sys.path:
     sys.path.insert(0, _INTEGRATIONS_ZOHO)
 
 import zoho_client as _zc                                                 # noqa: E402
-from export_zoho_payload import build_full_payload, collect_values       # noqa: E402
+from export_zoho_payload import (CANDIDATE_MAP_FILE, DEFAULT_MAP_FILE,   # noqa: E402
+                                 build_full_payload, collect_values)
 
 from sqlalchemy.orm import Session                                       # noqa: E402
 
@@ -39,6 +40,18 @@ from app.models import Candidate                                         # noqa:
 # --email-field lets that be overridden per-org, which this button does not
 # expose — fix here if a target form uses a different name.
 EMAIL_FIELD = "Email_ID"
+
+# The two Zoho forms HR can publish to, one button each. Each has its own
+# .env setting (blank = button refuses), field map, and set of Candidate
+# columns tracking its record - a push to one never touches the other's record.
+#   confirmation -> Confirmation_Process_Form ("Candidate Information")
+#   candidate    -> Zoho's "Candidate" form
+TARGETS = {
+    "confirmation": {"setting": "ZOHO_CANDIDATE_WRITE_FORM",
+                     "map_file": DEFAULT_MAP_FILE, "prefix": "zoho_"},
+    "candidate": {"setting": "ZOHO_CANDIDATE_PROFILE_WRITE_FORM",
+                  "map_file": CANDIDATE_MAP_FILE, "prefix": "zoho_cand_"},
+}
 
 
 class ZohoPushError(RuntimeError):
@@ -54,19 +67,22 @@ def _network_message(exc: "_zc.ZohoUnreachable") -> str:
             "connection is back.")
 
 
-def push_candidate(db: Session, candidate: Candidate) -> dict:
+def push_candidate(db: Session, candidate: Candidate, target: str = "confirmation") -> dict:
     """Insert (first call) or update (every call after) this candidate's Zoho
-    People record. Returns {"record_id", "status", "fields_pushed",
-    "fields_unmapped"}. Raises ZohoPushError on anything that stops the push —
-    the caller is expected to surface str(exc) to HR and move on."""
-    form = settings.ZOHO_CANDIDATE_WRITE_FORM
+    People record on the form `target` names (see TARGETS). Returns
+    {"record_id", "status", "fields_pushed", "fields_unmapped"}. Raises
+    ZohoPushError on anything that stops the push — the caller is expected
+    to surface str(exc) to HR and move on."""
+    cfg = TARGETS[target]
+    form = getattr(settings, cfg["setting"])
     if not form:
         raise ZohoPushError(
-            "Zoho push is not configured: set ZOHO_CANDIDATE_WRITE_FORM in .env to "
+            f"Zoho push is not configured: set {cfg['setting']} in .env to "
             "the exact Zoho form (formLinkName) this button should write to, once "
             "the payload has round-tripped against it via the CLI.")
 
-    payload, tabular, _skipped, unmapped, subform_counts = build_full_payload(db, candidate)
+    payload, tabular, _skipped, unmapped, subform_counts = build_full_payload(
+        db, candidate, map_file=cfg["map_file"])
     if not payload:
         raise ZohoPushError(
             "Nothing to push — field_map.json has no mapped field with a value yet.")
@@ -79,7 +95,11 @@ def push_candidate(db: Session, candidate: Candidate) -> dict:
     # Zoho form — attach whatever's mapped in field_map.json's "files" map so
     # the insert doesn't fail on a missing mandatory upload.
     files, _files_unmapped, files_missing = _zc.load_candidate_documents(
-        candidate.id, _zc.load_file_map())
+        candidate.id, _zc.load_file_map(cfg["map_file"]))
+    # Two local documents can share one Zoho field (Candidate form: profile
+    # picture and passport photo -> Photo). Upload only one; the last in key
+    # order wins, matching what the dict merge in upload_files would keep.
+    files = list({f[0]: f for f in files}.values())
     if files_missing:
         raise ZohoPushError(
             "Cannot push: these documents are mapped for Zoho but missing from the "
@@ -92,7 +112,7 @@ def push_candidate(db: Session, candidate: Candidate) -> dict:
     except _zc.ZohoError as exc:
         raise ZohoPushError(f"Could not authenticate with Zoho: {exc}") from exc
 
-    record_id = candidate.zoho_record_id
+    record_id = getattr(candidate, cfg["prefix"] + "record_id")
     if not record_id:
         try:
             existing = _zc.find_by_email(token, form, email, EMAIL_FIELD)
@@ -112,7 +132,7 @@ def push_candidate(db: Session, candidate: Candidate) -> dict:
     # (error 7052). As a draft it lands valid and editable for HR.
     # Education/employment rows ARE sent — they ride inside inputData as
     # column arrays, which build_full_payload has already merged in.
-    _zc.log("push.request", source="hr-portal", form=form, candidate_id=candidate.id,
+    _zc.log("push.request", source="hr-portal", target=target, form=form, candidate_id=candidate.id,
             email=email, record_id=record_id, fields=len(payload),
             files=[f[0] for f in files], tabular_rows=subform_counts)
     try:

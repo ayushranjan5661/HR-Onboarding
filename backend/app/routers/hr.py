@@ -353,6 +353,10 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         zoho_status=candidate.zoho_status,
         zoho_synced_at=candidate.zoho_synced_at,
         zoho_last_error=candidate.zoho_last_error,
+        zoho_cand_record_id=candidate.zoho_cand_record_id,
+        zoho_cand_status=candidate.zoho_cand_status,
+        zoho_cand_synced_at=candidate.zoho_cand_synced_at,
+        zoho_cand_last_error=candidate.zoho_cand_last_error,
     )
 
 
@@ -831,41 +835,61 @@ def mark_onboarding_complete(candidate_id: int, db: Session = Depends(get_db),
 _ZOHO_PUSH_STAGES = {CandidateStage.APPROVED_FOR_BGV, CandidateStage.ONBOARDING_COMPLETE}
 
 
-@router.post("/candidates/{candidate_id}/zoho/push")
-def push_candidate_to_zoho(candidate_id: int, db: Session = Depends(get_db),
-                            current: HRUser = Depends(get_current_staff)):
-    """Publish this candidate into Zoho People. The first call inserts a
-    Zoho draft record; every call after that updates the same record (never
-    a second insert). Nothing is sent unless ZOHO_CANDIDATE_WRITE_FORM is
-    configured in .env — see integrations/zoho/README.md."""
-    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+def _run_zoho_push(db: Session, candidate, target: str) -> dict:
+    """Shared body of both Zoho buttons. `target` picks the form and the
+    Candidate columns its record is tracked in (zoho_* / zoho_cand_*)."""
     if candidate.stage not in _ZOHO_PUSH_STAGES:
         raise HTTPException(
             status_code=400,
             detail="Only candidates approved for BGV, or fully onboarded, can be "
                     "published to Zoho People.")
 
+    prefix = zoho_push.TARGETS[target]["prefix"]
     try:
-        was_synced_before = bool(candidate.zoho_record_id)
-        result = zoho_push.push_candidate(db, candidate)
+        was_synced_before = bool(getattr(candidate, prefix + "record_id"))
+        result = zoho_push.push_candidate(db, candidate, target=target)
     except zoho_push.ZohoPushError as exc:
-        candidate.zoho_last_error = str(exc)[:2000]
+        setattr(candidate, prefix + "last_error", str(exc)[:2000])
         db.commit()
         raise HTTPException(status_code=502, detail=str(exc))
 
-    candidate.zoho_record_id = result["record_id"]
-    candidate.zoho_status = result["status"]
-    candidate.zoho_synced_at = datetime.now(timezone.utc)
-    candidate.zoho_last_error = None
+    setattr(candidate, prefix + "record_id", result["record_id"])
+    setattr(candidate, prefix + "status", result["status"])
+    setattr(candidate, prefix + "synced_at", datetime.now(timezone.utc))
+    setattr(candidate, prefix + "last_error", None)
     db.commit()
 
-    detail = (f"Zoho People draft updated (record {result['record_id']})."
+    form_label = "the Zoho Candidate form" if target == "candidate" else "Zoho People"
+    detail = (f"Draft updated in {form_label} (record {result['record_id']})."
               if was_synced_before else
-              f"Draft created in Zoho People (record {result['record_id']}).")
+              f"Draft created in {form_label} (record {result['record_id']}).")
     # tabular_rows still rides in the response for the caller/logs; it is left
     # out of the message because the API reports success for tabular writes it
     # did not actually make, so the count promised more than it could confirm.
     return {"detail": detail, **result}
+
+
+@router.post("/candidates/{candidate_id}/zoho/push")
+def push_candidate_to_zoho(candidate_id: int, db: Session = Depends(get_db),
+                            current: HRUser = Depends(get_current_staff)):
+    """Publish this candidate into Zoho People's Confirmation_Process_Form.
+    The first call inserts a Zoho draft record; every call after that updates
+    the same record (never a second insert). Nothing is sent unless
+    ZOHO_CANDIDATE_WRITE_FORM is configured in .env — see
+    integrations/zoho/README.md."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    return _run_zoho_push(db, candidate, "confirmation")
+
+
+@router.post("/candidates/{candidate_id}/zoho/candidate-form/push")
+def push_candidate_to_zoho_candidate_form(candidate_id: int, db: Session = Depends(get_db),
+                                           current: HRUser = Depends(get_current_staff)):
+    """Same as /zoho/push, but into Zoho's "Candidate" form using
+    integrations/zoho/field_map_candidate.json. Tracked in its own zoho_cand_*
+    columns, so it never touches the Confirmation_Process_Form record.
+    Nothing is sent unless ZOHO_CANDIDATE_PROFILE_WRITE_FORM is set in .env."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    return _run_zoho_push(db, candidate, "candidate")
 
 
 # ---------------------------------------------------------------------------

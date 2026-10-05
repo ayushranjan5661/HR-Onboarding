@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#3730a3">
 <title>HR Portal — Candidate</title>
-<link rel="stylesheet" href="css/style.css?v=20260929b">
+<link rel="stylesheet" href="css/style.css?v=20261005a">
 </head>
 <body>
   <div class="app-shell">
@@ -24,8 +26,7 @@
 
     <div class="main-area">
       <div class="container">
-        <a class="back-link" href="dashboard.html">&larr; Back to all candidates</a>
-        <div class="page-header" style="margin-top:10px;">
+        <div class="page-header">
           <h2 id="candName">Loading...</h2>
           <span id="candStage"></span>
         </div>
@@ -96,6 +97,13 @@
         <div class="card section-card hidden" id="zohoCard">
           <div class="section-title"><h3>Zoho People</h3></div>
           <div id="zohoBody"></div>
+        </div>
+
+        <!-- Separate push into Zoho's "Candidate" form (own record, own map:
+             integrations/zoho/field_map_candidate.json). Same stage gate. -->
+        <div class="card section-card hidden" id="zohoCandCard">
+          <div class="section-title"><h3>Zoho Candidate Form</h3></div>
+          <div id="zohoCandBody"></div>
         </div>
       </div>
     </div>
@@ -181,17 +189,15 @@
   <!-- Document preview -->
   <div class="modal-backdrop hidden" id="viewModal">
     <div class="modal" style="width:90vw;max-width:1000px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <h3 id="viewTitle" style="margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Document</h3>
-        <div style="display:flex;gap:8px;flex:0 0 auto;">
+      <div class="viewer-head">
+        <h3 id="viewTitle">Document</h3>
+        <div class="viewer-actions">
           <button class="btn btn-outline btn-small" id="viewNewTabBtn">Open in new tab</button>
           <button class="btn btn-outline btn-small" id="viewDownloadBtn">Download</button>
           <button class="btn btn-primary btn-small" onclick="closeViewModal()">Close</button>
         </div>
       </div>
-      <div id="viewBody" style="margin-top:14px;background:#f9fafb;border:1px solid var(--border);
-           border-radius:8px;height:70vh;display:flex;align-items:center;justify-content:center;
-           overflow:auto;"></div>
+      <div id="viewBody" class="viewer-body"></div>
     </div>
   </div>
 

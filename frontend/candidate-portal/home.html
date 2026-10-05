@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#3730a3">
 <title>Candidate Portal — Home</title>
-<link rel="stylesheet" href="css/style.css?v=20260929b">
+<link rel="stylesheet" href="css/style.css?v=20261005a">
 </head>
 <body>
   <div class="topbar">
@@ -15,12 +17,16 @@
   </div>
 
   <div class="container">
-    <h2>Your Application Status</h2>
-    <div class="status-track" id="statusTrack"></div>
+    <div class="home-hero">
+      <h1 id="greeting">Welcome</h1>
+      <p>Track your onboarding and complete the forms below. Use <strong>Save Draft</strong> on any form to finish it later.</p>
+    </div>
 
-    <div class="card" id="rejectedCard" style="display:none;">
+    <ol class="status-track" id="statusTrack" aria-label="Application progress"></ol>
+
+    <div class="card" id="rejectedCard" style="display:none;margin-bottom:20px;">
       <strong style="color:#b91c1c;">Your application is not proceeding further.</strong>
-      <p style="color:#6b7280;">Thank you for your interest. HR will reach out if anything further is needed.</p>
+      <p style="color:#6b7280;margin-bottom:0;">Thank you for your interest. HR will reach out if anything further is needed.</p>
     </div>
 
     <!-- Fields HR has unlocked on an already-submitted form -->
@@ -35,6 +41,7 @@
       </div>
     </div>
 
+    <div class="section-label" id="formsLabel">Your forms</div>
     <div id="formTiles"></div>
   </div>
 
@@ -43,6 +50,8 @@
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
+    const firstName = (getName() || "").trim().split(/\s+/)[0];
+    document.getElementById("greeting").textContent = firstName ? `Hi, ${firstName}` : "Welcome";
 
     const STEPS = ["INVITED", "CIF_SUBMITTED", "APPROVED_FOR_BGV", "ONBOARDING_COMPLETE"];
     const STEP_LABELS = {
@@ -61,15 +70,18 @@
       track.innerHTML = "";
       if (stage === "REJECTED") {
         document.getElementById("rejectedCard").style.display = "block";
-        track.innerHTML = `<div class="status-step blocked">Application Closed</div>`;
+        document.getElementById("formsLabel").classList.add("hidden");
+        track.innerHTML = `<li class="status-step blocked" data-n="!">Application Closed</li>`;
         return;
       }
       const currentIdx = STEPS.indexOf(stage);
       STEPS.forEach((s, i) => {
-        const div = document.createElement("div");
-        div.className = "status-step " + (i < currentIdx ? "done" : i === currentIdx ? "active" : "");
-        div.textContent = STEP_LABELS[s];
-        track.appendChild(div);
+        const li = document.createElement("li");
+        li.className = "status-step " + (i < currentIdx ? "done" : i === currentIdx ? "active" : "");
+        li.dataset.n = i + 1;
+        li.textContent = STEP_LABELS[s];
+        if (i === currentIdx) li.setAttribute("aria-current", "step");
+        track.appendChild(li);
       });
     }
 
@@ -86,44 +98,43 @@
       const ordered = FORM_ORDER
         .map(t => forms.find(f => f.form_type === t))
         .filter(Boolean);
-      ordered.forEach(f => {
+      ordered.forEach((f, i) => {
         const meta = FORM_META[f.form_type];
+        const tile = document.createElement("div");
         if (f.status === "LOCKED") {
           // Show it greyed out so the candidate knows what is still to come.
-          const locked = document.createElement("div");
-          locked.className = "card form-tile";
-          locked.style.opacity = "0.6";
-          locked.innerHTML = `
-            <div>
+          tile.className = "card form-tile is-locked";
+          tile.innerHTML = `
+            <div class="ft-icon" aria-hidden="true">${i + 1}</div>
+            <div class="ft-main">
               <div class="ft-name">${meta.title}</div>
               <div class="ft-desc">${meta.desc}</div>
-              <div class="ft-desc" style="color:#b45309;margin-top:4px;">
-                HR will send you this form if it is needed.</div>
+              <div class="ft-note is-warn">HR will send you this form if it is needed.</div>
             </div>
-            <div style="text-align:right;">
-              <div class="badge badge-locked">LOCKED</div>
+            <div class="ft-side">
+              <span class="badge badge-locked">LOCKED</span>
             </div>`;
-          container.appendChild(locked);
+          container.appendChild(tile);
           return;
         }
-        const tile = document.createElement("div");
-        tile.className = "card form-tile";
         const canFill = f.status === "PENDING";
+        tile.className = "card form-tile" + (canFill ? "" : " is-done");
         // Every form is frozen once submitted — corrections go through a value
         // HR opens for you, so there is no "Edit" here any more.
         const label = canFill ? "Fill Form" : "View";
         const note = canFill
           ? ""
-          : "<div class='ft-desc' style='color:#6b7280;margin-top:4px;'>Submitted and locked. "
+          : "<div class='ft-note' style='color:#6b7280;'>Submitted and locked. "
             + "To change something, ask HR to open that field for you.</div>";
         tile.innerHTML = `
-          <div>
+          <div class="ft-icon" aria-hidden="true">${canFill ? i + 1 : "&#10003;"}</div>
+          <div class="ft-main">
             <div class="ft-name">${meta.title}</div>
             <div class="ft-desc">${meta.desc}</div>
             ${note}
           </div>
-          <div style="text-align:right;">
-            <div class="badge badge-${f.status.toLowerCase()}" style="margin-bottom:8px;">${statusBadgeText(f.status)}</div><br>
+          <div class="ft-side">
+            <span class="badge badge-${f.status.toLowerCase()}">${statusBadgeText(f.status)}</span>
             <button class="btn ${canFill ? "btn-primary" : "btn-outline"} btn-small"
               ${canFill ? "" : "disabled"}
               onclick="window.location.href='${meta.page}'">${label}</button>

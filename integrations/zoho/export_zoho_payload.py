@@ -38,40 +38,59 @@ _EDU_SECTION_TO_KEY = {"UG_PG": "education_ug_pg", "12TH": "education_12th",
                         "10TH": "education_10th"}
 
 
-def _load_field_map():
-    with open(os.path.join(HERE, "field_map.json"), encoding="utf-8") as fh:
+# Confirmation_Process_Form ("Candidate Information") — the original target.
+DEFAULT_MAP_FILE = "field_map.json"
+# Zoho's "Candidate" form — the second HR-portal button.
+CANDIDATE_MAP_FILE = "field_map_candidate.json"
+
+
+def _load_field_map(map_file=DEFAULT_MAP_FILE):
+    with open(os.path.join(HERE, map_file), encoding="utf-8") as fh:
         return json.load(fh)
 
 
-def load_map():
-    return _load_field_map()["map"]
+def load_map(map_file=DEFAULT_MAP_FILE):
+    return _load_field_map(map_file)["map"]
 
 
-def load_value_map():
+def load_value_map(map_file=DEFAULT_MAP_FILE):
     """local key -> {local value: exact Zoho picklist option text}, for the
     handful of fields whose local option wording doesn't already match what's
     configured in Zoho. See field_map.json's _value_map_readme."""
-    return _load_field_map().get("_value_map", {})
+    return _load_field_map(map_file).get("_value_map", {})
 
 
-def load_date_fields():
+def load_date_fields(map_file=DEFAULT_MAP_FILE):
     """Local keys whose value needs reformatting from the local DD/MM/YYYY
     into the dd-MMM-yyyy Zoho's Date fields expect."""
-    return set(_load_field_map().get("_date_fields", []))
+    return set(_load_field_map(map_file).get("_date_fields", []))
 
 
-def load_email_fields():
+def load_email_fields(map_file=DEFAULT_MAP_FILE):
     """Local keys mapped to Zoho Email-type fields. Zoho rejects the whole
     record if any of these carries a non-email value, so a value that doesn't
     look like an email (e.g. an HR "NANA" placeholder) is dropped rather than
     sent — see field_map.json's _email_fields."""
-    return set(_load_field_map().get("_email_fields", []))
+    return set(_load_field_map(map_file).get("_email_fields", []))
 
 
-def load_subforms():
+def load_numeric_fields(map_file=DEFAULT_MAP_FILE):
+    """Local keys mapped to Zoho Number/Decimal/Currency fields. The CIF stores
+    these as free text ("12 LPA", "1234 5678 9012"), which Zoho rejects, so
+    build_payload() reduces them to the bare number first."""
+    return set(_load_field_map(map_file).get("_numeric_fields", []))
+
+
+def load_blood_group_fields(map_file=DEFAULT_MAP_FILE):
+    """Local keys mapped to a Zoho BloodGroup picklist ("O +ve" style). The CIF
+    takes blood group as free text, so build_payload() normalises it."""
+    return set(_load_field_map(map_file).get("_blood_group_fields", []))
+
+
+def load_subforms(map_file=DEFAULT_MAP_FILE):
     """Tabular-section config from field_map.json: {subform key: {_zoho_section,
     map: {local col -> Zoho field}}}. See field_map.json's _subforms."""
-    return _load_field_map().get("_subforms", {})
+    return _load_field_map(map_file).get("_subforms", {})
 
 
 def collect_values(db, candidate):
@@ -122,7 +141,27 @@ def _reformat_date(value):
     return text
 
 
-def build_payload(local, mapping, value_map=None, date_fields=None, email_fields=None):
+def _to_number(value):
+    """ "12 LPA" -> "12", "1234 5678 9012" -> "123456789012", "1,20,000" ->
+    "120000". None when no number is in there at all."""
+    text = re.sub(r"[,\s]", "", str(value))
+    match = re.search(r"\d+(\.\d+)?", text)
+    return match.group() if match else None
+
+
+def _normalize_blood_group(value):
+    """ "O+", "o positive", "AB -VE" -> Zoho's "O +ve" / "AB -ve" option text.
+    Anything unrecognisable is passed through for Zoho to reject by name."""
+    text = str(value).upper().replace(" ", "")
+    match = re.match(r"^(A1B|A2B|AB|A1|A2|B1|A|B|O)(\+|-|POS(ITIVE)?|NEG(ATIVE)?|\+VE|-VE)$", text)
+    if not match:
+        return str(value)
+    sign = "+ve" if match.group(2).startswith(("+", "P")) else "-ve"
+    return "%s %s" % (match.group(1), sign)
+
+
+def build_payload(local, mapping, value_map=None, date_fields=None, email_fields=None,
+                  numeric_fields=None, blood_group_fields=None):
     """local values + field map -> (payload, skipped, unmapped).
 
     Shared with zoho_client.py so the CLI push and this exporter (and, in the
@@ -137,6 +176,8 @@ def build_payload(local, mapping, value_map=None, date_fields=None, email_fields
     value_map = value_map or {}
     date_fields = date_fields or set()
     email_fields = email_fields or set()
+    numeric_fields = numeric_fields or set()
+    blood_group_fields = blood_group_fields or set()
     payload, skipped, unmapped = {}, [], []
     for key, zoho_field in mapping.items():
         value = local.get(key)
@@ -149,7 +190,13 @@ def build_payload(local, mapping, value_map=None, date_fields=None, email_fields
             # non-email value, so drop just this field rather than lose the
             # whole push to one bad placeholder (e.g. "NANA").
             skipped.append("%s (invalid email)" % key)
+        elif key in numeric_fields and _to_number(value) is None:
+            skipped.append("%s (not a number)" % key)
         else:
+            if key in numeric_fields:
+                value = _to_number(value)
+            if key in blood_group_fields:
+                value = _normalize_blood_group(value)
             if key in date_fields:
                 value = _reformat_date(value)
             value = _apply_value_map(key, value, value_map)
@@ -258,7 +305,30 @@ def build_subforms(local_rows, subforms_config, value_map=None, email_fields=Non
     return out
 
 
-def build_full_payload(db, candidate):
+def _fill_rows_from_profile(local_rows, subforms_config, local):
+    """Copy single CIF values into one row of a tabular section, for Zoho
+    columns that live in a table but have only one local answer — e.g. the
+    Candidate form's Salary_Drawn_Last (Experience table) <- current_ctc_lpa.
+
+    "_fill_from_profile": {local key: "current_row"} puts the value on the row
+    with currently_working == "Yes", else the first row; every other row gets
+    "" so build_subforms keeps the column aligned. No rows -> nothing sent.
+    Numbers are reduced to the bare number like the flat numeric fields."""
+    for key, cfg in subforms_config.items():
+        rows = local_rows.get(key) or []
+        for local_key, where in (cfg.get("_fill_from_profile") or {}).items():
+            value = local.get(local_key)
+            if not rows or value in (None, "") or where != "current_row":
+                continue
+            target = next((r for r in rows
+                           if str(r.get("currently_working") or "").strip().lower() == "yes"),
+                          rows[0])
+            for r in rows:
+                r[local_key] = ""
+            target[local_key] = _to_number(value) or ""
+
+
+def build_full_payload(db, candidate, map_file=DEFAULT_MAP_FILE):
     """Everything one candidate sends to Zoho, in the single `inputData` dict
     the API wants: flat fields as plain strings, tabular columns as arrays with
     one element per row. The single source of truth shared by the CLI, this
@@ -271,16 +341,24 @@ def build_full_payload(db, candidate):
       subform_counts - {local section key: row count} for what was emitted.
     """
     local = collect_values(db, candidate)
+    value_map = load_value_map(map_file)
     payload, skipped, unmapped = build_payload(
-        local, load_map(), value_map=load_value_map(), date_fields=load_date_fields(),
-        email_fields=load_email_fields())
+        local, load_map(map_file), value_map=value_map,
+        date_fields=load_date_fields(map_file), email_fields=load_email_fields(map_file),
+        numeric_fields=load_numeric_fields(map_file),
+        blood_group_fields=load_blood_group_fields(map_file))
     local_rows = collect_subform_rows(db, candidate)
-    tabular = build_subforms(local_rows, load_subforms(),
-                             value_map=load_value_map(), email_fields={"email_id"})
+    _fill_rows_from_profile(local_rows, load_subforms(map_file), local)
+    tabular = build_subforms(local_rows, load_subforms(map_file),
+                             value_map=value_map, email_fields={"email_id"})
     # Tabular columns ride inside inputData alongside the flat fields — see
     # build_subforms for why there is no separate tabularData parameter.
     payload.update(tabular)
-    subform_counts = {key: len(rows) for key, rows in local_rows.items() if rows}
+    # Only sections this map actually writes count — the Candidate form map
+    # has no _subforms, so it must not report rows it never sent.
+    sections = load_subforms(map_file)
+    subform_counts = {key: len(rows) for key, rows in local_rows.items()
+                      if rows and sections.get(key, {}).get("map")}
     return payload, tabular, skipped, unmapped, subform_counts
 
 
@@ -289,6 +367,8 @@ def main():
     ap.add_argument("--candidate-id", type=int)
     ap.add_argument("--email")
     ap.add_argument("--show", action="store_true", help="print the payload instead of only the field names")
+    ap.add_argument("--map-file", default=DEFAULT_MAP_FILE,
+                    help="field map to build with, e.g. %s for Zoho's Candidate form" % CANDIDATE_MAP_FILE)
     args = ap.parse_args()
 
     if not args.candidate_id and not args.email:
@@ -305,7 +385,8 @@ def main():
         if candidate is None:
             sys.exit("candidate not found")
 
-        payload, tabular, skipped, unmapped, subform_counts = build_full_payload(db, candidate)
+        payload, tabular, skipped, unmapped, subform_counts = build_full_payload(
+            db, candidate, map_file=args.map_file)
 
         out_dir = os.path.join(HERE, "out")
         os.makedirs(out_dir, exist_ok=True)
