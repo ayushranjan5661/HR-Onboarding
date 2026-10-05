@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#3730a3">
 <title>HR Portal — Dashboard</title>
-<link rel="stylesheet" href="css/style.css?v=20260901b">
+<link rel="stylesheet" href="css/style.css?v=20261005a">
 </head>
 <body>
   <div class="app-shell">
@@ -24,7 +26,10 @@
     <div class="main-area">
       <div class="container">
         <div class="page-header">
-          <h2>Candidates</h2>
+          <div>
+            <h2>Candidates</h2>
+            <p class="page-sub">Track every hire from invite to onboarding.</p>
+          </div>
           <button class="btn btn-primary" onclick="document.getElementById('inviteModal').classList.remove('hidden')">+ Invite Candidate</button>
         </div>
 
@@ -47,17 +52,19 @@
           </div>
         </div>
 
-        <div class="toolbar">
-          <input type="text" class="search-input" id="searchInput" placeholder="Search by name or email...">
-        </div>
-
-        <div class="card">
-          <table id="candTable">
-            <thead>
-              <tr><th>Name</th><th>Email</th><th>Stage</th><th>Invited On</th><th>Actions</th></tr>
-            </thead>
-            <tbody id="candBody"></tbody>
-          </table>
+        <div class="card list-card">
+          <div class="list-card-head">
+            <h3>All candidates</h3>
+            <input type="search" class="search-input" id="searchInput" placeholder="Search by name or email" aria-label="Search candidates">
+          </div>
+          <div class="table-scroll">
+            <table id="candTable" class="stack">
+              <thead>
+                <tr><th>Name</th><th>Email</th><th>Stage</th><th>Invited On</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="candBody"></tbody>
+            </table>
+          </div>
           <div class="empty-state hidden" id="emptyState">No candidates yet. Click "Invite Candidate" to get started.</div>
         </div>
       </div>
@@ -155,8 +162,8 @@
         const tr = document.createElement("tr");
         tr.onclick = () => window.location.href = `candidate.html?id=${c.id}`;
         tr.innerHTML = `<td><div class="name-cell"><span class="row-avatar">${escapeHtml(initials(c.name))}</span>${escapeHtml(c.name)}</div></td>
-          <td>${escapeHtml(c.email)}</td>
-          <td>${badge(c.stage)}</td><td>${new Date(c.created_at).toLocaleDateString()}</td>`;
+          <td class="cell-muted">${escapeHtml(c.email)}</td>
+          <td>${badge(c.stage)}</td><td class="cell-muted">${new Date(c.created_at).toLocaleDateString()}</td>`;
 
         const actions = document.createElement("td");
         const del = document.createElement("button");
