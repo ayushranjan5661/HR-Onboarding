@@ -29,7 +29,7 @@ if _INTEGRATIONS_ZOHO not in sys.path:
 
 import zoho_client as _zc                                                 # noqa: E402
 from export_zoho_payload import (CANDIDATE_MAP_FILE, DEFAULT_MAP_FILE,   # noqa: E402
-                                 build_full_payload, collect_values)
+                                 build_full_payload, collect_values, load_subforms)
 
 from sqlalchemy.orm import Session                                       # noqa: E402
 
@@ -127,6 +127,25 @@ def push_candidate(db: Session, candidate: Candidate, target: str = "confirmatio
                 "is not linked to. Resolve it in Zoho first (or link it via the CLI's "
                 "--record-id) before publishing from here.")
 
+    # Tabular columns in inputData always APPEND rows, so a re-sync would
+    # duplicate every table. For sections the map marks with a section id,
+    # note the rows already there now and delete them once the update has
+    # landed — the record ends up mirroring the portal. Read failures abort
+    # before anything is written.
+    replace_sections = {cfg_s["_zoho_section_id"]: cfg_s.get("_zoho_section_display", "")
+                        for cfg_s in load_subforms(cfg["map_file"]).values()
+                        if cfg_s.get("_zoho_section_id")}
+    old_rows = {}
+    if record_id and replace_sections:
+        try:
+            existing_record = _zc.get_record(token, form, record_id)
+        except _zc.ZohoUnreachable as exc:
+            raise ZohoPushError(_network_message(exc)) from exc
+        except _zc.ZohoError as exc:
+            raise ZohoPushError(f"Could not read the existing Zoho record before updating it: {exc}") from exc
+        old_rows = {sec: _zc.tabular_row_ids(existing_record, display)
+                    for sec, display in replace_sections.items()}
+
     # The record is written as a Zoho DRAFT: a non-draft write enforces every
     # mandatory field on the form, including ones no local data answers
     # (error 7052). As a draft it lands valid and editable for HR.
@@ -158,6 +177,20 @@ def push_candidate(db: Session, candidate: Candidate, target: str = "confirmatio
     new_id = record_id or _zc.record_id_from(response)
     if not new_id:
         raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
+
+    if any(old_rows.values()):
+        try:
+            cleanup = _zc.delete_tabular_rows(token, form, record_id, old_rows, draft=True)
+        except _zc.ZohoError as exc:
+            cleanup = {"error": str(exc)}
+        _zc.log("push.tabular_cleanup", source="hr-portal", target=target, form=form,
+                candidate_id=candidate.id, deleted={s: len(i) for s, i in old_rows.items()},
+                response=cleanup)
+        if "error" in cleanup or _zc.has_errors(cleanup):
+            raise ZohoPushError(
+                "The record was updated, but its previous table rows could not be removed, "
+                "so Education/Experience may now appear twice in Zoho. Re-sync again or "
+                f"delete the extra rows in Zoho: {str(cleanup)[:400]}")
 
     return {
         "record_id": new_id,

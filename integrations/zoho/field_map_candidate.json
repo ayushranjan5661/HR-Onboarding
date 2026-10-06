@@ -34,11 +34,36 @@
     "technical_certifications": ""
   },
   "_unmapped_readme": "Left \"\" because the sheet gives no Candidate-form field for them: position_applied_for, any_backlogs, worked_in_levelshift_before, levelshift_employee_id, levelshift_experience_yrs, expected_ctc_lpa, additional_allowance, variable_comp, notice_period_days, other_offers. technical_certifications is free text locally but the sheet points it at Certifications_Zip_File, a File_Upload field — text cannot go there, so it is skipped.",
-  "_date_fields": ["date_of_birth"],
-  "_email_fields": ["email", "alternate_email"],
+  "_date_fields": [
+    "date_of_birth"
+  ],
+  "_copy_fields_readme": "Zoho field -> another Zoho field already in the payload whose (already formatted) value it repeats. The Candidate form asks DOB twice: Original_Date_of_Birth gets the same CIF date of birth as Date_of_Birth.",
+  "_copy_fields": {
+    "Original_Date_of_Birth": "Date_of_Birth"
+  },
+  "_document_flags_readme": "Zoho picklist answered from whether the candidate uploaded any of the listed local documents (Document.field_key). Do_you_have_a_passport = Yes when a passport copy (CIF or BGV) is on file, otherwise No.",
+  "_document_flags": {
+    "Do_you_have_a_passport": {
+      "documents": [
+        "passport_copy",
+        "passport_copy_bgv"
+      ],
+      "yes": "Yes",
+      "no": "No"
+    }
+  },
+  "_email_fields": [
+    "email",
+    "alternate_email"
+  ],
   "_numeric_fields_readme": "Zoho types: Aadhar_number Number(12), Relevant_Years_Of_Experience1 Decimal. Reduced to the bare number before sending (\"1234 5678 9012\" -> \"123456789012\").",
-  "_numeric_fields": ["aadhaar_number", "relevant_skill_exp_yrs"],
-  "_blood_group_fields": ["blood_group"],
+  "_numeric_fields": [
+    "aadhaar_number",
+    "relevant_skill_exp_yrs"
+  ],
+  "_blood_group_fields": [
+    "blood_group"
+  ],
   "_value_map_readme": "local option text -> exact Candidate-form picklist option (read live 2026-10-01). Gender1: Male/Female/Others. Source_Of_Hire options: Direct, CareerSite, Advertisement, Added by User, Indeedresume, Newspaper, Partner, Search Engine, Imported by parser, Gapps, SearchEngine, Facebook, Twitter, External Referral, Vendor, Employee Referral, Campus — Job Portal/Social Media/Walk-in/Other have no exact match and are best guesses; change them here if HR prefers others.",
   "_value_map": {
     "gender": {
@@ -54,22 +79,41 @@
       "_default": "Direct"
     }
   },
-  "_subforms_readme": "Salary_Drawn_Last is NOT a flat field: it is a column of the Candidate form's \"Experience\" tabular section (Zoho answers 7022 \"Input is expected in JSONArray for tabular field\" otherwise). So the candidate's employment rows are sent as that table (columns flat in inputData, one array element per row — same recipe as field_map.json's _subforms_write_status), and the CIF's Current CTC is put on the current-job row (currently_working = Yes, else the first row) via _fill_from_profile. Sent as the bare number in LPA, as entered — not converted to rupees. A candidate with no employment rows sends no Experience table and no salary.",
+  "_subforms_readme": "Tabular sections of the Candidate form, written with the same recipe as field_map.json's _subforms_write_status (columns flat in inputData, one array element per row). CandidateEducation: one row per CIF education entry (UG/PG, then 12th, then 10th). Major_subject has no local source and is left out. Experience: one row per CIF employment entry. Exp_Duration is whole MONTHS computed from From/To (a current job with no To date counts to today) — Zoho's field is a plain Number with no unit, change _duration_months in export_zoho_payload.py if HR wants years. Summary (Responsibilities) and HR_Name/HR_Email_ID/HR_Contact_Number come from the BGV form's employment check for the same company (else same position) and are blank until BGV is filled. Salary_Drawn_Last: the CIF's Current CTC (LPA, bare number) on the current-job row only, via _fill_from_profile. A section with no local rows is not sent.",
   "_subforms": {
+    "education_all": {
+      "_zoho_section": "CandidateEducation",
+      "map": {
+        "qualification": "College",
+        "college_name": "Degree",
+        "specialization": "Specialization",
+        "year_of_passing": "Yearofgraduation",
+        "cgpa_percent": "MARKS"
+      },
+      "_zoho_section_id": "312853000013347205",
+      "_zoho_section_display": "Education"
+    },
     "work_experience": {
       "_zoho_section": "Experience",
       "map": {
         "company_name": "Company",
         "position_held": "Occupation_Title",
-        "from_date": "From1",
-        "to_date": "To1",
+        "duration_months": "Exp_Duration",
+        "responsibilities": "Summary",
         "currently_working": "I_currently_work_here",
+        "current_ctc_lpa": "Salary_Drawn_Last",
         "reason_for_leaving": "Reason_for_Leaving_the_Job",
-        "current_ctc_lpa": "Salary_Drawn_Last"
+        "hr_name": "HR_Name",
+        "hr_email": "HR_Email_ID",
+        "hr_phone": "HR_Contact_Number",
+        "from_date": "From1",
+        "to_date": "To1"
       },
       "_fill_from_profile": {
         "current_ctc_lpa": "current_row"
-      }
+      },
+      "_zoho_section_id": "312853000013347207",
+      "_zoho_section_display": "Experience"
     }
   },
   "files": {
@@ -97,6 +141,15 @@
       "passport_copy": "Passport_Copy_self_attested",
       "address_proof": "Address_proof_self_attested",
       "id_proof": "ID_proof_self_attested"
+    }
+  },
+  "_subforms_replace_readme": "Re-sync REPLACES the rows of every section that has _zoho_section_id: columns-as-arrays in inputData always APPEND rows, so a plain update duplicated the table on every click. zoho_push reads the record's existing tabular.ROWIDs (getRecordByID, keyed by _zoho_section_display), sends the update, then removes the old rows with tabularData={sectionId:{\"delete\":[rowIds]}} (verified 2026-10-05). Rows HR typed into these tables directly in Zoho are removed too — the portal is the source of truth.",
+  "_row_flags_readme": "Zoho picklist answered from whether a local tabular section has rows. Work_Experience MUST be \"Experienced\" for the Experience table to save: Zoho hides that section otherwise and silently drops any rows sent to it (status 0, \"Successfully Updated\", empty row on read-back — verified 2026-10-05).",
+  "_row_flags": {
+    "Work_Experience": {
+      "section": "work_experience",
+      "yes": "Experienced",
+      "no": "Fresher"
     }
   }
 }
