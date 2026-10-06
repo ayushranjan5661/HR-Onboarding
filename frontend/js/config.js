@@ -6,3 +6,14 @@
 const API_BASE = ["localhost", "127.0.0.1"].includes(location.hostname)
   ? "http://127.0.0.1:8000"
   : "https://hr-onboarding-bazm.onrender.com";
+
+// Enter on a dropdown doesn't submit its form natively (it does from a text
+// box). Make it submit inside pop-up forms (Add employee, Invite candidate…).
+// Long candidate forms are left alone so a stray Enter can't send them early.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.defaultPrevented || e.isComposing) return;
+  const el = e.target;
+  if (el.tagName !== "SELECT" || el.multiple || !el.form || !el.closest(".modal")) return;
+  e.preventDefault();
+  el.form.requestSubmit();
+});
