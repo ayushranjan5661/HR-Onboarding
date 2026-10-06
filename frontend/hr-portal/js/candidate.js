@@ -56,18 +56,26 @@ function showConfirm(message, { title = "Please confirm", confirmText = "Confirm
   okBtn.textContent = confirmText;
   okBtn.className = `btn ${danger ? "btn-danger" : "btn-primary"}`;
   modal.classList.remove("hidden");
+  okBtn.focus();
 
   return new Promise((resolve) => {
     function done(result) {
       modal.classList.add("hidden");
       okBtn.removeEventListener("click", onOk);
       cancelBtn.removeEventListener("click", onCancel);
+      document.removeEventListener("keydown", onKey);
       resolve(result);
     }
     function onOk() { done(true); }
     function onCancel() { done(false); }
+    // Enter confirms, Escape cancels; a focused Cancel keeps its own Enter.
+    function onKey(e) {
+      if (e.key === "Escape") { e.preventDefault(); done(false); }
+      else if (e.key === "Enter" && e.target !== cancelBtn) { e.preventDefault(); done(true); }
+    }
     okBtn.addEventListener("click", onOk);
     cancelBtn.addEventListener("click", onCancel);
+    document.addEventListener("keydown", onKey);
   });
 }
 
@@ -90,9 +98,14 @@ function showAlert(message, { title = "Done", okText = "OK", danger = false } = 
       modal.classList.add("hidden");
       cancelBtn.classList.remove("hidden");   // restore it for the next showConfirm
       okBtn.removeEventListener("click", done);
+      document.removeEventListener("keydown", onKey);
       resolve();
     }
+    function onKey(e) {
+      if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); done(); }
+    }
     okBtn.addEventListener("click", done);
+    document.addEventListener("keydown", onKey);
     okBtn.focus();
   });
 }
@@ -422,6 +435,7 @@ function showLoadError(message) {
   document.getElementById("candName").textContent = "Could not load candidate";
   document.getElementById("candStage").innerHTML = "";
   document.getElementById("credentialsCard").classList.add("hidden");
+  document.getElementById("welcomeEmailCard").classList.add("hidden");
   document.getElementById("decisionCard").classList.add("hidden");
   document.getElementById("cifCard").classList.add("hidden");
   document.getElementById("auditCard").classList.add("hidden");
@@ -464,6 +478,16 @@ function render() {
       The login link signs the candidate straight into their form — treat it like a password.
       "New Link" issues a fresh one and immediately kills the old one.
     </div>`;
+
+  // Rejected candidates don't need onboarding mail.
+  document.getElementById("welcomeEmailCard").classList.toggle("hidden", c.stage === "REJECTED");
+  // Document Collection opens only once the CIF is approved (see sendGate).
+  const docsOpen = c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE";
+  applyEmailDraftVisibility();
+  renderWelcomeEmailDraft(document.getElementById("welcomeEmailBody"), c, {
+    templates: docsOpen ? ["CIF", "DOCUMENT_COLLECTION"] : ["CIF"],
+    template: c.stage === "APPROVED_FOR_BGV" ? "DOCUMENT_COLLECTION" : "CIF",
+  });
 
   // Decision card only when awaiting the final-interview decision
   document.getElementById("decisionCard").classList.toggle("hidden", c.stage !== "CIF_SUBMITTED");
@@ -687,11 +711,29 @@ async function regenerateLink() {
   try {
     await apiFetch(`/hr/candidates/${candidateId}/regenerate-link`, { method: "POST" });
     await load();
-    await showAlert("Copy the new link and send it to the candidate — the old one no longer works.",
+    await showAlert("The welcome email draft now carries the new link — send it to the candidate. The old one no longer works.",
                      { title: "New link issued" });
   } catch (err) {
     showError(err.message);
   }
+}
+
+// Email draft card can be collapsed; the choice is remembered per browser.
+const EMAIL_DRAFT_HIDDEN_KEY = "hr.emailDraftHidden";
+
+let emailDraftIsHidden = (() => {
+  try { return localStorage.getItem(EMAIL_DRAFT_HIDDEN_KEY) === "1"; } catch { return false; }
+})();
+
+function applyEmailDraftVisibility() {
+  document.getElementById("welcomeEmailCard").classList.toggle("collapsed", emailDraftIsHidden);
+  document.getElementById("emailDraftToggle").setAttribute("aria-expanded", String(!emailDraftIsHidden));
+}
+
+function toggleEmailDraft() {
+  emailDraftIsHidden = !emailDraftIsHidden;
+  try { localStorage.setItem(EMAIL_DRAFT_HIDDEN_KEY, emailDraftIsHidden ? "1" : "0"); } catch {}
+  applyEmailDraftVisibility();
 }
 
 // Copies the login link only — that's the one thing HR sends the candidate.
@@ -1554,6 +1596,13 @@ document.getElementById("rejectBtn").addEventListener("click", () => {
 document.getElementById("rejectConfirmInput").addEventListener("input", (e) => {
   document.getElementById("confirmRejectBtn").disabled =
     !currentData || e.target.value !== currentData.name;
+});
+
+// Enter confirms once the name matches; Escape cancels.
+document.getElementById("rejectConfirmInput").addEventListener("keydown", (e) => {
+  const btn = document.getElementById("confirmRejectBtn");
+  if (e.key === "Enter" && !btn.disabled) { e.preventDefault(); btn.click(); }
+  else if (e.key === "Escape") { e.preventDefault(); closeRejectModal(); }
 });
 
 document.getElementById("confirmRejectBtn").addEventListener("click", async () => {

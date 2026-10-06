@@ -38,6 +38,21 @@
           <div id="credentialsBody"></div>
         </div>
 
+        <div class="card section-card" id="welcomeEmailCard">
+          <div class="section-title collapsible" id="emailDraftToggle" onclick="toggleEmailDraft()"
+               role="button" tabindex="0" aria-controls="welcomeEmailContent"
+               onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleEmailDraft(); }">
+            <h3>Candidate Email Draft</h3>
+            <span class="chevron">&#9660;</span>
+          </div>
+          <div id="welcomeEmailContent">
+            <p style="color:#6b7280;font-size:0.85rem;margin:0 0 10px;">
+              Auto-drafted from the credentials above. Pick the form the email is for, edit if needed, then copy it or open it in your mail app.
+            </p>
+            <div id="welcomeEmailBody"></div>
+          </div>
+        </div>
+
         <div class="card section-card hidden" id="decisionCard">
           <div class="section-title"><h3>Final Interview Decision</h3></div>
           <p style="color:#6b7280;font-size:0.88rem;">
@@ -201,10 +216,11 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260907a"></script>
+  <script src="../js/config.js?v=20261006a"></script>
   <script src="js/api.js?v=20260929c"></script>
   <script src="../js/field-labels.js?v=20260923b"></script>
   <script src="../js/date-format.js?v=20260922d"></script>
-  <script src="js/candidate.js?v=20260930c"></script>
+  <script src="../js/welcome-email.js?v=20261006b"></script>
+  <script src="js/candidate.js?v=20261006f"></script>
 </body>
 </html>

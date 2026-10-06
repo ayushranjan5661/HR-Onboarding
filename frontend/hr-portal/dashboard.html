@@ -120,8 +120,9 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260901b"></script>
+  <script src="../js/config.js?v=20261006a"></script>
   <script src="js/api.js?v=20260929c"></script>
+  <script src="../js/welcome-email.js?v=20261006b"></script>
   <script>
     requireAuth(["HR"]);   // Managers and the Super Admin have their own candidate pages
     document.getElementById("whoami").textContent = getName();
@@ -226,6 +227,13 @@
         !pendingDelete || e.target.value !== pendingDelete.candidate.name;
     });
 
+    // Enter confirms once the name matches; Escape cancels.
+    document.getElementById("deleteConfirmInput").addEventListener("keydown", (e) => {
+      const btn = document.getElementById("confirmDeleteBtn");
+      if (e.key === "Enter" && !btn.disabled) { e.preventDefault(); btn.click(); }
+      else if (e.key === "Escape") { e.preventDefault(); closeDeleteModal(); }
+    });
+
     document.getElementById("confirmDeleteBtn").addEventListener("click", async () => {
       if (!pendingDelete) return;
       const { candidate } = pendingDelete;
@@ -322,6 +330,7 @@
       const errorMsg = document.getElementById("inviteError");
       errorMsg.textContent = "";
       try {
+        const inviteName = document.getElementById("inviteName").value.trim();
         const data = await apiFetch("/hr/candidates", {
           method: "POST",
           body: JSON.stringify({
@@ -350,11 +359,18 @@
           <div class="cred-note">
             The password is temporary and shown only once &mdash; copy it before closing.
           </div>
+          <details class="cred-email" open style="margin:12px 0;">
+            <summary style="cursor:pointer;font-weight:600;margin-bottom:8px;">Welcome email draft</summary>
+            <div id="welcomeEmailBody"></div>
+          </details>
           <div class="cred-actions">
             <button type="button" class="btn btn-outline" onclick="copyAllCredentials(this)">Copy all details</button>
             <button type="button" class="btn btn-primary" onclick="closeInviteModal(); loadCandidates();">Done</button>
           </div>
         `;
+        renderWelcomeEmailDraft(document.getElementById("welcomeEmailBody"),
+                                { ...data, name: inviteName });
+        box.querySelector(".cred-actions .btn-primary").focus();  // Enter = Done
         loadCandidates();
       } catch (err) {
         errorMsg.textContent = err.message;

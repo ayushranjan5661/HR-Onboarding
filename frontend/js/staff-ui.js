@@ -86,15 +86,30 @@ function confirmDialog({ title, html, confirmLabel = "Confirm", danger = true, t
         </div>
       </div>`;
     modal.classList.remove("hidden");
-    const done = (v) => { modal.classList.add("hidden"); resolve(v); };
+    const okBtn = modal.querySelector("#uiConfirmOk");
+    // Enter confirms (only once the confirm button is enabled), Escape cancels.
+    // A focused button (e.g. Cancel) keeps its own Enter behaviour.
+    const onKey = (e) => {
+      if (e.key === "Enter" && e.target.tagName === "BUTTON") return;
+      if (e.key === "Enter" && !okBtn.disabled) { e.preventDefault(); done(true); }
+      else if (e.key === "Escape") { e.preventDefault(); done(false); }
+    };
+    const done = (v) => {
+      document.removeEventListener("keydown", onKey);
+      modal.classList.add("hidden");
+      resolve(v);
+    };
+    document.addEventListener("keydown", onKey);
     modal.querySelector("#uiConfirmCancel").onclick = () => done(false);
-    modal.querySelector("#uiConfirmOk").onclick = () => done(true);
+    okBtn.onclick = () => done(true);
     if (typed) {
       const input = modal.querySelector("#uiConfirmInput");
       input.focus();
       input.addEventListener("input", () => {
-        modal.querySelector("#uiConfirmOk").disabled = input.value !== typed;
+        okBtn.disabled = input.value !== typed;
       });
+    } else {
+      okBtn.focus();
     }
   });
 }
@@ -155,6 +170,7 @@ function renderCredentials(container, { title, sub, rows, note, doneLabel = "Don
   container.querySelector("#credCopyAll").onclick = (e) =>
     copyText(rows.map(r => `${r.label}: ${r.value}`).join("\n"), e.currentTarget);
   container.querySelector("#credDone").onclick = () => { container.classList.add("hidden"); onDone && onDone(); };
+  container.querySelector("#credDone").focus();  // Enter = Done
 }
 
 // ---------------------------------------------------------------------------

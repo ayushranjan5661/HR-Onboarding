@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 from uuid import uuid4
+from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -120,6 +121,20 @@ def _candidate_login_url(candidate: Candidate) -> str:
             f"?role=candidate&email={quote(candidate.email)}&next=form")
 
 
+def _login_page_url() -> str:
+    """Plain login page, for candidates who sign in with ID + password."""
+    return f"{settings.PORTAL_BASE_URL}/index.html?role=candidate"
+
+
+def _link_expiry(candidate: Candidate) -> Optional[datetime]:
+    """Expiry of the one-click link (None for legacy no-token candidates).
+    SQLite hands back naive datetimes; they were written as UTC."""
+    exp = candidate.invite_token_expires_at if candidate.invite_token else None
+    if exp is not None and exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    return exp
+
+
 def _issue_invite_token(candidate: Candidate) -> None:
     """(Re)issue the candidate's one-click link token. Replacing it instantly
     invalidates any link previously sent out."""
@@ -223,7 +238,9 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
     # Wire up SMTP in .env and send here for a live flow.
     return InviteCandidateResponse(candidate_id=candidate.id, email=candidate.email,
                                     temp_password=temp_password,
-                                    login_url=_candidate_login_url(candidate))
+                                    login_url=_candidate_login_url(candidate),
+                                    login_page_url=_login_page_url(),
+                                    login_link_expires_at=_link_expiry(candidate))
 
 
 @router.get("/field-mappings")
@@ -333,6 +350,8 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         assigned_hr_name=owner.get("assigned_hr_name"),
         temp_password=decrypt_password(candidate.temp_password_enc),
         login_url=_candidate_login_url(candidate),
+        login_page_url=_login_page_url(),
+        login_link_expires_at=_link_expiry(candidate),
         profile=candidate.profile,
         submissions=candidate.submissions,
         documents=[_document_out(d) for d in candidate.documents],
@@ -372,7 +391,8 @@ def regenerate_invite_link(candidate_id: int, db: Session = Depends(get_db),
                          action="EDIT", edited_by_hr_id=current.id))
     db.commit()
     return {"detail": "New link issued. The previous link no longer works.",
-            "login_url": _candidate_login_url(candidate)}
+            "login_url": _candidate_login_url(candidate),
+            "login_link_expires_at": _link_expiry(candidate)}
 
 
 @router.post("/candidates/{candidate_id}/reset-password")

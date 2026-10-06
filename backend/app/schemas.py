@@ -107,6 +107,8 @@ class InviteCandidateResponse(BaseModel):
     email: EmailStr
     temp_password: str
     login_url: str
+    login_page_url: str
+    login_link_expires_at: Optional[datetime] = None
 
 
 class CandidateListItem(BaseModel):
@@ -295,6 +297,8 @@ class CandidateDetailOut(BaseModel):
     assigned_hr_name: Optional[str] = None
     temp_password: Optional[str] = None   # decrypted on demand for HR view
     login_url: Optional[str] = None
+    login_page_url: Optional[str] = None
+    login_link_expires_at: Optional[datetime] = None
     profile: Optional[CandidateProfileOut] = None
     submissions: list[FormSubmissionOut] = []
     documents: list[DocumentOut] = []
