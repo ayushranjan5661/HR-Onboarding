@@ -30,8 +30,10 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, "backend"))
 
 from app.database import SessionLocal          # noqa: E402
-from app.models import (Candidate, CandidateProfile, CIFDetails,  # noqa: E402
-                         EducationDetail, EmploymentDetail, ReferenceDetail)
+from app.agents.insights import _month_span     # noqa: E402
+from app.models import (BGVEmploymentCheck, Candidate, CandidateProfile,  # noqa: E402
+                         CIFDetails, Document, EducationDetail, EmploymentDetail,
+                         ReferenceDetail)
 
 # Local EducationDetail.section -> the _subforms key in field_map.json.
 _EDU_SECTION_TO_KEY = {"UG_PG": "education_ug_pg", "12TH": "education_12th",
@@ -213,6 +215,26 @@ def _combine_course_college(edu):
     return combined or edu.course_college
 
 
+def _duration_months(from_date, to_date, currently_working):
+    """Exp_Duration in whole months, counted exactly as the HR portal's
+    Duration column does (part-month counts as a month; a current job with
+    no To date runs to today) — app.agents.insights._month_span is the single
+    source of that rule. "" when the dates are missing or backwards, since
+    Zoho's Exp_Duration is a Number field."""
+    months = _month_span(from_date, to_date, currently_working)
+    return "" if months is None else str(months)
+
+
+def _bgv_match(bgv_rows, company, index):
+    """The BGV employment-check row for one CIF employment row: same company
+    name (case/space-insensitive), else the BGV row in the same position."""
+    key = (company or "").strip().lower()
+    for b in bgv_rows:
+        if key and (b.company_name or "").strip().lower() == key:
+            return b
+    return bgv_rows[index] if index < len(bgv_rows) else None
+
+
 def collect_subform_rows(db, candidate):
     """Local repeating-section rows keyed by the field_map.json _subforms key.
 
@@ -236,9 +258,26 @@ def collect_subform_rows(db, candidate):
             "course_college": _combine_course_college(e),
             "cgpa_percent": e.cgpa_percent, "year_of_passing": e.year_of_passing,
             "has_marksheet": e.has_marksheet, "gaps": e.gaps})
-    for m in (db.query(EmploymentDetail).filter_by(candidate_id=candidate.id)
-              .order_by(EmploymentDetail.id).all()):
+        # Zoho's Candidate form has ONE education table for every level, with
+        # college and specialization in separate columns — "education_all".
+        rows.setdefault("education_all", []).append({
+            "qualification": e.qualification, "college_name": e.college_name,
+            "specialization": e.specialization, "year_of_passing": e.year_of_passing,
+            "cgpa_percent": e.cgpa_percent})
+    bgv_rows = (db.query(BGVEmploymentCheck).filter_by(candidate_id=candidate.id)
+                .order_by(BGVEmploymentCheck.id).all())
+    employment = (db.query(EmploymentDetail).filter_by(candidate_id=candidate.id)
+                  .order_by(EmploymentDetail.id).all())
+    for i, m in enumerate(employment):
+        # Responsibilities and the employer's HR contact are only asked on the
+        # BGV form; they ride along for maps that want them (Candidate form).
+        b = _bgv_match(bgv_rows, m.company_name, i)
         rows.setdefault("work_experience", []).append({
+            "duration_months": _duration_months(m.from_date, m.to_date, m.currently_working),
+            "responsibilities": b.job_description if b else None,
+            "hr_name": b.hr_name if b else None,
+            "hr_email": b.hr_email if b else None,
+            "hr_phone": b.hr_phone if b else None,
             "company_name": m.company_name, "position_held": m.position_held,
             "from_date": m.from_date, "to_date": m.to_date,
             "currently_working": m.currently_working,
@@ -328,6 +367,29 @@ def _fill_rows_from_profile(local_rows, subforms_config, local):
             target[local_key] = _to_number(value) or ""
 
 
+def _apply_copy_fields(payload, copy_fields):
+    """{target Zoho field: source Zoho field} -> repeat an already-built value
+    (e.g. Original_Date_of_Birth <- Date_of_Birth). Nothing if the source is
+    absent, so an empty DOB stays empty in both."""
+    for target, source in copy_fields.items():
+        if payload.get(source) not in (None, ""):
+            payload[target] = payload[source]
+
+
+def _apply_document_flags(db, candidate, payload, flags):
+    """{Zoho field: {documents, yes, no}} -> "yes" if the candidate has any of
+    those documents uploaded, else "no" (e.g. Do_you_have_a_passport)."""
+    if not flags:
+        return
+    uploaded = {key for (key,) in db.query(Document.field_key)
+                .filter_by(candidate_id=candidate.id).all()}
+    for zoho_field, cfg in flags.items():
+        has_doc = any(k in uploaded for k in cfg.get("documents", []))
+        answer = cfg.get("yes") if has_doc else cfg.get("no")
+        if answer:
+            payload[zoho_field] = answer
+
+
 def build_full_payload(db, candidate, map_file=DEFAULT_MAP_FILE):
     """Everything one candidate sends to Zoho, in the single `inputData` dict
     the API wants: flat fields as plain strings, tabular columns as arrays with
@@ -347,10 +409,17 @@ def build_full_payload(db, candidate, map_file=DEFAULT_MAP_FILE):
         date_fields=load_date_fields(map_file), email_fields=load_email_fields(map_file),
         numeric_fields=load_numeric_fields(map_file),
         blood_group_fields=load_blood_group_fields(map_file))
+    field_map = _load_field_map(map_file)
+    _apply_copy_fields(payload, field_map.get("_copy_fields", {}))
+    _apply_document_flags(db, candidate, payload, field_map.get("_document_flags", {}))
     local_rows = collect_subform_rows(db, candidate)
+    # e.g. Work_Experience = Experienced/Fresher — without "Experienced" Zoho
+    # silently drops the whole Experience table (see field_map_candidate.json).
+    for zoho_field, cfg in field_map.get("_row_flags", {}).items():
+        payload[zoho_field] = cfg["yes"] if local_rows.get(cfg["section"]) else cfg["no"]
     _fill_rows_from_profile(local_rows, load_subforms(map_file), local)
     tabular = build_subforms(local_rows, load_subforms(map_file),
-                             value_map=value_map, email_fields={"email_id"})
+                             value_map=value_map, email_fields={"email_id", "hr_email"})
     # Tabular columns ride inside inputData alongside the flat fields — see
     # build_subforms for why there is no separate tabularData parameter.
     payload.update(tabular)

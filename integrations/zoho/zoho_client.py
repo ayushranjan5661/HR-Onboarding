@@ -452,6 +452,43 @@ def update_record(token, form, record_id, payload, files=None, draft=False):
     return api("POST", path, data=data, token=token)
 
 
+def get_record(token, form, record_id):
+    """One record by id, as getRecordByID returns it (tabular rows under
+    "tabularSections", keyed by section display name). {} if not found."""
+    resp = api("GET", "forms/%s/getRecordByID" % urllib.parse.quote(form),
+               token=token, params={"recordId": record_id})
+    result = resp.get("response", {}).get("result") or []
+    if isinstance(result, list):
+        return result[0] if result else {}
+    return result if isinstance(result, dict) else {}
+
+
+def tabular_row_ids(record, section_display):
+    """tabular.ROWID of every saved row in one section of a get_record() result.
+    Rows without an id (Zoho returns a bare {} for an empty table) are skipped."""
+    rows = (record.get("tabularSections") or {}).get(section_display) or []
+    return [str(r["tabular.ROWID"]) for r in rows
+            if isinstance(r, dict) and r.get("tabular.ROWID")]
+
+
+def delete_tabular_rows(token, form, record_id, rows_by_section, draft=False):
+    """{section id: [row id, ...]} -> remove those rows. This is the one place
+    tabularData works: {"<sectionId>": {"delete": [rowIds]}} (verified on the
+    Candidate form 2026-10-05). Adding rows still goes through inputData."""
+    rows_by_section = {sec: ids for sec, ids in rows_by_section.items() if ids}
+    if not rows_by_section:
+        return None
+    data = {
+        "recordId": record_id,
+        "inputData": "{}",
+        "tabularData": _dumps({sec: {"delete": ids} for sec, ids in rows_by_section.items()}),
+    }
+    if draft:
+        data["isDraft"] = "true"
+    path = "forms/json/%s/updateRecord" % urllib.parse.quote(form)
+    return api("POST", path, data=data, token=token)
+
+
 def get_records(token, form, limit=5):
     return api("GET", "forms/%s/getRecords" % urllib.parse.quote(form),
                token=token, params={"sIndex": 1, "limit": limit})
