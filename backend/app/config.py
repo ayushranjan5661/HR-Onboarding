@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # --- Portal (used to build the candidate's direct login URL) ---
     PORTAL_BASE_URL: str = "http://127.0.0.1:5500"
     # How long a one-click invite link stays valid. HR can always reissue.
-    INVITE_LINK_EXPIRY_DAYS: int = 30
+    INVITE_LINK_EXPIRY_DAYS: int = 3
 
     # --- AI cross-form mapping agent (Azure OpenAI) ---
     # Reads the VITE_*-prefixed values already present in .env.

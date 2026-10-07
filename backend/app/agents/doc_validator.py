@@ -921,7 +921,9 @@ def decide(field_key: str, extracted: Extracted | None, profile: dict | None) ->
     best_type = max(scores, key=scores.get)
     best = scores[best_type]
     ev = [e for e in evidence.get(exp_type, []) if not e.startswith("but:")]
-    found = ", ".join(ev[:4])
+    # "; " because some evidence labels contain commas themselves — the HR
+    # badge splits on it to show one chip per sign.
+    found = "; ".join(ev[:4])
     match_at, mismatch_at = settings.DOC_VALIDATION_MATCH_SCORE, settings.DOC_VALIDATION_MISMATCH_SCORE
 
     # Identity number and name, only when the slot wanted an ID card.
