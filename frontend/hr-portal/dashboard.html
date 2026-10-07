@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#3730a3">
 <title>HR Portal — Dashboard</title>
-<link rel="stylesheet" href="css/style.css?v=20261005a">
+<link rel="stylesheet" href="css/style.css?v=20261007a">
+<link rel="stylesheet" href="css/portal-theme.css?v=20261006s">
 </head>
-<body>
+<body class="themed">
   <div class="app-shell">
     <aside class="sidebar">
       <div class="sidebar-brand"><span class="brand-mark">LS</span><span>HR Portal</span></div>
@@ -17,7 +18,7 @@
       <div class="sidebar-footer">
         <div class="user-chip">
           <span class="avatar" id="whoamiAvatar"></span>
-          <span class="user-name" id="whoami"></span>
+          <span class="user-name"><span id="whoami"></span><span class="user-role" id="whoamiRole"></span></span>
         </div>
         <a class="back-link" href="../change-password.html" style="display:block;margin:0 0 8px 2px;font-size:0.78rem;">Change password</a>
         <button class="logout-btn" onclick="hrLogout()">Log out</button>
@@ -122,11 +123,12 @@
 
   <script src="../js/config.js?v=20261006a"></script>
   <script src="js/api.js?v=20260929c"></script>
-  <script src="../js/welcome-email.js?v=20261006b"></script>
+  <script src="../js/welcome-email.js?v=20261006n"></script>
   <script>
     requireAuth(["HR"]);   // Managers and the Super Admin have their own candidate pages
     document.getElementById("whoami").textContent = getName();
     document.getElementById("whoamiAvatar").textContent = getName().charAt(0).toUpperCase();
+    document.getElementById("whoamiRole").textContent = roleLabel(getRole());
 
     function badge(stage) {
       return `<span class="badge badge-${stage.toLowerCase()}">${stage.replaceAll("_", " ")}</span>`;

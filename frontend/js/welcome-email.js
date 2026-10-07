@@ -128,14 +128,14 @@ function renderWelcomeEmailDraft(container, data, opts = {}) {
   const inputStyle = "width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #d1d5db;" +
     "border-radius:8px;font:inherit;font-size:0.88rem;";
   container.innerHTML = `
-    <div style="display:grid;gap:10px;">
+    <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:10px;">
       ${templates.length > 1 ? `
       <label style="font-size:0.8rem;font-weight:600;color:#374151;">Email for
         <select class="we-template" style="${inputStyle}margin-top:4px;background:#fff;">
           ${templates.map(k => `<option value="${k}"${k === current ? " selected" : ""}>${esc(EMAIL_TEMPLATES[k].label)}</option>`).join("")}
         </select>
       </label>` : ""}
-      <div style="font-size:0.85rem;color:#6b7280;">To: <strong style="color:#111827;">${esc(mail.to)}</strong></div>
+      <div style="font-size:0.85rem;color:#6b7280;overflow-wrap:anywhere;">To: <strong style="color:#111827;">${esc(mail.to)}</strong></div>
       <label style="font-size:0.8rem;font-weight:600;color:#374151;">Subject
         <input type="text" class="we-subject" style="${inputStyle}margin-top:4px;" value="${esc(mail.subject)}">
       </label>

@@ -170,8 +170,41 @@ const hrLogout = staffLogout;
 // The candidate detail page is shared by all roles but its links point at
 // the HR dashboard; send Managers and the Super Admin back to their own
 // candidate list instead.
+// The candidate detail page lives in hr-portal/ but every staff role opens
+// it: give it the signed-in role's own portal name, sidebar links and role
+// label, so a Super Admin or Manager doesn't land in an "HR Portal".
+const ROLE_NAV = {
+  ADMIN: [
+    ["../super-admin/users.html", "Employee Accounts"],
+    ["../super-admin/candidates.html", "Candidates", true],
+    ["../super-admin/audit.html", "Audit Trail"],
+  ],
+  MANAGER: [
+    ["../manager/candidates.html", "Candidates", true],
+    ["../manager/team.html", "My Team"],
+    ["../manager/audit.html", "Audit Trail"],
+  ],
+  HR: [["dashboard.html", "Candidates", true]],
+};
 function applyRoleNav() {
+  const role = getRole();
+  const navKey = ADMIN_ROLES.includes(role) ? "ADMIN" : (ROLE_NAV[role] ? role : "HR");
+  const portal = navKey === "ADMIN" ? roleLabel(role)
+    : navKey === "MANAGER" ? "Manager Portal" : "HR Portal";
+
+  const brand = document.getElementById("brandTitle");
+  if (brand) brand.textContent = portal;
+  const roleEl = document.getElementById("whoamiRole");
+  if (roleEl) roleEl.textContent = roleLabel(role);
+  document.title = document.title.replace(/^HR Portal/, portal);
+
+  const nav = document.getElementById("sidebarNav");
+  if (nav) {
+    nav.innerHTML = ROLE_NAV[navKey].map(([href, label, active]) =>
+      `<a href="${href}" class="nav-item${active ? " active" : ""}"><span class="nav-dot"></span> ${label}</a>`
+    ).join("");
+  }
+  // Any other in-page "back to candidates" link follows the role too.
   const target = roleCandidatesPage();
-  if (target === ROLE_CANDIDATES.HR) return;
   document.querySelectorAll('a[href="dashboard.html"]').forEach(a => { a.href = target; });
 }
