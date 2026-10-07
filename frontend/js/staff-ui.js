@@ -196,7 +196,7 @@ function renderAudit(container, entries) {
     container.innerHTML = `<div class="empty-state">Nothing on record yet.</div>`;
     return;
   }
-  container.innerHTML = `<table>
+  container.innerHTML = `<table class="cards">
     <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
     <tbody>${entries.map(e => `<tr>
       <td style="white-space:nowrap;">${fmtDateTime(e.created_at)}</td>

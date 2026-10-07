@@ -1,4 +1,4 @@
-// On phones, wide tables (repeating form rows, the HR candidate list) are
+// On phones, wide tables (repeating form rows, candidate/staff/audit lists) are
 // restacked by CSS into one card per row. Each cell then needs its column
 // name beside it, so copy the header text onto every cell as data-label.
 // Rows are added at runtime (Add Row, prefill, drafts), so keep watching.
@@ -31,8 +31,13 @@
       .observe(table, { childList: true, subtree: true });
   }
 
+  const SELECTOR = "table.rep, table.stack, table.cards";
+
   function init() {
-    document.querySelectorAll("table.rep, table.stack").forEach(watch);
+    document.querySelectorAll(SELECTOR).forEach(watch);
+    // Staff pages render their tables later via innerHTML, so pick those up too.
+    new MutationObserver(() => document.querySelectorAll(SELECTOR).forEach(watch))
+      .observe(document.body, { childList: true, subtree: true });
   }
 
   if (document.readyState === "loading") {

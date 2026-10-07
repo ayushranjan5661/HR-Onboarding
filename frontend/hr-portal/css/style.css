@@ -161,16 +161,86 @@ h1, h2, h3, h4 { font-family: inherit; letter-spacing: -0.01em; }
     box-shadow: 0 2px 12px rgba(21,19,46,0.3);
   }
   .sidebar-brand { padding: 0; margin-right: auto; font-size: 0.95rem; }
-  .sidebar-nav { flex-direction: row; flex: none; }
+  .sidebar-nav { flex-direction: row; flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .sidebar-nav::-webkit-scrollbar { display: none; }
   .nav-item { padding: 7px 12px; }
   .nav-item.active { box-shadow: none; }
   .sidebar-footer { border-top: none; margin: 0; padding: 0; display: flex; align-items: center; gap: 8px; }
   .user-chip { margin-bottom: 0; padding: 0; }
-  .user-name { max-width: 140px; }
+  .user-name { display: none; }
   .logout-btn { width: auto; }
 }
+/* List pages use the laptop's width instead of a narrow centre column */
+@media (min-width: 901px) {
+  .container:has(table.cards, table.stack),
+  body.cand-page .container { max-width: 1440px; }
+}
+/* Wide screens: real table. It scrolls inside its own card, never the page */
+@media (min-width: 1320px) {
+  .card:has(> table.cards) { overflow-x: auto; }
+  /* Short values (headers, badges, counts, dates) never break mid-phrase */
+  table.cards th, table.cards .badge, table.cards .nowrap { white-space: nowrap; }
+  table.cards td:last-child:not(.cell-actions) { min-width: 200px; }
+  table.cards td select { min-width: 140px; max-width: 170px; }
+  /* Long emails may break at the @ (<wbr> in the markup) so the row fits */
+  table.cards td[data-label="Email"] { overflow-wrap: break-word; min-width: 140px; }
+  /* Rows with several actions keep room for two buttons a line */
+  table.cards td.cell-actions:has(.btn + .btn + .btn) { min-width: 210px; }
+  table.cards th, table.cards td { padding-left: 10px; padding-right: 10px; }
+}
+/* Laptops between tablet and wide: cards, two per row */
+@media (min-width: 901px) and (max-width: 1319px) {
+  table.cards tbody { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
+  table.cards tbody tr:last-child, table.cards tbody tr:nth-last-child(2):nth-child(odd) { border-bottom: 0; }
+}
+/* Staff lists switch to cards wherever the table would not fit (tablet, small laptop) */
+@media (max-width: 1319px) {
+  /* Staff lists (candidates, team, audit): one labelled card per row.
+     Labels come from responsive-tables.js (data-label). */
+  table.cards, table.cards tbody { display: block; width: 100%; margin: 0; }
+  table.cards thead { display: none; }
+  table.cards tr {
+    display: block; padding: 12px 0; border-bottom: 1px solid var(--border);
+  }
+  table.cards tbody tr:last-child { border-bottom: 0; }
+  table.cards tbody tr:hover td { background: transparent; }
+  table.cards tbody tr:active { background: var(--brand-light); }
+  table.cards td {
+    display: block; padding: 5px 0; border: 0; font-size: 0.86rem; min-width: 0;
+    white-space: normal !important; overflow-wrap: anywhere; text-align: right;
+  }
+  table.cards td::after { content: ""; display: block; clear: both; }
+  table.cards td[data-label]:not(.cell-actions)::before {
+    content: attr(data-label); float: left; margin-right: 12px; padding-top: 2px; text-align: left;
+    color: var(--muted); font-size: 0.7rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  table.cards td:first-child { font-size: 0.95rem; text-align: left; padding-bottom: 8px; }
+  table.cards td:first-child::before { display: none; }
+  table.cards td select { max-width: 62%; margin: 0; }
+  table.cards td.cell-actions { text-align: left; padding-top: 8px; }
+  table.cards td.cell-actions .row-actions { justify-content: stretch; }
+  table.cards td.cell-actions .btn { flex: 1 1 auto; padding: 10px 14px; font-size: 0.8rem; }
+  table.cards .btn-small { min-height: 36px; }
+}
 @media (max-width: 640px) {
-  .sidebar-nav, .user-name { display: none; }
+  .user-name { display: none; }
+  /* Page links drop to a second row of tabs under the brand/logout bar */
+  .sidebar {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "brand foot" "nav nav"; row-gap: 10px; padding-bottom: 10px;
+  }
+  .sidebar-brand { grid-area: brand; min-width: 0; }
+  .sidebar-footer { grid-area: foot; }
+  .sidebar-footer .back-link { margin: 0 !important; max-width: 64px; line-height: 1.2; text-align: right; }
+  .sidebar-nav { grid-area: nav; gap: 6px; }
+  .sidebar-nav .nav-section, .nav-dot { display: none; }
+  .nav-item {
+    flex: 1 1 auto; justify-content: center; text-align: center; line-height: 1.2;
+    padding: 8px 10px; font-size: 0.82rem; border-radius: 20px; background: rgba(255,255,255,0.05);
+  }
+  body.themed .sidebar .nav-item:not(.active):hover { transform: none; }
+  .nav-item.active { background: rgba(167,139,250,0.3); }
   .avatar { width: 30px; height: 30px; }
   .logout-btn { padding: 7px 12px; }
 }
@@ -639,13 +709,16 @@ table .edit-input { min-width: 120px; margin: 0; padding: 6px 8px; font-size: 0.
   table.stack td:nth-child(4) { text-align: right; color: var(--muted); font-size: 0.78rem; }
   table.stack td:nth-child(5) { grid-column: 1 / -1; padding-left: 42px; }
 
+
   /* Detail page */
   .field-row { flex-wrap: wrap; gap: 4px 10px; }
   .field-row .fname { flex-basis: 100%; }
   .field-actions { flex-wrap: wrap; }
   .section-title { flex-wrap: wrap; gap: 10px; }
   .section-title.collapsible { margin: -18px -16px 12px; padding: 18px 16px 0; }
-  .section-title h3 { flex: 1 1 auto; }
+  .section-title h3 { flex: 1 1 0; min-width: 0; }
+  /* Finger-sized tap targets for the compact buttons */
+  .btn-small { min-height: 36px; padding: 8px 14px; }
   .section-title-actions { order: 3; flex: 1 1 100%; justify-content: flex-start; margin-left: 0; }
   .decision-bar .btn { flex: 1; padding: 12px; }
   .access-banner-head, .access-row { flex-wrap: wrap; }

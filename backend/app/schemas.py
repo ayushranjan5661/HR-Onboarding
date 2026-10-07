@@ -119,6 +119,7 @@ class CandidateListItem(BaseModel):
     created_at: datetime
     assigned_hr_id: Optional[int] = None
     assigned_hr_name: Optional[str] = None
+    assigned_hr_role: Optional[str] = None  # lets the list label an owner outside the viewer's scope
     manager_id: Optional[int] = None      # the owner's Manager (or the owner, if a Manager)
     manager_name: Optional[str] = None
 

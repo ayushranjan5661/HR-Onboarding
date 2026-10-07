@@ -1,0 +1,229 @@
+/* =====================================================================
+   Candidate detail page theme. Loaded only by candidate.html and scoped
+   under body.cand-page, so the shared style.css stays untouched.
+   ===================================================================== */
+body.cand-page {
+  --grad-hero: linear-gradient(120deg, #4338ca 0%, #6d28d9 45%, #db2777 100%);
+  --grad-btn: linear-gradient(135deg, #4f46e5, #7c3aed);
+}
+
+/* ---- Backdrop: soft colour washes behind the cards ---- */
+body.cand-page .main-area {
+  background:
+    radial-gradient(900px 420px at 100% -10%, rgba(124, 58, 237, 0.10), transparent 60%),
+    radial-gradient(700px 380px at -10% 30%, rgba(14, 165, 233, 0.08), transparent 60%),
+    radial-gradient(800px 400px at 60% 110%, rgba(236, 72, 153, 0.07), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* ---- Hero header ---- */
+body.cand-page .page-header {
+  position: relative;
+  overflow: hidden;
+  padding: 26px 28px;
+  border-radius: var(--radius-lg);
+  background: var(--grad-hero);
+  background-size: 200% 200%;
+  color: #fff;
+  box-shadow: 0 14px 36px rgba(79, 70, 229, 0.30);
+  animation: cp-hero-shift 12s ease-in-out infinite, cp-fade-up 0.5s ease both;
+}
+body.cand-page .page-header::before,
+body.cand-page .page-header::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+}
+body.cand-page .page-header::before { width: 220px; height: 220px; right: -60px; top: -110px; animation: cp-float 9s ease-in-out infinite; }
+body.cand-page .page-header::after  { width: 140px; height: 140px; right: 180px; bottom: -90px; animation: cp-float 11s ease-in-out infinite reverse; }
+body.cand-page .page-header h2 {
+  position: relative; z-index: 1;
+  color: #fff; font-size: 1.45rem; letter-spacing: -0.01em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+body.cand-page #candStage { position: relative; z-index: 1; }
+body.cand-page #candStage .badge {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(6px);
+}
+body.cand-page #candStage .badge-onboarding_complete,
+body.cand-page #candStage .badge-approved_for_bgv {
+  background: #fff; color: #4338ca; border-color: #fff;
+}
+body.cand-page #candStage .badge-rejected { background: #fee2e2; color: #b91c1c; border-color: #fee2e2; }
+
+/* ---- Cards: accent stripe + icon chip, per section ---- */
+body.cand-page .section-card {
+  --accent: #6366f1;
+  --accent-soft: rgba(99, 102, 241, 0.10);
+  position: relative;
+  border-color: transparent;
+  box-shadow: inset 4px 0 0 var(--accent), 0 4px 18px rgba(15, 23, 42, 0.06);
+  transition: transform var(--ease), box-shadow 220ms ease;
+  animation: cp-fade-up 0.45s ease both;
+}
+body.cand-page .section-card:hover {
+  transform: translateY(-2px);
+  box-shadow: inset 4px 0 0 var(--accent), 0 12px 30px rgba(15, 23, 42, 0.10);
+}
+
+#credentialsCard  { --accent: #6366f1; --accent-soft: rgba(99, 102, 241, 0.10); animation-delay: 0.05s; }
+#welcomeEmailCard { --accent: #0ea5e9; --accent-soft: rgba(14, 165, 233, 0.10); animation-delay: 0.10s; }
+#decisionCard     { --accent: #f59e0b; --accent-soft: rgba(245, 158, 11, 0.12); animation-delay: 0.15s; }
+#rejectedNotice   { --accent: #dc2626; --accent-soft: rgba(220, 38, 38, 0.08); }
+#insightsCard     { --accent: #8b5cf6; --accent-soft: rgba(139, 92, 246, 0.10); animation-delay: 0.15s; }
+#cifCard          { --accent: #14b8a6; --accent-soft: rgba(20, 184, 166, 0.10); animation-delay: 0.20s; }
+#followupForms > .section-card:nth-child(3n+1) { --accent: #10b981; --accent-soft: rgba(16, 185, 129, 0.10); }
+#followupForms > .section-card:nth-child(3n+2) { --accent: #ec4899; --accent-soft: rgba(236, 72, 153, 0.10); }
+#followupForms > .section-card:nth-child(3n)   { --accent: #22c55e; --accent-soft: rgba(34, 197, 94, 0.10); }
+#auditCard        { --accent: #64748b; --accent-soft: rgba(100, 116, 139, 0.10); }
+#zohoCard,
+#zohoCandCard     { --accent: #f97316; --accent-soft: rgba(249, 115, 22, 0.10); }
+
+body.cand-page .section-title h3 {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+body.cand-page .section-title h3::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 26px; height: 26px;
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 50%, #fff 0 3.5px, transparent 4px),
+    linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #fff));
+  box-shadow: 0 4px 10px var(--accent-soft), 0 0 0 4px var(--accent-soft);
+}
+
+/* Collapsible headers: tinted hover band + accent chevron */
+body.cand-page .section-title.collapsible {
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  transition: background 200ms ease;
+}
+body.cand-page .section-card.collapsed .section-title.collapsible { border-radius: var(--radius-md); padding-bottom: 24px; margin-bottom: -24px; }
+body.cand-page .section-title.collapsible:hover { background: var(--accent-soft); }
+body.cand-page .section-title.collapsible .chevron {
+  color: var(--accent);
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  transition: transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1), background 200ms ease;
+}
+body.cand-page .section-title.collapsible:hover .chevron { background: color-mix(in srgb, var(--accent) 22%, #fff); }
+
+/* Body reveal when a card is expanded */
+body.cand-page .section-card:not(.collapsed) > *:not(.section-title) {
+  animation: cp-reveal 0.32s ease both;
+}
+
+/* ---- Field rows ---- */
+body.cand-page .field-row {
+  padding-left: 10px; padding-right: 10px;
+  margin: 0 -10px;
+  border-radius: 8px;
+  transition: background 160ms ease;
+}
+body.cand-page .field-row:hover { background: var(--accent-soft); }
+body.cand-page .field-row .fname { color: color-mix(in srgb, var(--accent) 55%, #475569); }
+body.cand-page #credentialsBody code {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: #3730a3;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* ---- Buttons ---- */
+body.cand-page .btn { transition: transform 140ms ease, box-shadow 200ms ease, background 200ms ease, color 200ms ease, border-color 200ms ease; }
+body.cand-page .btn:hover:not(:disabled) { transform: translateY(-1px); }
+body.cand-page .btn:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+body.cand-page .btn-primary {
+  position: relative; overflow: hidden;
+  background: var(--grad-btn);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
+}
+body.cand-page .btn-primary:hover:not(:disabled) {
+  background: var(--grad-btn);
+  box-shadow: 0 10px 22px rgba(99, 102, 241, 0.45);
+}
+body.cand-page .btn-primary::after {
+  content: "";
+  position: absolute; top: 0; left: -75%;
+  width: 50%; height: 100%;
+  background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  transform: skewX(-20deg);
+  transition: left 0.6s ease;
+}
+body.cand-page .btn-primary:hover::after { left: 130%; }
+body.cand-page .btn-success { background: linear-gradient(135deg, #059669, #10b981); box-shadow: 0 6px 14px rgba(16, 185, 129, 0.30); }
+body.cand-page .btn-danger  { background: linear-gradient(135deg, #dc2626, #f43f5e); box-shadow: 0 6px 14px rgba(244, 63, 94, 0.28); }
+body.cand-page .section-card .btn-outline:hover {
+  border-color: var(--accent);
+  color: color-mix(in srgb, var(--accent) 75%, #0f172a);
+  background: var(--accent-soft);
+}
+
+/* ---- Status badges in card titles ---- */
+body.cand-page .section-title .badge { position: relative; }
+body.cand-page .section-title .badge-approved::before,
+body.cand-page .section-title .badge-submitted::before,
+body.cand-page .section-title .badge-under_review::before {
+  content: "";
+  display: inline-block;
+  width: 6px; height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: middle;
+  animation: cp-pulse 1.8s ease-out infinite;
+}
+
+/* ---- Inputs inside the page ---- */
+body.cand-page .section-card input:focus,
+body.cand-page .section-card select:focus,
+body.cand-page .section-card textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ---- Modals ---- */
+body.cand-page .modal-backdrop:not(.hidden) { animation: cp-fade 0.2s ease both; }
+body.cand-page .modal-backdrop:not(.hidden) .modal { animation: cp-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+/* ---- Sidebar polish ---- */
+body.cand-page .sidebar .nav-item.active { box-shadow: inset 3px 0 0 #a78bfa, 0 6px 18px rgba(124, 58, 237, 0.25); }
+body.cand-page .brand-mark { background: linear-gradient(135deg, #6366f1, #ec4899); }
+
+/* ---- Keyframes ---- */
+@keyframes cp-fade-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes cp-reveal  { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes cp-fade    { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cp-pop     { from { opacity: 0; transform: scale(0.94) translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes cp-hero-shift { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+@keyframes cp-float   { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(-14px, 10px); } }
+@keyframes cp-pulse {
+  0%   { box-shadow: 0 0 0 0 currentColor; }
+  70%  { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* ---- Mobile ---- */
+@media (max-width: 720px) {
+  body.cand-page .page-header { padding: 20px 18px; }
+  body.cand-page .page-header h2 { font-size: 1.15rem; word-break: break-word; }
+  body.cand-page .section-card.collapsed .section-title.collapsible { padding-bottom: 18px; margin-bottom: -18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.cand-page *, body.cand-page *::before, body.cand-page *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

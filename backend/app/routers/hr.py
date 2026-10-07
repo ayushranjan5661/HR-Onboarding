@@ -104,6 +104,7 @@ def _owner_columns(db: Session, candidates: list) -> dict[int, dict]:
         else:
             mgr = managers.get(owner.manager_id) if owner.manager_id else None
         out[oid] = {"assigned_hr_id": owner.id, "assigned_hr_name": owner.name,
+                    "assigned_hr_role": owner.role,
                     "manager_id": mgr.id if mgr else None,
                     "manager_name": mgr.name if mgr else None}
     return out
