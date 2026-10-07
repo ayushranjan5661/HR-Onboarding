@@ -15,7 +15,7 @@ async function initTeamPage(mode) {
   const BASE = isAdmin ? "/admin/staff" : "/manager/team";
   const root = document.getElementById("pageContent");
   const loginLink = new URL("../index.html", location.href).href;
-  const passwordHeader = isMaster ? "Password" : "First password";
+  const passwordHeader = "First password";
   let staff = [];
   let myId = null;
 
@@ -102,17 +102,9 @@ async function initTeamPage(mode) {
   function managers() { return staff.filter(s => s.role === "MANAGER"); }
   function hrs() { return staff.filter(s => s.role === "HR"); }
 
+  // Only the generated one-time password is ever shown, and only until the
+  // user replaces it — a password someone chose is never displayed.
   function passwordCell(s) {
-    if (isMaster) {
-      // The Master Admin sees the password in force. Accounts whose password
-      // was last set before it was recorded show nothing until a reset.
-      if (s.current_password) {
-        return `<span class="temp-pass">${escapeHtml(s.current_password)}</span>
-                <button type="button" class="cred-copy" title="Copy" data-copy="${escapeHtml(s.current_password)}">${COPY_ICON}</button>
-                ${s.must_reset_password ? `<div class="pending-tag">Not yet changed</div>` : ""}`;
-      }
-      return `<span class="muted-text" title="Set before passwords were recorded. Reset it to see it.">Not recorded</span>`;
-    }
     if (!s.must_reset_password) return `<span class="muted-text">Set by user</span>`;
     if (!s.temp_password) return `<span class="pending-tag">Change pending</span>`;
     return `<span class="temp-pass">${escapeHtml(s.temp_password)}</span>

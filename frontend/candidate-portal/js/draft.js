@@ -128,7 +128,9 @@ async function viewDraftDoc(doc) {
       return;
     }
     const blob = await res.blob();
-    renderInViewer(URL.createObjectURL(blob), doc.content_type || blob.type, doc.original_filename);
+    // Held in doc-viewer.js's _viewerUrl so closing the viewer revokes it.
+    _viewerUrl = URL.createObjectURL(blob);
+    renderInViewer(_viewerUrl, doc.content_type || blob.type, doc.original_filename);
   } catch (err) {
     body.innerHTML = `<div style="color:#b91c1c;padding:20px;">Could not load this file.</div>`;
   }

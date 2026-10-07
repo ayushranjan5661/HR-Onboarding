@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#3730a3">
 <title>HR Portal — Dashboard</title>
-<link rel="stylesheet" href="css/style.css?v=20261007a">
+<link rel="stylesheet" href="css/style.css?v=20261007c">
 <link rel="stylesheet" href="css/portal-theme.css?v=20261006s">
 </head>
 <body class="themed">
@@ -121,9 +121,8 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20261006a"></script>
+  <script src="../js/config.js?v=20261007b"></script>
   <script src="js/api.js?v=20260929c"></script>
-  <script src="../js/welcome-email.js?v=20261006n"></script>
   <script>
     requireAuth(["HR"]);   // Managers and the Super Admin have their own candidate pages
     document.getElementById("whoami").textContent = getName();
@@ -332,7 +331,6 @@
       const errorMsg = document.getElementById("inviteError");
       errorMsg.textContent = "";
       try {
-        const inviteName = document.getElementById("inviteName").value.trim();
         const data = await apiFetch("/hr/candidates", {
           method: "POST",
           body: JSON.stringify({
@@ -361,17 +359,11 @@
           <div class="cred-note">
             The password is temporary and shown only once &mdash; copy it before closing.
           </div>
-          <details class="cred-email" open style="margin:12px 0;">
-            <summary style="cursor:pointer;font-weight:600;margin-bottom:8px;">Welcome email draft</summary>
-            <div id="welcomeEmailBody"></div>
-          </details>
           <div class="cred-actions">
             <button type="button" class="btn btn-outline" onclick="copyAllCredentials(this)">Copy all details</button>
             <button type="button" class="btn btn-primary" onclick="closeInviteModal(); loadCandidates();">Done</button>
           </div>
         `;
-        renderWelcomeEmailDraft(document.getElementById("welcomeEmailBody"),
-                                { ...data, name: inviteName });
         box.querySelector(".cred-actions .btn-primary").focus();  // Enter = Done
         loadCandidates();
       } catch (err) {

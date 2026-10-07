@@ -239,10 +239,61 @@ function docActions(formType, fieldKey, doc, editing, fileAvailable = true) {
 // in the Aadhaar slot should be obvious from the checklist, not from opening
 // the file.
 const _DOC_CHECK_STYLE = {
-  MATCH:     { color: "#15803d", icon: "✅", label: "Document check" },
-  UNCERTAIN: { color: "#b45309", icon: "⚠️", label: "Document check — please verify" },
-  MISMATCH:  { color: "#b91c1c", icon: "❌", label: "Document check — wrong document?" },
+  MATCH:     { cls: "match",    icon: "✅", label: "Verified" },
+  UNCERTAIN: { cls: "uncertain", icon: "⚠️", label: "Please verify" },
+  MISMATCH:  { cls: "mismatch", icon: "❌", label: "Wrong document?" },
 };
+
+// Splits on `sep` only outside parentheses — evidence labels such as
+// "Class 10 (SSC / SSLC / …)" carry their own brackets.
+function _splitTopLevel(text, sep) {
+  const parts = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0 && text.startsWith(sep, i)) {
+      parts.push(text.slice(start, i));
+      start = i + sep.length;
+      i += sep.length - 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+// The stored note reads "Looks like X (score 85%: sign; sign; sign)." —
+// pull the signs out into chips and drop the inline score, which is shown
+// once as a pill instead. Brackets are matched by depth, not by the first
+// ")", since the signs can contain their own. Notes written before the
+// "; " separator used ", ".
+function _splitDocNote(note) {
+  let evidence = [];
+  let message = note;
+  const re = /\s*\(score\s+\d+%/g;
+  let m;
+  while ((m = re.exec(message))) {
+    let depth = 1, i = m.index + m[0].length;
+    for (; i < message.length && depth; i++) {
+      if (message[i] === "(") depth++;
+      else if (message[i] === ")") depth--;
+    }
+    const inner = message.slice(m.index + m[0].length, depth ? i : i - 1);
+    if (!evidence.length && inner.startsWith(":")) {
+      const signs = inner.slice(1).trim();
+      evidence = _splitTopLevel(signs, signs.includes("; ") ? "; " : ", ")
+        .map(s => s.replace(/^only\s+/, "").trim()).filter(Boolean);
+    }
+    message = message.slice(0, m.index) + message.slice(i);
+    re.lastIndex = m.index;
+  }
+  message = message
+    .replace(/\s*\(\d+%\)/g, "")
+    .replace(/\s+([.,])/g, "$1")
+    .trim();
+  return { message, evidence };
+}
 
 function docCheckBadge(doc) {
   const style = _DOC_CHECK_STYLE[doc.ai_status];
@@ -251,11 +302,21 @@ function docCheckBadge(doc) {
     // Say so rather than leave a gap HR might read as "fine".
     const why = doc.ai_status === "UNVERIFIED" ? escapeHtml(doc.ai_note || "Could not be checked.")
                                                 : "Not checked yet — use “Re-check documents”.";
-    return `<div style="color:#6b7280;font-size:0.8rem;margin-top:2px;">◌ Document check: ${why}</div>`;
+    return `<div class="doc-check doc-check--none">
+      <div class="doc-check__head"><span>◌</span><strong>Not checked</strong></div>
+      <div class="doc-check__msg">${why}</div></div>`;
   }
-  const conf = doc.ai_confidence != null ? ` (score ${doc.ai_confidence}%)` : "";
-  return `<div style="color:${style.color};font-size:0.8rem;margin-top:2px;">
-    ${style.icon} ${style.label}: ${escapeHtml(doc.ai_note || "")}${conf}</div>`;
+  const { message, evidence } = _splitDocNote(doc.ai_note || "");
+  const score = doc.ai_confidence != null
+    ? `<span class="doc-check__score">${doc.ai_confidence}% match</span>` : "";
+  const chips = evidence.length
+    ? `<div class="doc-check__found"><span class="doc-check__found-label">Found:</span>${
+        evidence.map(e => `<span class="doc-check__chip">${escapeHtml(e)}</span>`).join("")}</div>`
+    : "";
+  return `<div class="doc-check doc-check--${style.cls}">
+    <div class="doc-check__head"><span>${style.icon}</span><strong>${style.label}</strong>${score}</div>
+    ${message ? `<div class="doc-check__msg">${escapeHtml(message)}</div>` : ""}
+    ${chips}</div>`;
 }
 
 // Re-run the OCR check over every document this candidate has on record —
@@ -453,6 +514,10 @@ function showLoadError(message) {
 
 function render() {
   const c = currentData;
+  // showLoadError hides these; a later successful load must bring them back.
+  for (const id of ["credentialsCard", "cifCard", "auditCard"]) {
+    document.getElementById(id).classList.remove("hidden");
+  }
   document.getElementById("candName").textContent = `${c.name} — ${c.email}`;
   const typeLabel = c.candidate_type === "FRESHER" ? "Fresher / Trainee" : "Experienced";
   document.getElementById("candStage").innerHTML =
