@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#3730a3">
+<title>Referee Feedback Form</title>
+<link rel="stylesheet" href="../candidate-portal/css/style.css?v=20261007c">
+<style>
+  .form-card { max-width: 900px; }
+  .q-label { font-weight: 600; margin-bottom: 6px; display: block; }
+  .rating-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  .rating-table th, .rating-table td { padding: 8px 6px; text-align: center; border-bottom: 1px solid #e5e7eb; }
+  .rating-table th:first-child, .rating-table td:first-child { text-align: left; }
+  .rating-table input[type="radio"] { width: auto; margin: 0; }
+  .rating-hint { color: #6b7280; font-size: 0.8rem; }
+  .done-msg { display: none; text-align: center; padding: 30px 10px; }
+  @media (max-width: 520px) {
+    .rating-table th, .rating-table td { padding: 6px 3px; font-size: 0.85rem; }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">LevelShift — Reference Check</div>
+  </div>
+
+  <div class="container">
+    <div class="card form-card" style="margin-top:14px;">
+      <h2>Referee Feedback Form</h2>
+      <p style="color:#6b7280;font-size:0.85rem;">
+        Thank you for taking the time to share your feedback. Your responses are kept confidential
+        and used only by the LevelShift hiring team.
+      </p>
+
+      <form id="refereeForm">
+        <div class="form-section">
+          <h3>Feedback</h3>
+
+          <label class="q-label" for="q1">1. What is your relationship with the candidate? *</label>
+          <textarea id="q1" name="relationship_with_candidate" rows="3" maxlength="2000" required
+            placeholder="e.g. I was their reporting manager at ABC Ltd. from 2021 to 2024"></textarea>
+
+          <label class="q-label" for="q2" style="margin-top:14px;">2. What would you say are the candidate's strengths? *</label>
+          <textarea id="q2" name="candidate_strengths" rows="4" maxlength="3000" required></textarea>
+
+          <label class="q-label" for="q3" style="margin-top:14px;">3. What would you say are the candidate's development areas (e.g., weaknesses)? *</label>
+          <textarea id="q3" name="candidate_development_areas" rows="4" maxlength="3000" required></textarea>
+
+          <label class="q-label" style="margin-top:14px;">4. How do you rate the candidate's following attributes on a scale of 1-4 (4 being highest)? *</label>
+          <div class="rating-hint">1 = Poor &nbsp;·&nbsp; 2 = Fair &nbsp;·&nbsp; 3 = Good &nbsp;·&nbsp; 4 = Excellent</div>
+          <table class="rating-table">
+            <thead><tr><th>Attribute</th><th>1</th><th>2</th><th>3</th><th>4</th></tr></thead>
+            <tbody id="ratingRows"></tbody>
+          </table>
+
+          <label class="q-label" for="q5" style="margin-top:14px;">5. Any additional comments or information about the candidate that may be relevant?</label>
+          <textarea id="q5" name="additional_comments" rows="4" maxlength="3000"></textarea>
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <button class="btn btn-primary" type="submit" id="submitBtn" style="padding:10px 30px;">Submit Feedback</button>
+        </div>
+        <div class="error-msg" id="errorMsg"></div>
+      </form>
+
+      <div class="done-msg" id="doneMsg">
+        <h3>Thank you!</h3>
+        <p style="color:#6b7280;">Your feedback has been submitted. You can close this page now.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/config.js?v=20261007b"></script>
+  <script>
+    const ATTRIBUTES = [
+      ["rating_reliability", "Reliability"],
+      ["rating_punctuality", "Punctuality"],
+      ["rating_attendance", "Attendance"],
+      ["rating_professionalism", "Professionalism"],
+    ];
+
+    const tbody = document.getElementById("ratingRows");
+    ATTRIBUTES.forEach(([name, label]) => {
+      const tr = document.createElement("tr");
+      const th = document.createElement("td");
+      th.textContent = label;
+      tr.appendChild(th);
+      for (let v = 1; v <= 4; v++) {
+        const td = document.createElement("td");
+        const input = document.createElement("input");
+        Object.assign(input, { type: "radio", name, value: String(v), required: true });
+        input.setAttribute("aria-label", `${label} ${v}`);
+        td.appendChild(input);
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    });
+
+    const formEl = document.getElementById("refereeForm");
+    const errorMsg = document.getElementById("errorMsg");
+    const btn = document.getElementById("submitBtn");
+
+    // Each reference gets their own link: …/referee-form.html?token=…
+    const token = new URLSearchParams(location.search).get("token") || "";
+
+    function showDone(title, text) {
+      formEl.style.display = "none";
+      const done = document.getElementById("doneMsg");
+      done.querySelector("h3").textContent = title;
+      done.querySelector("p").textContent = text;
+      done.style.display = "block";
+    }
+
+    async function readError(res) {
+      const data = await res.json().catch(() => ({}));
+      return typeof data.detail === "string" ? data.detail : `Request failed (${res.status})`;
+    }
+
+    (async () => {
+      btn.disabled = true;
+      if (!token) throw new Error("This feedback link is incomplete. Please open the full link from your email.");
+      const res = await fetch(`${API_BASE}/referee/form?token=${encodeURIComponent(token)}`);
+      if (!res.ok) throw new Error(await readError(res));
+      const info = await res.json();
+      if (info.submitted) {
+        showDone("Feedback already submitted", "Thank you — we have already received your feedback for this candidate.");
+        return;
+      }
+      btn.disabled = false;
+    })().catch(err => { errorMsg.textContent = err.message; });
+
+    formEl.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorMsg.textContent = "";
+      btn.disabled = true;
+      try {
+        const body = Object.fromEntries(new FormData(formEl));
+        ATTRIBUTES.forEach(([name]) => { body[name] = Number(body[name]); });
+        body.token = token;
+        const res = await fetch(`${API_BASE}/referee/feedback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error(await readError(res));
+        showDone("Thank you!", "Your feedback has been submitted. You can close this page now.");
+      } catch (err) {
+        errorMsg.textContent = err.message;
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

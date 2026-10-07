@@ -147,7 +147,7 @@ function _referenceTemplate(n) {
   const ref = (data, key) => ((data.ref_check_details || {})[`ref${n}_${key}`] || "").trim();
   const aiFor = (data) => ((data.ref_ai || {})[`ref${n}`]) || {};
   return {
-    label: `Reference ${n} — Reference Check Questions`,
+    label: `Referee ${n} — Reference Check Questions`,
     // Shown to HR above the draft, never put in the mail.
     note: (data) => {
       if (!((data.ref_check_details || {}).message_to_hiring_team || "").trim()) return "";
@@ -168,6 +168,7 @@ function _referenceTemplate(n) {
       const refName = ref(data, "name") || "Sir/Madam";
       const title = ref(data, "title");
       const position = (d.position_applied_for || "").trim() || "a position";
+      const formUrl = ((data.referee_feedback || []).find(r => r.ref_index === n) || {}).form_url || "";
       return [
         `Dear ${refName},`,
         ``,
@@ -175,8 +176,10 @@ function _referenceTemplate(n) {
         ``,
         `${name} has applied for the role of ${position} at LevelShift and has listed you`
           + `${title ? ` (${title})` : ""} as a professional reference. We would be grateful if you`
-          + ` could take a few minutes to share your feedback by replying to this email with your`
-          + ` answers to the questions below.`,
+          + ` could take a few minutes to share your feedback`
+          + (formUrl ? ` using the secure form below.` : ` by replying to this email with your`
+                       + ` answers to the questions below.`),
+        ...(formUrl ? [``, formUrl] : []),
         ``,
         // Practical points from the candidate's "Message to Hiring Team",
         // as read by the AI (see backend agents/reference_email.py).
@@ -190,24 +193,28 @@ function _referenceTemplate(n) {
           ``,
         ] : []),
         ...(aiFor(data).mail_note ? [aiFor(data).mail_note, ``] : []),
-        `1. What is your relationship with the candidate?`,
-        `   Answer: `,
-        ``,
-        `2. What would you say are the candidate's strengths?`,
-        `   Answer: `,
-        ``,
-        `3. What would you say are the candidate's development areas (e.g., weaknesses)?`,
-        `   Answer: `,
-        ``,
-        `4. How do you rate the candidate's following attributes on a scale of 1-4 (4 being highest)?`,
-        `   - Reliability: `,
-        `   - Punctuality: `,
-        `   - Attendance: `,
-        `   - Professionalism: `,
-        ``,
-        `5. Any additional comments or information about the candidate that may be relevant?`,
-        `   Answer: `,
-        ``,
+        // With a form link the questions live on the form; without one the
+        // reference answers them in their reply.
+        ...(formUrl ? [] : [
+          `1. What is your relationship with the candidate?`,
+          `   Answer: `,
+          ``,
+          `2. What would you say are the candidate's strengths?`,
+          `   Answer: `,
+          ``,
+          `3. What would you say are the candidate's development areas (e.g., weaknesses)?`,
+          `   Answer: `,
+          ``,
+          `4. How do you rate the candidate's following attributes on a scale of 1-4 (4 being highest)?`,
+          `   - Reliability: `,
+          `   - Punctuality: `,
+          `   - Attendance: `,
+          `   - Professionalism: `,
+          ``,
+          `5. Any additional comments or information about the candidate that may be relevant?`,
+          `   Answer: `,
+          ``,
+        ]),
         `Your response will be kept confidential and used only for the purpose of this hiring decision.`,
         ``,
         `Thank you for your time and support.`,

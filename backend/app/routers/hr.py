@@ -13,7 +13,7 @@ from app.config import settings
 from app.database import get_db
 from app.deps import get_current_staff, get_current_staff_allow_reset
 from app import edit_access
-from app import scope, staff_service
+from app import referee_links, scope, staff_service
 from app import date_format
 from app.date_format import normalize_field
 from app.form_definitions import (BGV_FIELDS, BGV_FILE_FIELDS, BGV_TABLE_SECTIONS,
@@ -342,7 +342,7 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
             joinedload(Candidate.profile), joinedload(Candidate.submissions),
             joinedload(Candidate.documents), joinedload(Candidate.cif_details),
             joinedload(Candidate.bgv_details), joinedload(Candidate.doc_details),
-            joinedload(Candidate.ref_check_details),
+            joinedload(Candidate.ref_check_details), joinedload(Candidate.referee_feedback),
             joinedload(Candidate.education), joinedload(Candidate.employment),
             joinedload(Candidate.references),
             joinedload(Candidate.bgv_addresses), joinedload(Candidate.bgv_education),
@@ -378,6 +378,7 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         doc_details=_row_dict(candidate.doc_details, DOC_FIELDS, include_id=False) if candidate.doc_details else None,
         ref_check_details=(_row_dict(candidate.ref_check_details, REF_CHECK_FIELDS, include_id=False)
                            if candidate.ref_check_details else None),
+        referee_feedback=referee_links.feedback_for_hr(candidate),
         education={
             section: [_row_dict(e, EDUCATION_COLUMNS) for e in candidate.education if e.section == section]
             for section in ("UG_PG", "12TH", "10TH")

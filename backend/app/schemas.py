@@ -308,6 +308,8 @@ class CandidateDetailOut(BaseModel):
     bgv_details: Optional[dict[str, Any]] = None
     doc_details: Optional[dict[str, Any]] = None
     ref_check_details: Optional[dict[str, Any]] = None
+    # One entry per named reference: its form link and, once given, the answers.
+    referee_feedback: list[dict[str, Any]] = []
     education: dict[str, list[dict[str, Any]]] = {}
     employment: list[dict[str, Any]] = []
     references: list[dict[str, Any]] = []

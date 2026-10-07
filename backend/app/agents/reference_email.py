@@ -36,13 +36,14 @@ Rules:
 - If the message is empty, gibberish, or irrelevant to contacting the
   references, set "meaningful" to false and leave every note empty.
 - "mail_note": at most 2 short, polite sentences to include in the email TO
-  that reference, only for practical points that concern them (best time or
-  way to reach them, language, how they know the candidate, a time constraint).
-  Never include anything negative, private, or about the other reference.
+  that reference, only for practical points that concern them (language, how
+  they know the candidate). Never include anything negative, private, or about
+  the other reference. NEVER mention when or how we will contact them - no
+  days, hours, time windows or call preferences (e.g. NOT "We will reach you
+  on weekdays between 9:00 AM and 5:00 PM"); put those in "hr_note" instead.
   Write it addressed to the reference ("you"), as a sentence inside the email
-  body - no greeting, do not start with their name. Example: "We understand
-  you prefer calls after 5 pm, so we will reach out accordingly."
-  Empty string if nothing applies.
+  body - no greeting, do not start with their name. Empty string if nothing
+  applies.
 - "identifiers": details the candidate gave so the reference can recognise
   them (college registration / roll / enrollment number, employee ID, batch,
   department, project name, ...). One {{"label", "value"}} per item, label in
@@ -50,7 +51,7 @@ Rules:
   Copy values exactly. Do NOT repeat these in mail_note. Empty list if none.
 - "hr_note": at most 2 short sentences for HR only, for anything HR must act on
   before sending (e.g. do not contact yet, reference is on leave, contact
-  details changed). Empty string if nothing applies.
+  details changed, best days/hours to call). Empty string if nothing applies.
 - Decide per reference: a point may apply to one reference, both, or neither.
 
 Candidate name: {candidate_name}
@@ -70,6 +71,13 @@ Return ONLY this JSON object:
   "ref2": {{"mail_note": "...", "identifiers": [], "hr_note": "..."}}}}
 """
 
+# A sentence about when/how to contact the reference — kept out of the mail.
+_TIMING = re.compile(
+    r"\b(weekdays?|weekends?|(mon|tues|wednes|thurs|fri|satur|sun)days?)\b"
+    r"|\b\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)"
+    r"|\b(morning|afternoon|evening|office hours|working hours|business hours)\b"
+    r"|\breach (you|out)\b|\bcontact you\b|\bcall(s)? (you|after|before|between)\b",
+    re.I)
 
 
 def _clean(value, limit: int) -> str:
@@ -165,9 +173,17 @@ def generate(details) -> dict:
             sentences = re.split(r"(?<=[.!?])\s+", note)
             note = " ".join(s for s in sentences
                             if not any(i["value"] in s for i in ids)).strip()
+        # Contact timing ("weekdays between 9 AM and 5 PM") is for HR, never
+        # the mail: move any such sentence the model let through to hr_note.
+        hr_note = _clean(r.get("hr_note"), 400)
+        timing = [s for s in re.split(r"(?<=[.!?])\s+", note) if _TIMING.search(s)]
+        if timing:
+            note = " ".join(s for s in re.split(r"(?<=[.!?])\s+", note)
+                            if not _TIMING.search(s)).strip()
+            hr_note = _clean(" ".join([hr_note, *timing]), 400)
         return {"mail_note": note,
                 "identifiers": ids,
-                "hr_note": _clean(r.get("hr_note"), 400)}
+                "hr_note": hr_note}
 
     return _result("llm", meaningful=meaningful,
                    summary=_clean(raw.get("summary"), 300) if meaningful else "",
