@@ -245,15 +245,6 @@ async function initCandidatesPage(mode) {
         note: "The password is temporary and shown only once — copy it before closing.",
         onDone: () => { closeModal("inviteModal"); load(); },
       });
-      // Auto-drafted welcome email, just above the Done button.
-      const cred = document.getElementById("inviteCred");
-      const draft = document.createElement("details");
-      draft.open = true;
-      draft.style.margin = "12px 0";
-      draft.innerHTML = `<summary style="cursor:pointer;font-weight:600;margin-bottom:8px;">Welcome email draft</summary><div></div>`;
-      cred.insertBefore(draft, cred.querySelector(".cred-actions"));
-      renderWelcomeEmailDraft(draft.querySelector("div"),
-        { ...data, name: document.getElementById("inviteName").value.trim() });
       load();
     } catch (err) {
       setError("inviteError", err.message);

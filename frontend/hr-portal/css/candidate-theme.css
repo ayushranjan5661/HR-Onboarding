@@ -227,3 +227,30 @@ body.cand-page .brand-mark { background: linear-gradient(135deg, #6366f1, #ec489
     transition: none !important;
   }
 }
+
+/* ---- OCR document-check badge (under each uploaded file) ---- */
+.doc-check {
+  --dc: #6b7280; --dc-soft: rgba(107, 114, 128, 0.08);
+  margin-top: 6px; padding: 8px 10px;
+  border-left: 3px solid var(--dc); border-radius: 6px;
+  background: var(--dc-soft);
+  font-size: 0.8rem; line-height: 1.45; color: #374151;
+}
+.doc-check--match     { --dc: #15803d; --dc-soft: rgba(21, 128, 61, 0.07); }
+.doc-check--uncertain { --dc: #b45309; --dc-soft: rgba(180, 83, 9, 0.08); }
+.doc-check--mismatch  { --dc: #b91c1c; --dc-soft: rgba(185, 28, 28, 0.08); }
+.doc-check__head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.doc-check__head strong { color: var(--dc); font-weight: 600; }
+.doc-check__score {
+  margin-left: auto; padding: 1px 8px; border-radius: 999px;
+  background: #fff; border: 1px solid var(--dc); color: var(--dc);
+  font-size: 0.72rem; font-weight: 600; white-space: nowrap;
+}
+.doc-check__msg { margin-top: 2px; }
+.doc-check__found { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 5px; }
+.doc-check__found-label { color: #6b7280; margin-right: 2px; }
+.doc-check__chip {
+  padding: 1px 7px; border-radius: 999px;
+  background: #fff; border: 1px solid #e5e7eb; color: #4b5563;
+  font-size: 0.72rem;
+}
