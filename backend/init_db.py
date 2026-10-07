@@ -52,6 +52,14 @@ def _sync_columns(conn):
 
 
 def main():
+    # New FormType values must exist in the Postgres enum before any table
+    # uses them. ADD VALUE cannot share a transaction with its first use, so
+    # it runs on its own autocommit connection.
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        exists = conn.execute(text("SELECT 1 FROM pg_type WHERE typname = 'formtype'")).first()
+        if exists:
+            conn.execute(text("ALTER TYPE formtype ADD VALUE IF NOT EXISTS 'REFERENCE_CHECK'"))
+
     Base.metadata.create_all(bind=engine)
 
     # Lightweight migrations for DBs created on earlier versions.
@@ -150,6 +158,15 @@ def main():
 
         # Bring every existing table up to date with its model.
         _sync_columns(conn)
+
+        # Reference Check sits between Document Collection and BGV. Candidates
+        # approved before it existed get it as an unsent (LOCKED) form.
+        conn.execute(text(
+            "INSERT INTO form_submissions (candidate_id, form_type, status) "
+            "SELECT d.candidate_id, 'REFERENCE_CHECK', 'LOCKED' FROM form_submissions d "
+            "WHERE d.form_type = 'DOCUMENT_COLLECTION' AND NOT EXISTS ("
+            "  SELECT 1 FROM form_submissions r WHERE r.candidate_id = d.candidate_id "
+            "  AND r.form_type = 'REFERENCE_CHECK')"))
 
     db = SessionLocal()
     try:

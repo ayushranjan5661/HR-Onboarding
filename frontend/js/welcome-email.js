@@ -96,14 +96,141 @@ const EMAIL_TEMPLATES = {
       ];
     },
   },
+  REFERENCE_CHECK: {
+    label: "Reference Check Form",
+    subject: "LevelShift - Complete Your Reference Check Form",
+    // Mirrors HR's approved Reference Check mail.
+    body: (data, name) => {
+      const expiry = _fmtExpiry(data.login_link_expires_at);
+      return [
+        `Dear ${name},`,
+        ``,
+        `Greetings from LevelShift!`,
+        ``,
+        `Thank you for submitting your documents.`,
+        ``,
+        `As the next step in the selection process, please complete the Reference Check Form using the link below:`,
+        ``,
+        `${data.login_url || "-"}`,
+        ``,
+        ...(expiry ? [`This link expires on ${expiry}.`, ``] : []),
+        `You will be asked to provide details of two professional references. Please keep the following information ready for each reference:`,
+        ``,
+        `- Full Name`,
+        `- Title / Designation`,
+        `- Official Email ID`,
+        `- Phone Number`,
+        ``,
+        `Please make sure that:`,
+        ``,
+        `- The references are people you have worked with professionally, such as a reporting manager, team lead, or college authority.`,
+        `- The contact details provided are correct and up to date.`,
+        `- Your references are informed that our team may contact them.`,
+        ``,
+        `Please complete and submit the form at the earliest.`,
+        ``,
+        `If you face any issues, please reply to this email and our team will assist you.`,
+        ``,
+        `Regards,`,
+        `HR Team`,
+        `LevelShift`,
+      ];
+    },
+  },
+  REFERENCE_1: _referenceTemplate(1),
+  REFERENCE_2: _referenceTemplate(2),
 };
+
+// Mail to one of the candidate's references, built from what the candidate
+// entered on their Reference Check form (name, title, mail ID, position).
+function _referenceTemplate(n) {
+  const ref = (data, key) => ((data.ref_check_details || {})[`ref${n}_${key}`] || "").trim();
+  const aiFor = (data) => ((data.ref_ai || {})[`ref${n}`]) || {};
+  return {
+    label: `Reference ${n} — Reference Check Questions`,
+    // Shown to HR above the draft, never put in the mail.
+    note: (data) => {
+      if (!((data.ref_check_details || {}).message_to_hiring_team || "").trim()) return "";
+      if (data.ref_ai_loading) return "AI is reading the candidate's message to the hiring team…";
+      const ai = data.ref_ai;
+      if (!ai) return "";
+      if (ai.error) return `AI could not read the candidate's message (${ai.error}) — standard mail shown.`;
+      if (!ai.meaningful) return "AI checked the candidate's message: nothing in it affects this mail.";
+      return ["AI: " + (ai.summary || "Mail adapted to the candidate's message."),
+              aiFor(data).hr_note ? "For HR: " + aiFor(data).hr_note : ""].filter(Boolean).join(" ");
+    },
+    to: (data) => ref(data, "email"),
+    // Use the candidate's name as they entered it on the Reference Check form.
+    subject: (data, name) => `Request for Candidate Reference Feedback – ${(data.ref_check_details || {}).candidate_name || name}`,
+    body: (data, accountName) => {
+      const d = data.ref_check_details || {};
+      const name = (d.candidate_name || "").trim() || accountName;
+      const refName = ref(data, "name") || "Sir/Madam";
+      const title = ref(data, "title");
+      const position = (d.position_applied_for || "").trim() || "a position";
+      return [
+        `Dear ${refName},`,
+        ``,
+        `Greetings from LevelShift!`,
+        ``,
+        `${name} has applied for the role of ${position} at LevelShift and has listed you`
+          + `${title ? ` (${title})` : ""} as a professional reference. We would be grateful if you`
+          + ` could take a few minutes to share your feedback by replying to this email with your`
+          + ` answers to the questions below.`,
+        ``,
+        // Practical points from the candidate's "Message to Hiring Team",
+        // as read by the AI (see backend agents/reference_email.py).
+        // Details the candidate asked us to share so the reference can
+        // place them (registration no., employee ID, ...).
+        ...((aiFor(data).identifiers || []).length ? [
+          `Candidate details for your reference:`,
+          `- Name: ${name}`,
+          `- Position Applied For: ${position}`,
+          ...aiFor(data).identifiers.map(i => `- ${i.label}: ${i.value}`),
+          ``,
+        ] : []),
+        ...(aiFor(data).mail_note ? [aiFor(data).mail_note, ``] : []),
+        `1. What is your relationship with the candidate?`,
+        `   Answer: `,
+        ``,
+        `2. What would you say are the candidate's strengths?`,
+        `   Answer: `,
+        ``,
+        `3. What would you say are the candidate's development areas (e.g., weaknesses)?`,
+        `   Answer: `,
+        ``,
+        `4. How do you rate the candidate's following attributes on a scale of 1-4 (4 being highest)?`,
+        `   - Reliability: `,
+        `   - Punctuality: `,
+        `   - Attendance: `,
+        `   - Professionalism: `,
+        ``,
+        `5. Any additional comments or information about the candidate that may be relevant?`,
+        `   Answer: `,
+        ``,
+        `Your response will be kept confidential and used only for the purpose of this hiring decision.`,
+        ``,
+        `Thank you for your time and support.`,
+        ``,
+        `Regards,`,
+        `HR Team`,
+        `LevelShift`,
+      ];
+    },
+  };
+}
 
 // data: { name, email, candidate_type, temp_password, login_url, login_page_url, login_link_expires_at }
 function buildWelcomeEmail(data, template = "CIF") {
   const t = EMAIL_TEMPLATES[template] || EMAIL_TEMPLATES.CIF;
   const name = (data.name || "").trim() || "Candidate";
   const lines = t.body(data, name);
-  return { to: data.email, subject: t.subject, body: lines.join("\n") };
+  return {
+    to: t.to ? t.to(data) : data.email,
+    subject: typeof t.subject === "function" ? t.subject(data, name) : t.subject,
+    body: lines.join("\n"),
+    note: t.note ? t.note(data) : "",
+  };
 }
 
 // Renders an editable draft (subject + body) with Copy / Open-in-mail actions.
@@ -140,7 +267,8 @@ function renderWelcomeEmailDraft(container, data, opts = {}) {
           ${templates.map(k => `<option value="${k}"${k === current ? " selected" : ""}>${esc(EMAIL_TEMPLATES[k].label)}</option>`).join("")}
         </select>
       </label>` : ""}
-      <div style="font-size:0.85rem;color:#6b7280;overflow-wrap:anywhere;">To: <strong style="color:#111827;">${esc(mail.to)}</strong></div>
+      <div class="we-note" style="${mail.note ? "" : "display:none;"}font-size:0.84rem;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 10px;">${esc(mail.note)}</div>
+      <div style="font-size:0.85rem;color:#6b7280;overflow-wrap:anywhere;">To: <strong class="we-to" style="color:#111827;">${esc(mail.to)}</strong></div>
       <label style="font-size:0.8rem;font-weight:600;color:#374151;">Subject
         <input type="text" class="we-subject" style="${inputStyle}margin-top:4px;" value="${esc(mail.subject)}">
       </label>
@@ -159,6 +287,13 @@ function renderWelcomeEmailDraft(container, data, opts = {}) {
   if (picker) picker.addEventListener("change", () => {
     current = picker.value;
     const m = buildWelcomeEmail(data, current);
+    // Reference mails go to the reference, not the candidate.
+    mail.to = m.to;
+    container.querySelector(".we-to").textContent = m.to;
+    container.dataset.weTo = String(m.to);
+    const noteEl = container.querySelector(".we-note");
+    noteEl.textContent = m.note || "";
+    noteEl.style.display = m.note ? "" : "none";
     subj.value = m.subject;
     body.value = m.body;
     container.dataset.weTemplate = current;

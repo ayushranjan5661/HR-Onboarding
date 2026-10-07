@@ -10,22 +10,25 @@ let currentData = null;
 let editAccess = { submitted: {}, grantable: {}, permissions: [] };
 // Whole-form edit mode, tracked per card and limited to one card at a time.
 // PROFILE fields are shown inside the CIF card, so they follow CIF's mode.
-const editModes = { CIF: false, DOCUMENT_COLLECTION: false, BGV: false };
+const editModes = { CIF: false, DOCUMENT_COLLECTION: false, REFERENCE_CHECK: false, BGV: false };
 
 const FORM_TITLES = {
   CIF: "Candidate Details (CIF)",
   DOCUMENT_COLLECTION: "Document Collection Form",
+  REFERENCE_CHECK: "Reference Check Form",
   BGV: "Background Verification Form",
 };
 // The CIF card is static markup; the follow-up cards are built by render().
-const FORM_CARD_ID = { CIF: "cifCard", DOCUMENT_COLLECTION: "card-DOCUMENT_COLLECTION", BGV: "card-BGV" };
-const FORM_DOCS_ID = { CIF: "cifDocs", DOCUMENT_COLLECTION: "docs-DOCUMENT_COLLECTION", BGV: "docs-BGV" };
+const FORM_CARD_ID = { CIF: "cifCard", DOCUMENT_COLLECTION: "card-DOCUMENT_COLLECTION",
+                       REFERENCE_CHECK: "card-REFERENCE_CHECK", BGV: "card-BGV" };
+const FORM_DOCS_ID = { CIF: "cifDocs", DOCUMENT_COLLECTION: "docs-DOCUMENT_COLLECTION",
+                       REFERENCE_CHECK: "docs-REFERENCE_CHECK", BGV: "docs-BGV" };
 
 // Values long enough that a single-line input is unusable.
 const LONG_TEXT_FIELDS = new Set([
   "current_address", "permanent_address", "skills_technologies",
   "technical_certifications", "understanding_of_levelshift", "aspirations",
-  "other_offers", "declaration_place",
+  "other_offers", "declaration_place", "message_to_hiring_team",
 ]);
 
 function badge(stage) {
@@ -120,7 +123,7 @@ function showError(message) {
 // a whole (one Edit button in the card header) rather than field by field, so
 // a row is either read-only text or — with `opts.editing` — an input.
 function fieldRow(form, field, value, opts = {}) {
-  const { editing = false } = opts;
+  const { editing = false, label = labelFor(field) } = opts;
   const hasValue = value !== null && value !== undefined && value !== "";
   if (editing) {
     const v = escapeHtml(String(value ?? ""));
@@ -128,7 +131,7 @@ function fieldRow(form, field, value, opts = {}) {
       + (isDateField(field) ? " data-date" : "");
     return `
       <div class="field-row">
-        <div class="fname">${labelFor(field)}</div>
+        <div class="fname">${escapeHtml(label)}</div>
         <div class="fval">${LONG_TEXT_FIELDS.has(field)
           ? `<textarea rows="2" ${attrs}>${v}</textarea>`
           : `<input type="text" ${attrs} value="${v}">`}</div>
@@ -136,7 +139,7 @@ function fieldRow(form, field, value, opts = {}) {
   }
   return `
     <div class="field-row">
-      <div class="fname">${labelFor(field)}</div>
+      <div class="fname">${escapeHtml(label)}</div>
       <div class="fval ${hasValue ? "" : "empty"}">${hasValue ? escapeHtml(String(value)) : "Not provided"}</div>
     </div>`;
 }
@@ -145,6 +148,23 @@ function fieldRows(form, fieldList, data, opts = {}) {
   if (!fieldList.length) return "";   // e.g. Document Collection — uploads only
   if (!data) return "<p style='color:#6b7280'>Not submitted yet.</p>";
   return fieldList.map(f => fieldRow(form, f, data[f], opts)).join("");
+}
+
+// Reference Check: candidate details, then each reference in its own box.
+const REF_BOX_LABELS = { name: "Reference Name", title: "Title", email: "Reference Mail ID",
+                         phone: "Reference Phone No." };
+function refCheckRows(data, opts = {}) {
+  if (!data) return "<p style='color:#6b7280'>Not submitted yet.</p>";
+  const rows = list => list.map(f => fieldRow("REFERENCE_CHECK", f, data[f], opts)).join("");
+  const box = n => `
+    <div class="ref-box">
+      <h4>Reference Detail ${n}</h4>
+      ${Object.entries(REF_BOX_LABELS).map(([k, label]) =>
+        fieldRow("REFERENCE_CHECK", `ref${n}_${k}`, data[`ref${n}_${k}`], { ...opts, label })).join("")}
+    </div>`;
+  return rows(["candidate_name", "reference_check_date", "position_applied_for"])
+    + box(1) + box(2)
+    + rows(["message_to_hiring_team", "declaration_accepted"]);
 }
 
 // Repeating-row table (education / employment / references). In edit mode every
@@ -548,11 +568,29 @@ function render() {
   document.getElementById("welcomeEmailCard").classList.toggle("hidden", c.stage === "REJECTED");
   // Document Collection opens only once the CIF is approved (see sendGate).
   const docsOpen = c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE";
+  // Reference Check opens only once the documents are approved (see sendGate).
+  const docSub = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
+  const refsOpen = docsOpen && docSub?.status === "APPROVED";
   applyEmailDraftVisibility();
-  renderWelcomeEmailDraft(document.getElementById("welcomeEmailBody"), c, {
-    templates: docsOpen ? ["CIF", "DOCUMENT_COLLECTION"] : ["CIF"],
-    template: c.stage === "APPROVED_FOR_BGV" ? "DOCUMENT_COLLECTION" : "CIF",
-  });
+  const emailOpts = {
+    templates: ["CIF", ...(docsOpen ? ["DOCUMENT_COLLECTION"] : []), ...(refsOpen ? ["REFERENCE_CHECK"] : []),
+                // Once the candidate has named their references, HR can mail each one.
+                ...[1, 2].filter(n => (c.ref_check_details || {})[`ref${n}_email`])
+                         .map(n => `REFERENCE_${n}`)],
+    template: refsOpen && c.stage === "APPROVED_FOR_BGV" ? "REFERENCE_CHECK"
+      : c.stage === "APPROVED_FOR_BGV" ? "DOCUMENT_COLLECTION" : "CIF",
+  };
+  const drawEmail = () => {
+    const box = document.getElementById("welcomeEmailBody");
+    c.ref_ai = refAi.result;
+    c.ref_ai_loading = refAi.loading;
+    // Keep whichever template HR is looking at when the AI answer arrives.
+    const shown = box.dataset.weTemplate;
+    renderWelcomeEmailDraft(box, c, emailOpts.templates.includes(shown)
+      ? { ...emailOpts, template: shown } : emailOpts);
+  };
+  drawEmail();
+  loadReferenceAi(c, drawEmail);
 
   // Decision card only when awaiting the final-interview decision
   document.getElementById("decisionCard").classList.toggle("hidden", c.stage !== "CIF_SUBMITTED");
@@ -606,9 +644,10 @@ function render() {
 
   // ---- Follow-up forms (BGV / Document Collection) ----
   document.getElementById("followupForms").innerHTML = "";
-  // Sequential order: Document Collection is reviewed first, then BGV.
+  // Sequential order: Document Collection, then Reference Check, then BGV.
   const followupConfig = {
     DOCUMENT_COLLECTION: { title: FORM_TITLES.DOCUMENT_COLLECTION, fields: DOC_FIELDS, data: c.doc_details },
+    REFERENCE_CHECK: { title: FORM_TITLES.REFERENCE_CHECK, fields: REF_CHECK_FIELDS, data: c.ref_check_details },
     BGV: { title: FORM_TITLES.BGV, fields: BGV_FIELDS, data: c.bgv_details },
   };
   Object.entries(followupConfig).forEach(([type, cfg]) => {
@@ -653,7 +692,8 @@ function render() {
         <span class="chevron">&#9660;</span>
       </div>
       ${!submitted ? "<p style='color:#6b7280'>Waiting for candidate to submit.</p>" :
-        fieldRows(type, cfg.fields, cfg.data, { editing })
+        (type === "REFERENCE_CHECK" ? refCheckRows(cfg.data, { editing })
+                                    : fieldRows(type, cfg.fields, cfg.data, { editing }))
           + (type === "BGV" ? bgvTables(c, { editing, showDelete: editing }) : "")
           + `<div id="${FORM_DOCS_ID[type]}">${renderDocs(c.documents, type, { editing })}</div>`}
     `;
@@ -783,6 +823,26 @@ async function regenerateLink() {
   }
 }
 
+// The AI reading of the candidate's "Message to Hiring Team", which tailors
+// the two reference mails. Fetched once per message, not on every re-render.
+const refAi = { message: null, loading: false, result: null };
+
+async function loadReferenceAi(c, redraw) {
+  const message = ((c.ref_check_details || {}).message_to_hiring_team || "").trim();
+  if (!message || refAi.message === message) return;
+  refAi.message = message;
+  refAi.loading = true;
+  refAi.result = null;
+  redraw();
+  try {
+    refAi.result = await apiFetch(`/hr/candidates/${candidateId}/reference-email-ai`);
+  } catch (err) {
+    refAi.result = { error: err.message };
+  }
+  refAi.loading = false;
+  redraw();
+}
+
 // Email draft card can be collapsed; the choice is remembered per browser.
 const EMAIL_DRAFT_HIDDEN_KEY = "hr.emailDraftHidden";
 
@@ -833,11 +893,18 @@ function sendGate(form, c) {
   if (form === "DOCUMENT_COLLECTION" && (c.stage === "INVITED" || c.stage === "CIF_SUBMITTED")) {
     return { canSend: false, reason: "Available once you approve their CIF above." };
   }
-  if (form === "BGV") {
+  if (form === "REFERENCE_CHECK") {
     const docs = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
     if (!docs || docs.status !== "APPROVED") {
       return { canSend: false,
                reason: "Available once you approve their Document Collection form above." };
+    }
+  }
+  if (form === "BGV") {
+    const refs = c.submissions.find(s => s.form_type === "REFERENCE_CHECK");
+    if (!refs || refs.status !== "APPROVED") {
+      return { canSend: false,
+               reason: "Available once you approve their Reference Check form above." };
     }
   }
   return { canSend: true, reason: "" };

@@ -169,6 +169,17 @@ BGV_TABLE_SECTIONS = {
 
 DOC_FIELDS = []  # the Document Collection form is uploads only — no text fields
 
+# --- Reference Check (after Document Collection, before BGV) ---------------
+REF_CHECK_FIELDS = [
+    "candidate_name", "reference_check_date", "position_applied_for",
+    "ref1_name", "ref1_title", "ref1_email", "ref1_phone",
+    "ref2_name", "ref2_title", "ref2_email", "ref2_phone",
+    "message_to_hiring_team",
+    "declaration_accepted",
+]
+REF_CHECK_OPTIONAL = {"message_to_hiring_team"}
+REF_CHECK_FILE_FIELDS = ["ref_signature"]   # mandatory
+
 # --- Document Collection: the real LevelShift form (40 uploads) -------------
 # Two variants share the same fields; only which ones are mandatory differs.
 #   EXPERIENCED -> "Experienced Candidate Document collection"

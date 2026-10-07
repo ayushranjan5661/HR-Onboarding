@@ -39,6 +39,7 @@ class FormType(str, enum.Enum):
     CIF = "CIF"
     BGV = "BGV"                             # Background Verification Form
     DOCUMENT_COLLECTION = "DOCUMENT_COLLECTION"
+    REFERENCE_CHECK = "REFERENCE_CHECK"     # after Document Collection, before BGV
 
 
 class FormStatus(str, enum.Enum):
@@ -182,6 +183,7 @@ class Candidate(Base):
     cif_details = relationship("CIFDetails", uselist=False, cascade="all, delete-orphan")
     bgv_details = relationship("BGVDetails", uselist=False, cascade="all, delete-orphan")
     doc_details = relationship("DocCollectionDetails", uselist=False, cascade="all, delete-orphan")
+    ref_check_details = relationship("ReferenceCheckDetails", uselist=False, cascade="all, delete-orphan")
     education = relationship("EducationDetail", cascade="all, delete-orphan")
     employment = relationship("EmploymentDetail", cascade="all, delete-orphan")
     references = relationship("ReferenceDetail", cascade="all, delete-orphan")
@@ -388,6 +390,28 @@ class DocCollectionDetails(Base):
     id = Column(Integer, primary_key=True, index=True)
     candidate_id = Column(Integer, ForeignKey("candidates.id"), unique=True, nullable=False)
     # The form is uploads-only (DOC_FIELDS is empty); no text columns yet.
+
+
+class ReferenceCheckDetails(Base):
+    """Reference Check form answers: two references. One row per candidate."""
+    __tablename__ = "reference_check_details"
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id"), unique=True, nullable=False)
+
+    candidate_name = Column(String(150))
+    reference_check_date = Column(String(20))
+    position_applied_for = Column(String(150))
+    ref1_name = Column(String(150))
+    ref1_title = Column(String(150))
+    ref1_email = Column(String(255))
+    ref1_phone = Column(String(20))
+    ref2_name = Column(String(150))
+    ref2_title = Column(String(150))
+    ref2_email = Column(String(255))
+    ref2_phone = Column(String(20))
+    message_to_hiring_team = Column(Text)
+    declaration_accepted = Column(String(10))
 
 
 class Document(Base):

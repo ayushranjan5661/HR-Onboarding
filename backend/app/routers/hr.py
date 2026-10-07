@@ -18,7 +18,8 @@ from app import date_format
 from app.date_format import normalize_field
 from app.form_definitions import (BGV_FIELDS, BGV_FILE_FIELDS, BGV_TABLE_SECTIONS,
                                     CIF_FIELDS, CIF_FILE_FIELDS, DOC_FIELDS,
-                                    DOC_FILE_FIELDS, PROFILE_FIELDS)
+                                    DOC_FILE_FIELDS, PROFILE_FIELDS, REF_CHECK_FIELDS,
+                                    REF_CHECK_FILE_FIELDS)
 from app.models import (
     BGVAddressHistory,
     BGVDetails,
@@ -45,6 +46,7 @@ from app.models import (
     FormSubmission,
     FormType,
     HRUser,
+    ReferenceCheckDetails,
     ReferenceDetail,
 )
 from app.schemas import (
@@ -273,6 +275,20 @@ def candidate_insights(candidate_id: int, db: Session = Depends(get_db),
     return insights_agent.generate(db, candidate_id)
 
 
+@router.get("/candidates/{candidate_id}/reference-email-ai")
+def reference_email_ai(candidate_id: int, db: Session = Depends(get_db),
+                        current: HRUser = Depends(get_current_staff)):
+    """LLM reading of the candidate's "Message to Hiring Team": a note to add
+    to each reference's mail and a private note for HR. Falls back to nothing
+    (the standard template) when the message is empty or AI is unavailable."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    if not candidate.ref_check_details:
+        raise HTTPException(status_code=400,
+                             detail="The candidate has not submitted the Reference Check form yet")
+    from app.agents import reference_email
+    return reference_email.generate(candidate.ref_check_details)
+
+
 @router.post("/candidates/{candidate_id}/documents/recheck")
 def recheck_documents(candidate_id: int, only_unchecked: bool = False,
                       db: Session = Depends(get_db),
@@ -326,6 +342,7 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
             joinedload(Candidate.profile), joinedload(Candidate.submissions),
             joinedload(Candidate.documents), joinedload(Candidate.cif_details),
             joinedload(Candidate.bgv_details), joinedload(Candidate.doc_details),
+            joinedload(Candidate.ref_check_details),
             joinedload(Candidate.education), joinedload(Candidate.employment),
             joinedload(Candidate.references),
             joinedload(Candidate.bgv_addresses), joinedload(Candidate.bgv_education),
@@ -359,6 +376,8 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         cif_details=_row_dict(candidate.cif_details, CIF_FIELDS, include_id=False) if candidate.cif_details else None,
         bgv_details=_row_dict(candidate.bgv_details, BGV_FIELDS, include_id=False) if candidate.bgv_details else None,
         doc_details=_row_dict(candidate.doc_details, DOC_FIELDS, include_id=False) if candidate.doc_details else None,
+        ref_check_details=(_row_dict(candidate.ref_check_details, REF_CHECK_FIELDS, include_id=False)
+                           if candidate.ref_check_details else None),
         education={
             section: [_row_dict(e, EDUCATION_COLUMNS) for e in candidate.education if e.section == section]
             for section in ("UG_PG", "12TH", "10TH")
@@ -455,6 +474,7 @@ _DETAIL_TABLES = {
     "CIF": (CIFDetails, "cif_details", set(CIF_FIELDS)),
     "BGV": (BGVDetails, "bgv_details", set(BGV_FIELDS)),
     "DOCUMENT_COLLECTION": (DocCollectionDetails, "doc_details", set(DOC_FIELDS)),
+    "REFERENCE_CHECK": (ReferenceCheckDetails, "ref_check_details", set(REF_CHECK_FIELDS)),
 }
 
 
@@ -791,8 +811,9 @@ def approve_candidate(candidate_id: int, payload: DecisionRequest, db: Session =
     # Sequential flow, but nothing is sent automatically: approving the CIF
     # makes Document Collection *sendable*, and it stays withdrawn (LOCKED)
     # until HR presses Send (/candidates/{id}/forms/DOCUMENT_COLLECTION/send).
-    # BGV likewise waits for the documents to be approved and then a Send.
-    for form_type in (FormType.DOCUMENT_COLLECTION, FormType.BGV):
+    # Reference Check waits for the documents to be approved, and BGV for the
+    # Reference Check — each then needs its own Send.
+    for form_type in (FormType.DOCUMENT_COLLECTION, FormType.REFERENCE_CHECK, FormType.BGV):
         existing = db.query(FormSubmission).filter(FormSubmission.candidate_id == candidate_id,
                                                      FormSubmission.form_type == form_type).first()
         if not existing:
@@ -954,15 +975,17 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
     submission.reviewed_at = datetime.now(timezone.utc)
     submission.reviewed_by_hr_id = current.id
 
-    # Approving the documents used to open BGV automatically. It no longer
-    # does: BGV is not always wanted, so once the documents are approved HR
-    # chooses between sending BGV (/candidates/{id}/forms/BGV/send) and
-    # finishing the onboarding there and then.
+    # Approving a form never opens the next one automatically: once the
+    # documents are approved HR sends the Reference Check, and once that is
+    # approved, BGV — or finishes the onboarding there and then.
     db.commit()
-    if (submission.form_type == FormType.DOCUMENT_COLLECTION
-            and submission.status == FormStatus.APPROVED):
-        return {"detail": "Documents approved. Send the BGV form if you need it, "
-                           "or mark the onboarding complete."}
+    if submission.status == FormStatus.APPROVED:
+        if submission.form_type == FormType.DOCUMENT_COLLECTION:
+            return {"detail": "Documents approved. Send the Reference Check form if you need it, "
+                               "or mark the onboarding complete."}
+        if submission.form_type == FormType.REFERENCE_CHECK:
+            return {"detail": "Reference Check approved. Send the BGV form if you need it, "
+                               "or mark the onboarding complete."}
     return {"detail": "Submission reviewed"}
 
 
@@ -979,19 +1002,27 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
 def _send_blocker(form: FormType, candidate: Candidate, db: Session) -> str | None:
     """Why this form cannot be opened yet, or None when it can.
 
-    The onboarding runs CIF -> Document Collection -> BGV, and a form sent out
-    of turn would ask the candidate for details the step before it decides.
+    The onboarding runs CIF -> Document Collection -> Reference Check -> BGV,
+    and a form sent out of turn would ask the candidate for details the step
+    before it decides.
     """
+    def approved(prev: FormType) -> bool:
+        row = db.query(FormSubmission).filter(
+            FormSubmission.candidate_id == candidate.id,
+            FormSubmission.form_type == prev).first()
+        return row is not None and row.status == FormStatus.APPROVED
+
     if form is FormType.DOCUMENT_COLLECTION:
         if candidate.stage in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
             return ("Approve this candidate's CIF before opening the "
                     "Document Collection form.")
-    elif form is FormType.BGV:
-        docs = db.query(FormSubmission).filter(
-            FormSubmission.candidate_id == candidate.id,
-            FormSubmission.form_type == FormType.DOCUMENT_COLLECTION).first()
-        if docs is None or docs.status != FormStatus.APPROVED:
+    elif form is FormType.REFERENCE_CHECK:
+        if not approved(FormType.DOCUMENT_COLLECTION):
             return ("Approve this candidate's Document Collection form before "
+                    "sending the Reference Check.")
+    elif form is FormType.BGV:
+        if not approved(FormType.REFERENCE_CHECK):
+            return ("Approve this candidate's Reference Check form before "
                     "sending Background Verification.")
     return None
 
@@ -1093,6 +1124,7 @@ _FORM_FILE_FIELDS = {
     FormType.CIF: set(CIF_FILE_FIELDS),
     FormType.BGV: set(BGV_FILE_FIELDS),
     FormType.DOCUMENT_COLLECTION: set(DOC_FILE_FIELDS),
+    FormType.REFERENCE_CHECK: set(REF_CHECK_FILE_FIELDS),
 }
 
 

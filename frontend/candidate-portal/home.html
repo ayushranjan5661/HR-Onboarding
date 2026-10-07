@@ -63,6 +63,7 @@
       CIF: { title: "Candidate Information Form (CIF)", desc: "Your personal, education and identity details.", page: "cif-form.html" },
       BGV: { title: "Background Verification Form", desc: "Employment history and reference details for verification.", page: "bgv-form.html" },
       DOCUMENT_COLLECTION: { title: "Document Collection Form", desc: "Upload your ID proof, resume and other documents.", page: "document-form.html" },
+      REFERENCE_CHECK: { title: "Reference Check Form", desc: "Two professional references we can contact.", page: "reference-form.html" },
     };
 
     function renderTrack(stage) {
@@ -90,7 +91,7 @@
     }
 
     // Show the forms in the order they must be completed, not DB order.
-    const FORM_ORDER = ["CIF", "DOCUMENT_COLLECTION", "BGV"];
+    const FORM_ORDER = ["CIF", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "BGV"];
 
     function renderTiles(forms) {
       const container = document.getElementById("formTiles");

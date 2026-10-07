@@ -26,6 +26,9 @@ from app.form_definitions import (
     EDUCATION_SECTIONS,
     EMPLOYMENT_COLUMNS,
     PROFILE_FIELDS,
+    REF_CHECK_FIELDS,
+    REF_CHECK_FILE_FIELDS,
+    REF_CHECK_OPTIONAL,
     REFERENCE_COLUMNS,
 )
 from app.models import (
@@ -51,6 +54,7 @@ from app.models import (
     FormStatus,
     FormSubmission,
     FormType,
+    ReferenceCheckDetails,
     ReferenceDetail,
 )
 from app.agents import doc_validator
@@ -99,7 +103,7 @@ def my_submission(form_type: str, db: Session = Depends(get_db),
                    current: Candidate = Depends(get_current_candidate)):
     """The candidate's own saved answers for one form, so they can edit and
     resubmit instead of filling everything in again."""
-    if form_type not in ("CIF", "BGV", "DOCUMENT_COLLECTION"):
+    if form_type not in ("CIF", "BGV", "DOCUMENT_COLLECTION", "REFERENCE_CHECK"):
         raise HTTPException(status_code=404, detail="Unknown form")
 
     out: dict = {"fields": {}, "tables": {}, "documents": []}
@@ -139,6 +143,11 @@ def my_submission(form_type: str, db: Session = Depends(get_db),
                 {c: getattr(r, c) for c in cols}
                 for r in db.query(model).filter(model.candidate_id == current.id).all()
             ]
+    elif form_type == "REFERENCE_CHECK":
+        details = db.query(ReferenceCheckDetails).filter(
+            ReferenceCheckDetails.candidate_id == current.id).first()
+        if details:
+            out["fields"] = {f: getattr(details, f) for f in REF_CHECK_FIELDS}
     else:
         details = db.query(DocCollectionDetails).filter(
             DocCollectionDetails.candidate_id == current.id).first()
@@ -165,7 +174,7 @@ def my_prefill(form_type: str, db: Session = Depends(get_db),
     """What this form can inherit from the candidate's earlier submissions —
     matched by the cross-form mapping agent, including uploads that can be
     carried over rather than re-uploaded."""
-    if form_type not in ("DOCUMENT_COLLECTION", "BGV"):
+    if form_type not in ("DOCUMENT_COLLECTION", "REFERENCE_CHECK", "BGV"):
         return {"fields": {}, "documents": [], "company_labels": {}}
     return prefill_agent.build_prefill(db, current.id, form_type)
 
@@ -179,6 +188,7 @@ _DRAFT_FILE_FIELDS = {
     "CIF": CIF_FILE_FIELDS,
     "BGV": BGV_FILE_FIELDS,
     "DOCUMENT_COLLECTION": DOC_FILE_FIELDS,
+    "REFERENCE_CHECK": REF_CHECK_FILE_FIELDS,
 }
 
 
@@ -257,11 +267,11 @@ def _save_draft(ft: FormType, form, db: Session, current: Candidate):
     replaced_paths: list[str] = []
     written_paths: list[str] = []
     try:
-        for field_key in _DRAFT_FILE_FIELDS[form_type]:
+        for field_key in _DRAFT_FILE_FIELDS[ft.value]:
             upload = form.get(field_key)
             if upload is None or not hasattr(upload, "filename") or not upload.filename:
                 continue
-            original, stored = save_upload(upload, current.id, f"DRAFT_{form_type}", field_key)
+            original, stored = save_upload(upload, current.id, f"DRAFT_{ft.value}", field_key)
             written_paths.append(upload_path(stored))
             verdict = _check_document(current, stored, upload, field_key)
             for old in db.query(FormDraftDocument).filter(
@@ -570,9 +580,11 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
 
 
 def _submit_followup_form(form_type: str, form, db: Session, current: Candidate):
-    if form_type not in ("BGV", "DOCUMENT_COLLECTION"):
+    if form_type not in ("BGV", "DOCUMENT_COLLECTION", "REFERENCE_CHECK"):
         raise HTTPException(status_code=404, detail="Unknown form")
-    if current.stage != CandidateStage.APPROVED_FOR_BGV:
+    # HR may still send a follow-up form after marking onboarding complete
+    # (e.g. a Reference Check added later); the PENDING check below is the gate.
+    if current.stage not in (CandidateStage.APPROVED_FOR_BGV, CandidateStage.ONBOARDING_COMPLETE):
         raise HTTPException(status_code=400, detail="This form is not unlocked for you yet")
 
     # Like the CIF, a follow-up form is frozen once submitted: the record HR
@@ -610,6 +622,35 @@ def _submit_followup_form(form_type: str, form, db: Session, current: Candidate)
         provided_bgv = {k for k in BGV_FILE_FIELDS
                          if hasattr(form.get(k), "filename") and form.get(k).filename}
         _promote_draft_documents(db, current.id, FormType.BGV, provided_bgv)
+    elif form_type == "REFERENCE_CHECK":
+        _reject_invalid_dates({f: form.get(f) for f in REF_CHECK_FIELDS if f in form})
+        missing = [f for f in REF_CHECK_FIELDS
+                   if f not in REF_CHECK_OPTIONAL and not str(form.get(f) or "").strip()]
+        if missing:
+            raise HTTPException(status_code=400,
+                                 detail="Please fill in every field: " + ", ".join(missing))
+        details = db.query(ReferenceCheckDetails).filter(
+            ReferenceCheckDetails.candidate_id == current.id).first()
+        if not details:
+            details = ReferenceCheckDetails(candidate_id=current.id)
+            db.add(details)
+        if details.declaration_accepted != "Yes" and form.get("declaration_accepted") != "Yes":
+            raise HTTPException(status_code=400, detail="Please accept the declaration.")
+        # The signature is mandatory: a new upload, one on record, or one in the draft.
+        provided_ref = {k for k in REF_CHECK_FILE_FIELDS
+                         if hasattr(form.get(k), "filename") and form.get(k).filename}
+        on_record = {d.field_key for d in db.query(Document).filter(
+            Document.candidate_id == current.id,
+            Document.form_type == FormType.REFERENCE_CHECK).all()}
+        on_record |= _draft_document_fields(db, current.id, FormType.REFERENCE_CHECK)
+        # The CIF signature is carried over below if no new one was given.
+        on_record |= {d["target_field"] for d in prefill_agent.build_prefill(
+            db, current.id, "REFERENCE_CHECK")["documents"] if d.get("available", True)}
+        if "ref_signature" not in provided_ref | on_record:
+            raise HTTPException(status_code=400, detail="Please upload your signature.")
+        _apply_fields(details, form, REF_CHECK_FIELDS)
+        replaced = _save_files(db, form, current, "REFERENCE_CHECK", REF_CHECK_FILE_FIELDS)
+        _promote_draft_documents(db, current.id, FormType.REFERENCE_CHECK, provided_ref)
     else:
         details = db.query(DocCollectionDetails).filter(DocCollectionDetails.candidate_id == current.id).first()
         if not details:
@@ -645,7 +686,9 @@ def _submit_followup_form(form_type: str, form, db: Session, current: Candidate)
 
     # Anything the candidate already gave us on an earlier form and did not
     # re-upload here is copied across automatically.
-    provided = {k for k in (BGV_FILE_FIELDS if form_type == "BGV" else DOC_FILE_FIELDS)
+    file_fields = {"BGV": BGV_FILE_FIELDS, "REFERENCE_CHECK": REF_CHECK_FILE_FIELDS}.get(
+        form_type, DOC_FILE_FIELDS)
+    provided = {k for k in file_fields
                  if hasattr(form.get(k), "filename") and form.get(k).filename}
     carried = prefill_agent.carry_documents(db, current.id, form_type, provided)
 
