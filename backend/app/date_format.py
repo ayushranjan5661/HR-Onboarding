@@ -21,6 +21,7 @@ DATE_FIELDS = frozenset({
     "passport_expiry",
     "from_date",
     "to_date",
+    "reference_check_date",
 })
 
 _DAYS_IN_MONTH = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
@@ -72,6 +73,7 @@ DATE_FIELD_LABELS = {
     "passport_expiry": "Passport Expiry",
     "from_date": "From",
     "to_date": "To",
+    "reference_check_date": "Date",
 }
 
 

@@ -42,10 +42,10 @@
   </div>
 
   <script src="../js/config.js?v=20261007b"></script>
-  <script src="../js/date-format.js?v=20260922d"></script>
+  <script src="../js/date-format.js?v=20261007r"></script>
   <script src="js/api.js?v=20260929c"></script>
   <script src="js/dialog.js?v=20260901b"></script>
-  <script src="../js/field-labels.js?v=20260923b"></script>
+  <script src="../js/field-labels.js?v=20261007u"></script>
   <script>
     requireAuth();
     document.getElementById("whoami").textContent = getName();
@@ -80,9 +80,10 @@
     const FORM_TITLES = {
       CIF: "Candidate Information Form (CIF)",
       DOCUMENT_COLLECTION: "Document Collection Form",
+      REFERENCE_CHECK: "Reference Check Form",
       BGV: "Background Verification Form",
     };
-    const FORM_ORDER = ["CIF", "DOCUMENT_COLLECTION", "BGV"];
+    const FORM_ORDER = ["CIF", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "BGV"];
 
     // "Employment #2 — Acme Ltd → Reason for Leaving", or just the field label.
     function permLabel(perm) {

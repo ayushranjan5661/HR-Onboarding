@@ -119,6 +119,7 @@
       CIF: "candidate-portal/cif-form.html",
       BGV: "candidate-portal/bgv-form.html",
       DOCUMENT_COLLECTION: "candidate-portal/document-form.html",
+      REFERENCE_CHECK: "candidate-portal/reference-form.html",
     };
 
     async function pendingFormPage(token) {
@@ -130,8 +131,8 @@
         if (!res.ok) return home;
         const status = await res.json();
         if (status.stage === "REJECTED") return home;
-        // Sequential order: CIF -> Document Collection -> BGV.
-        for (const type of ["CIF", "DOCUMENT_COLLECTION", "BGV"]) {
+        // Sequential order: CIF -> Document Collection -> Reference Check -> BGV.
+        for (const type of ["CIF", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "BGV"]) {
           const form = status.forms.find(f => f.form_type === type);
           if (form && form.status === "PENDING") return FORM_PAGES[type];
         }

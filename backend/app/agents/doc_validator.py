@@ -80,6 +80,7 @@ EXPECTED: dict[str, set[str]] = {
     "bank_statement_salary": {"BANK_STATEMENT"},
     "police_clearance_certificate": {"POLICE_CLEARANCE"},
     "bgv_signature": {"SIGNATURE"},
+    "ref_signature": {"SIGNATURE"},
     # Document collection — education
     "marksheet_10": {"MARKSHEET_10"},
     "marksheet_12_diploma": {"MARKSHEET_12", "DIPLOMA_MARKSHEET"},

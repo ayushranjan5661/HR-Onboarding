@@ -307,6 +307,7 @@ class CandidateDetailOut(BaseModel):
     cif_details: Optional[dict[str, Any]] = None
     bgv_details: Optional[dict[str, Any]] = None
     doc_details: Optional[dict[str, Any]] = None
+    ref_check_details: Optional[dict[str, Any]] = None
     education: dict[str, list[dict[str, Any]]] = {}
     employment: list[dict[str, Any]] = []
     references: list[dict[str, Any]] = []
