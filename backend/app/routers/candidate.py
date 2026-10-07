@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 
@@ -227,7 +228,12 @@ async def save_draft(form_type: str, request: Request, db: Session = Depends(get
     and `tables` as JSON strings, plus any attached files."""
     ft = _draft_form_type(form_type)
     form = await request.form()
+    # The rest is blocking (database, OCR check of attached files) — off the
+    # event loop, so one upload doesn't stall every other request.
+    return await run_in_threadpool(_save_draft, ft, form, db, current)
 
+
+def _save_draft(ft: FormType, form, db: Session, current: Candidate):
     def _json_or_empty(key):
         try:
             value = json.loads(form.get(key) or "{}")
@@ -468,6 +474,13 @@ def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> li
 @router.post("/forms/cif")
 async def submit_cif(request: Request, db: Session = Depends(get_db),
                       current: Candidate = Depends(get_current_candidate)):
+    form = await request.form()
+    # Blocking from here on (database, OCR, prefill mapping) — run it off the
+    # event loop so one submit doesn't stall every other request.
+    return await run_in_threadpool(_submit_cif, form, db, current)
+
+
+def _submit_cif(form, db: Session, current: Candidate):
     # The CIF is a one-shot form: once submitted it is frozen, and the only
     # way a value changes afterwards is a field HR explicitly opens (see
     # /me/edit-access). That keeps the record HR reviewed from moving under
@@ -487,8 +500,6 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
     if current.stage not in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
         raise HTTPException(status_code=400,
                              detail="Your CIF has already been reviewed and can no longer be edited.")
-
-    form = await request.form()
 
     # Nothing is written until every date on the form reads as DD/MM/YYYY.
     employment_rows = _rows_from_json(form, "employment_details", EMPLOYMENT_COLUMNS)
@@ -553,6 +564,12 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
 @router.post("/forms/{form_type}/submit")
 async def submit_followup_form(form_type: str, request: Request, db: Session = Depends(get_db),
                                 current: Candidate = Depends(get_current_candidate)):
+    form = await request.form()
+    # Blocking from here on (database, OCR, prefill mapping) — off the event loop.
+    return await run_in_threadpool(_submit_followup_form, form_type, form, db, current)
+
+
+def _submit_followup_form(form_type: str, form, db: Session, current: Candidate):
     if form_type not in ("BGV", "DOCUMENT_COLLECTION"):
         raise HTTPException(status_code=404, detail="Unknown form")
     if current.stage != CandidateStage.APPROVED_FOR_BGV:
@@ -571,8 +588,6 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
             status_code=400,
             detail="You have already submitted this form and it can no longer be edited. "
                     "If something needs correcting, ask HR to open that field for you.")
-
-    form = await request.form()
 
     if form_type == "BGV":
         _reject_invalid_dates(
@@ -693,6 +708,11 @@ async def apply_granted_edits(request: Request, db: Session = Depends(get_db),
     and nothing changes, so the candidate never ends up half-corrected.
     """
     form = await request.form()
+    # Blocking from here on (database, OCR of replacement files) — off the event loop.
+    return await run_in_threadpool(_apply_granted_edits, form, db, current)
+
+
+def _apply_granted_edits(form, db: Session, current: Candidate):
     try:
         changes = json.loads(form.get("changes") or "[]")
     except (TypeError, ValueError):

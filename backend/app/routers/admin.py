@@ -9,8 +9,7 @@ A Super Admin creates, deactivates, deletes and resets Admins. An Admin has
 every Super Admin power over Managers, HR Executives and candidates, but
 never sees or touches the Master Admin, a Super Admin, or another Admin.
 
-The Master Admin (developer account, seeded from .env) additionally sees the
-password in force on every account, and is the only one who may create,
+The Master Admin (developer account, seeded from .env) is the only one who may create,
 deactivate, delete or reset a Super Admin. A Super Admin never sees the
 Master Admin's row at all, and an Admin never sees a Super Admin's."""
 from fastapi import APIRouter, Depends, HTTPException
@@ -37,15 +36,23 @@ def _target(db: Session, staff_id: int, current: HRUser) -> HRUser:
 
 
 def _out(db: Session, users: list[HRUser], current: HRUser) -> list[StaffOut]:
-    return staff_service.staff_out(db, users, include_temp_password=True,
-                                   include_current_password=scope.is_master_admin(current))
+    # Only the generated one-time password is shown, never one a user chose.
+    out = staff_service.staff_out(db, users, include_temp_password=True)
+    # A peer Super Admin is listed but not managed: their one-time password
+    # would let the caller sign in as an account they may not touch.
+    by_id = {u.id: u for u in users}
+    for row in out:
+        target = by_id[row.id]
+        if target.id != current.id and not scope.staff_in_scope(db, target, current):
+            row.temp_password = None
+    return out
 
 
 @router.get("/staff", response_model=list[StaffOut])
 def list_staff(db: Session = Depends(get_db), current: HRUser = Depends(get_current_admin)):
     """Everyone the caller may see, themselves included, with owned-candidate
-    and team counts. One-time passwords are shown until changed; the Master
-    Admin also sees the password currently in force on every account."""
+    and team counts. Generated one-time passwords are shown until changed;
+    a password the user chose is never shown to anyone."""
     q = db.query(HRUser)
     above = scope.ROLES_ABOVE.get(current.role, ())
     if above:

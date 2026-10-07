@@ -161,10 +161,10 @@ def reset_password(db: Session, actor: HRUser, target: HRUser) -> str:
 
 
 def record_own_password(user: HRUser, plain: str) -> None:
-    """A staff user chose their own password: keep the encrypted copy in
-    step so the Master Admin's view stays accurate."""
+    """A staff user chose their own password: only its hash is kept. No
+    recoverable copy, so nobody — the Master Admin included — can view it."""
     user.password_hash = hash_password(plain)
-    user.password_enc = encrypt_password(plain)
+    user.password_enc = None
     user.must_reset_password = False
     user.temp_password_enc = None
 
