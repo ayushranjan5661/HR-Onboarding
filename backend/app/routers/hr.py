@@ -5,7 +5,7 @@ from uuid import uuid4
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -287,6 +287,22 @@ def reference_email_ai(candidate_id: int, db: Session = Depends(get_db),
                              detail="The candidate has not submitted the Reference Check form yet")
     from app.agents import reference_email
     return reference_email.generate(candidate.ref_check_details)
+
+
+@router.get("/candidates/{candidate_id}/reference-check/pdf")
+def reference_check_pdf(candidate_id: int, db: Session = Depends(get_db),
+                        current: HRUser = Depends(get_current_staff)):
+    """Reference Check form plus each referee's feedback, as a styled PDF."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    if not candidate.ref_check_details:
+        raise HTTPException(status_code=400,
+                             detail="The candidate has not submitted the Reference Check form yet")
+    from app.services import reference_pdf
+    pdf = reference_pdf.build(candidate)
+    safe = "".join(ch if ch.isalnum() else "_" for ch in (candidate.name or "candidate")).strip("_")
+    filename = f"Referee_Check_{safe or candidate.id}.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.post("/candidates/{candidate_id}/documents/recheck")

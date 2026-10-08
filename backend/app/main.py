@@ -19,6 +19,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Lets the page read the download filename (e.g. the Reference Check PDF).
+    expose_headers=["Content-Disposition"],
 )
 
 app.include_router(auth.router)
