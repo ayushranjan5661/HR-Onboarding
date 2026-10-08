@@ -15,7 +15,7 @@ const editModes = { CIF: false, DOCUMENT_COLLECTION: false, REFERENCE_CHECK: fal
 const FORM_TITLES = {
   CIF: "Candidate Details (CIF)",
   DOCUMENT_COLLECTION: "Document Collection Form",
-  REFERENCE_CHECK: "Reference Check Form",
+  REFERENCE_CHECK: "Referee Check Form",
   BGV: "Background Verification Form",
 };
 // The CIF card is static markup; the follow-up cards are built by render().
@@ -207,6 +207,37 @@ function refereeFeedbackBlock(fb) {
       ${REFEREE_RATINGS.map(([k, label]) => row(`${label} (1-4)`, a[k])).join("")}
       ${row("Additional comments", a.additional_comments)}
     </div>`;
+}
+
+// The PDF endpoint needs the Authorization header, so fetch it as a blob and
+// hand it to the browser as a download.
+async function downloadReferencePdf(btn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Preparing…";
+  try {
+    const res = await fetch(`${API_BASE}/hr/candidates/${candidateId}/reference-check/pdf`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error((data && data.detail) || "Could not create the PDF");
+    }
+    const match = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "");
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = match ? match[1] : "Referee_Check.pdf";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (err) {
+    await showAlert(err.message, { title: "Download failed" });
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
 }
 
 async function copyRefereeLink(btn, url) {
@@ -738,11 +769,13 @@ function render() {
     const reviewControls = canReview && !editing ? `
       <button class="btn btn-success btn-small" onclick="reviewSubmission(${sub.id}, 'APPROVED')">Approve</button>
       <button class="btn btn-danger btn-small" onclick="reviewSubmission(${sub.id}, 'REJECTED')">Reject</button>` : "";
+    const pdfControl = type === "REFERENCE_CHECK" && submitted && !editing && cfg.data
+      ? `<button class="btn btn-outline btn-small" onclick="downloadReferencePdf(this)">Download PDF</button>` : "";
     wrap.innerHTML = `
       <div class="section-title collapsible" onclick="toggleCollapse(this)">
         <h3>${cfg.title} <span class="badge badge-${sub.status.toLowerCase()}">${sub.status.replaceAll("_"," ")}</span></h3>
         <div class="section-title-actions" onclick="event.stopPropagation()">
-          ${submitted ? formEditControls(type) : ""}${reviewControls}${accessControls(type, sub, c)}
+          ${pdfControl}${submitted ? formEditControls(type) : ""}${reviewControls}${accessControls(type, sub, c)}
         </div>
         <span class="chevron">&#9660;</span>
       </div>
