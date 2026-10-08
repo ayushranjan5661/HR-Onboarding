@@ -804,11 +804,11 @@ function render() {
 const ZOHO_TARGETS = {
   confirmation: {
     prefix: "zoho_", bodyId: "zohoBody", btnId: "zohoPushBtn",
-    path: "zoho/push", label: "Zoho People",
+    path: "zoho/push", label: "Zoho Candidate Information Form",
   },
   candidate: {
     prefix: "zoho_cand_", bodyId: "zohoCandBody", btnId: "zohoCandPushBtn",
-    path: "zoho/candidate-form/push", label: "Zoho Candidate Form",
+    path: "zoho/candidate-form/push", label: "Zoho Candidate Onboarding Form",
   },
 };
 

@@ -404,6 +404,15 @@ th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size
   input[type="checkbox"], input[type="radio"] { width: 20px; height: 20px; }
   label { font-size: 0.86rem; }
 
+  /* Nothing on a form page should ever push the page sideways */
+  body { overflow-x: clip; }
+  .card { overflow-wrap: anywhere; }
+  input[type="file"] { max-width: 100%; min-width: 0; }
+
+  /* Preview / Remove / View buttons under file inputs: finger-sized */
+  form .btn-small { padding: 9px 14px; font-size: 0.84rem; margin-top: 6px; }
+  body .doc-group { padding: 12px; }
+
   .grid-2, .field-grid { grid-template-columns: 1fr; }
   .field-row { flex-wrap: wrap; }
   .field-row .fname { flex-basis: 100%; }
@@ -446,7 +455,7 @@ th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size
   .modal-backdrop { align-items: flex-end; padding: 0; }
   .modal {
     max-width: none !important; width: 100% !important;
-    border-radius: 18px 18px 0 0; max-height: 92vh;
+    border-radius: 18px 18px 0 0; max-height: 92vh; max-height: 92dvh;
     padding: 22px 18px calc(18px + env(safe-area-inset-bottom));
     animation: sheetIn 220ms cubic-bezier(0.16, 1, 0.3, 1);
   }

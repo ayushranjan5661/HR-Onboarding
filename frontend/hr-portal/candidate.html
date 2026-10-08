@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#3730a3">
 <title>HR Portal — Candidate</title>
-<link rel="stylesheet" href="css/style.css?v=20261007c">
+<link rel="stylesheet" href="css/style.css?v=20261008a">
 <link rel="stylesheet" href="css/candidate-theme.css?v=20261007ref">
 </head>
 <body class="cand-page">
@@ -112,14 +112,14 @@
         <!-- Publish this candidate's data into Zoho People. Only shown once
              BGV has been reached — see backend _ZOHO_PUSH_STAGES. -->
         <div class="card section-card hidden" id="zohoCard">
-          <div class="section-title"><h3>Zoho People</h3></div>
+          <div class="section-title"><h3>Zoho Data Push - Candidate Information Form</h3></div>
           <div id="zohoBody"></div>
         </div>
 
         <!-- Separate push into Zoho's "Candidate" form (own record, own map:
              integrations/zoho/field_map_candidate.json). Same stage gate. -->
         <div class="card section-card hidden" id="zohoCandCard">
-          <div class="section-title"><h3>Zoho Candidate Form</h3></div>
+          <div class="section-title"><h3>Zoho Data Push - Candidate Onboarding Form</h3></div>
           <div id="zohoCandBody"></div>
         </div>
       </div>
@@ -223,6 +223,6 @@
   <script src="../js/field-labels.js?v=20261007ref3"></script>
   <script src="../js/date-format.js?v=20261007r"></script>
   <script src="../js/welcome-email.js?v=20261007ref3"></script>
-  <script src="js/candidate.js?v=20261007ref3"></script>
+  <script src="js/candidate.js?v=20261008a"></script>
 </body>
 </html>

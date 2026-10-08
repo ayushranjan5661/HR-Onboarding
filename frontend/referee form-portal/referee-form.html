@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#3730a3">
 <title>Referee Feedback Form</title>
-<link rel="stylesheet" href="../candidate-portal/css/style.css?v=20261007c">
+<link rel="stylesheet" href="../candidate-portal/css/style.css?v=20261008a">
 <style>
   .form-card { max-width: 900px; }
   .q-label { font-weight: 600; margin-bottom: 6px; display: block; }
@@ -15,8 +15,27 @@
   .rating-table input[type="radio"] { width: auto; margin: 0; }
   .rating-hint { color: #6b7280; font-size: 0.8rem; }
   .done-msg { display: none; text-align: center; padding: 30px 10px; }
-  @media (max-width: 520px) {
-    .rating-table th, .rating-table td { padding: 6px 3px; font-size: 0.85rem; }
+  /* Each radio sits in a label so the whole cell is tappable; the number is
+     only shown on phones, where the column headers are hidden. */
+  .rating-table label.rate-opt { display: flex; justify-content: center; margin: 0; cursor: pointer; }
+  .rate-opt span { display: none; }
+  @media (max-width: 720px) {
+    .rating-table, .rating-table tbody { display: block; }
+    .rating-table thead { display: none; }
+    .rating-table tr {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+      background: #fafbfe; border: 1px solid var(--border); border-radius: 12px;
+      padding: 12px; margin-bottom: 10px;
+    }
+    .rating-table td { padding: 0; border: 0; }
+    .rating-table td:first-child { grid-column: 1 / -1; font-weight: 600; }
+    .rating-table label.rate-opt {
+      align-items: center; gap: 6px; padding: 10px 0;
+      border: 1px solid #dcdfe9; border-radius: var(--radius-sm); background: #fff;
+      font-weight: 600;
+    }
+    .rate-opt span { display: inline; }
+    .rate-opt:has(input:checked) { border-color: var(--brand); background: var(--brand-light); color: var(--brand-dark); }
   }
 </style>
 </head>
@@ -91,7 +110,12 @@
         const input = document.createElement("input");
         Object.assign(input, { type: "radio", name, value: String(v), required: true });
         input.setAttribute("aria-label", `${label} ${v}`);
-        td.appendChild(input);
+        const opt = document.createElement("label");
+        opt.className = "rate-opt";
+        const num = document.createElement("span");
+        num.textContent = String(v);
+        opt.append(input, num);
+        td.appendChild(opt);
         tr.appendChild(td);
       }
       tbody.appendChild(tr);
