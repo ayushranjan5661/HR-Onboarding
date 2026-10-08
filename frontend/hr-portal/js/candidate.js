@@ -606,6 +606,7 @@ function showLoadError(message) {
   document.getElementById("auditCard").classList.add("hidden");
   document.getElementById("zohoCard").classList.add("hidden");
   document.getElementById("zohoCandCard").classList.add("hidden");
+  document.getElementById("zohoRefCard").classList.add("hidden");
   document.getElementById("openAccessBanner").innerHTML = "";
   document.getElementById("followupForms").innerHTML = "";
   const notice = document.getElementById("rejectedNotice");
@@ -823,9 +824,11 @@ function render() {
   const zohoEligible = c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE";
   document.getElementById("zohoCard").classList.toggle("hidden", !zohoEligible);
   document.getElementById("zohoCandCard").classList.toggle("hidden", !zohoEligible);
+  document.getElementById("zohoRefCard").classList.toggle("hidden", !zohoEligible);
   if (zohoEligible) {
     renderZoho(c, "confirmation");
     renderZoho(c, "candidate");
+    renderZoho(c, "reference");
   }
 
   // Edit-mode date cells are rebuilt on every render, so re-wire them here.
@@ -842,6 +845,13 @@ const ZOHO_TARGETS = {
   candidate: {
     prefix: "zoho_cand_", bodyId: "zohoCandBody", btnId: "zohoCandPushBtn",
     path: "zoho/candidate-form/push", label: "Zoho Candidate Onboarding Form",
+  },
+  // Uploads the Referee Check PDF into Zoho's "Documents Collection - Trainee".
+  reference: {
+    prefix: "zoho_ref_", bodyId: "zohoRefBody", btnId: "zohoRefPushBtn",
+    path: "zoho/reference-check/push", label: "Zoho Referee Check Form",
+    confirmNew: "Upload the Referee Check PDF to this candidate's Zoho Documents Collection record?",
+    confirmAgain: "Replace the Referee Check PDF in Zoho with a freshly generated one?",
   },
 };
 
@@ -873,10 +883,10 @@ function renderZoho(c, target) {
 async function pushToZoho(target = "confirmation") {
   const t = ZOHO_TARGETS[target];
   const alreadyPushed = !!(currentData && currentData[t.prefix + "record_id"]);
-  const msg = alreadyPushed
+  const msg = (alreadyPushed ? t.confirmAgain : t.confirmNew) || (alreadyPushed
     ? `Push this candidate's latest data to the existing ${t.label} record?`
     : `Create this candidate as a draft record in ${t.label}? You'll be able to `
-      + "review it there before treating it as final.";
+      + "review it there before treating it as final.");
   if (!await showConfirm(msg, {
         title: `Publish to ${t.label}`,
         confirmText: alreadyPushed ? "Re-sync" : "Publish",

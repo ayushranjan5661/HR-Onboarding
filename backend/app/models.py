@@ -176,6 +176,12 @@ class Candidate(Base):
     zoho_cand_status = Column(String(20), nullable=True)
     zoho_cand_synced_at = Column(DateTime(timezone=True), nullable=True)
     zoho_cand_last_error = Column(Text, nullable=True)
+    # Same four, for the Reference Check PDF upload into Zoho's "Documents
+    # Collection - Trainee" form (the "Publish Referee Check" button).
+    zoho_ref_record_id = Column(String(50), nullable=True)
+    zoho_ref_status = Column(String(20), nullable=True)
+    zoho_ref_synced_at = Column(DateTime(timezone=True), nullable=True)
+    zoho_ref_last_error = Column(Text, nullable=True)
 
     profile = relationship("CandidateProfile", uselist=False, back_populates="candidate", cascade="all, delete-orphan")
     submissions = relationship("FormSubmission", back_populates="candidate", cascade="all, delete-orphan")

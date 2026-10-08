@@ -323,6 +323,10 @@ class CandidateDetailOut(BaseModel):
     zoho_cand_status: Optional[str] = None
     zoho_cand_synced_at: Optional[datetime] = None
     zoho_cand_last_error: Optional[str] = None
+    zoho_ref_record_id: Optional[str] = None
+    zoho_ref_status: Optional[str] = None
+    zoho_ref_synced_at: Optional[datetime] = None
+    zoho_ref_last_error: Optional[str] = None
 
     class Config:
         from_attributes = True

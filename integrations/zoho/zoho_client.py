@@ -202,7 +202,8 @@ def api(method, path, data=None, token=None, params=None, body=None, content_typ
 def _multipart(fields, files):
     """multipart/form-data body: text fields plus (name, filename,
     content_type, path) file parts. Only uploadFile() needs this - insert and
-    updateRecord take ordinary urlencoded form data (see upload_files)."""
+    updateRecord take ordinary urlencoded form data (see upload_files).
+    `path` may also be the file's bytes, for content generated in memory."""
     boundary = "----hr-onboarding-" + os.urandom(12).hex()
     out = bytearray()
     for name, value in fields.items():
@@ -210,8 +211,11 @@ def _multipart(fields, files):
                 % (boundary, name)).encode()
         out += str(value).encode("utf-8") + b"\r\n"
     for name, filename, ctype, path in files:
-        with open(path, "rb") as fh:
-            content = fh.read()
+        if isinstance(path, (bytes, bytearray)):
+            content, path = bytes(path), filename or "file"
+        else:
+            with open(path, "rb") as fh:
+                content = fh.read()
         safe = (filename or os.path.basename(path)).replace('"', "'")
         out += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\n"
                 "Content-Type: %s\r\n\r\n"

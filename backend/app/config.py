@@ -125,6 +125,10 @@ class Settings(BaseSettings):
     # (normally "Candidate"), with integrations/zoho/field_map_candidate.json.
     # Blank keeps that button refusing, independent of the one above.
     ZOHO_CANDIDATE_PROFILE_WRITE_FORM: str = ""
+    # The "Publish Referee Check" button uploads the generated Reference Check
+    # PDF into this form's Reference_check file field ("Documents Collection -
+    # Trainee"). Blank keeps that button refusing.
+    ZOHO_REFERENCE_CHECK_WRITE_FORM: str = "documents_collection_trainee"
     ZOHO_TIMEOUT: int = 30
 
     # --- File uploads ---
