@@ -371,7 +371,7 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         login_page_url=_login_page_url(),
         login_link_expires_at=_link_expiry(candidate),
         profile=candidate.profile,
-        submissions=candidate.submissions,
+        submissions=candidate.visible_submissions,
         documents=[_document_out(d) for d in candidate.documents],
         cif_details=_row_dict(candidate.cif_details, CIF_FIELDS, include_id=False) if candidate.cif_details else None,
         bgv_details=_row_dict(candidate.bgv_details, BGV_FIELDS, include_id=False) if candidate.bgv_details else None,
@@ -814,7 +814,11 @@ def approve_candidate(candidate_id: int, payload: DecisionRequest, db: Session =
     # until HR presses Send (/candidates/{id}/forms/DOCUMENT_COLLECTION/send).
     # Reference Check waits for the documents to be approved, and BGV for the
     # Reference Check — each then needs its own Send.
-    for form_type in (FormType.DOCUMENT_COLLECTION, FormType.REFERENCE_CHECK, FormType.BGV):
+    # Reference Check is created for Fresher / Trainee candidates only.
+    follow_ups = ((FormType.DOCUMENT_COLLECTION, FormType.REFERENCE_CHECK, FormType.BGV)
+                  if candidate.uses_reference_check
+                  else (FormType.DOCUMENT_COLLECTION, FormType.BGV))
+    for form_type in follow_ups:
         existing = db.query(FormSubmission).filter(FormSubmission.candidate_id == candidate_id,
                                                      FormSubmission.form_type == form_type).first()
         if not existing:
@@ -945,7 +949,7 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
     submission = db.query(FormSubmission).filter(FormSubmission.id == submission_id).first()
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
-    scope.get_scoped_candidate(db, submission.candidate_id, current)
+    candidate = scope.get_scoped_candidate(db, submission.candidate_id, current)
 
     # A review is a decision, not an arbitrary status write: LOCKED/PENDING/
     # SUBMITTED must never be reachable through this endpoint.
@@ -982,7 +986,8 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
     db.commit()
     if submission.status == FormStatus.APPROVED:
         if submission.form_type == FormType.DOCUMENT_COLLECTION:
-            return {"detail": "Documents approved. Send the Reference Check form if you need it, "
+            next_form = "Reference Check" if candidate.uses_reference_check else "BGV"
+            return {"detail": f"Documents approved. Send the {next_form} form if you need it, "
                                "or mark the onboarding complete."}
         if submission.form_type == FormType.REFERENCE_CHECK:
             return {"detail": "Reference Check approved. Send the BGV form if you need it, "
@@ -1018,11 +1023,17 @@ def _send_blocker(form: FormType, candidate: Candidate, db: Session) -> str | No
             return ("Approve this candidate's CIF before opening the "
                     "Document Collection form.")
     elif form is FormType.REFERENCE_CHECK:
+        if not candidate.uses_reference_check:
+            return "The Reference Check is only for Fresher / Trainee candidates."
         if not approved(FormType.DOCUMENT_COLLECTION):
             return ("Approve this candidate's Document Collection form before "
                     "sending the Reference Check.")
     elif form is FormType.BGV:
-        if not approved(FormType.REFERENCE_CHECK):
+        if not candidate.uses_reference_check:
+            if not approved(FormType.DOCUMENT_COLLECTION):
+                return ("Approve this candidate's Document Collection form before "
+                        "sending Background Verification.")
+        elif not approved(FormType.REFERENCE_CHECK):
             return ("Approve this candidate's Reference Check form before "
                     "sending Background Verification.")
     return None

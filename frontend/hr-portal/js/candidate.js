@@ -623,12 +623,14 @@ function render() {
   const docsOpen = c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE";
   // Reference Check opens only once the documents are approved (see sendGate).
   const docSub = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
-  const refsOpen = docsOpen && docSub?.status === "APPROVED";
+  // Reference Check is a Fresher / Trainee form only.
+  const refsOpen = c.candidate_type === "FRESHER" && docsOpen && docSub?.status === "APPROVED";
   applyEmailDraftVisibility();
   const emailOpts = {
     templates: ["CIF", ...(docsOpen ? ["DOCUMENT_COLLECTION"] : []), ...(refsOpen ? ["REFERENCE_CHECK"] : []),
                 // Once the candidate has named their references, HR can mail each one.
-                ...[1, 2].filter(n => (c.ref_check_details || {})[`ref${n}_email`])
+                ...[1, 2].filter(n => c.candidate_type === "FRESHER"
+                                       && (c.ref_check_details || {})[`ref${n}_email`])
                          .map(n => `REFERENCE_${n}`)],
     template: refsOpen && c.stage === "APPROVED_FOR_BGV" ? "REFERENCE_CHECK"
       : c.stage === "APPROVED_FOR_BGV" ? "DOCUMENT_COLLECTION" : "CIF",
@@ -953,7 +955,13 @@ function sendGate(form, c) {
                reason: "Available once you approve their Document Collection form above." };
     }
   }
-  if (form === "BGV") {
+  if (form === "BGV" && c.candidate_type !== "FRESHER") {
+    const docs = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
+    if (!docs || docs.status !== "APPROVED") {
+      return { canSend: false,
+               reason: "Available once you approve their Document Collection form above." };
+    }
+  } else if (form === "BGV") {
     const refs = c.submissions.find(s => s.form_type === "REFERENCE_CHECK");
     if (!refs || refs.status !== "APPROVED") {
       return { canSend: false,

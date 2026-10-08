@@ -194,6 +194,17 @@ class Candidate(Base):
     bgv_references = relationship("BGVReferenceCheck", cascade="all, delete-orphan")
     bgv_gaps = relationship("BGVGap", cascade="all, delete-orphan")
 
+    # The Reference Check is a Fresher / Trainee form only; experienced
+    # candidates go straight from Document Collection to BGV.
+    @property
+    def uses_reference_check(self) -> bool:
+        return self.candidate_type == CandidateType.FRESHER
+
+    @property
+    def visible_submissions(self) -> list:
+        return [s for s in self.submissions
+                if self.uses_reference_check or s.form_type != FormType.REFERENCE_CHECK]
+
 
 class CandidateProfile(Base):
     """

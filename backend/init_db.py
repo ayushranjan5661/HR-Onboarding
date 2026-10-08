@@ -160,10 +160,12 @@ def main():
         _sync_columns(conn)
 
         # Reference Check sits between Document Collection and BGV. Candidates
-        # approved before it existed get it as an unsent (LOCKED) form.
+        # approved before it existed get it as an unsent (LOCKED) form — Fresher /
+        # Trainee only; experienced candidates never get a Reference Check.
         conn.execute(text(
             "INSERT INTO form_submissions (candidate_id, form_type, status) "
             "SELECT d.candidate_id, 'REFERENCE_CHECK', 'LOCKED' FROM form_submissions d "
+            "JOIN candidates c ON c.id = d.candidate_id AND c.candidate_type = 'FRESHER' "
             "WHERE d.form_type = 'DOCUMENT_COLLECTION' AND NOT EXISTS ("
             "  SELECT 1 FROM form_submissions r WHERE r.candidate_id = d.candidate_id "
             "  AND r.form_type = 'REFERENCE_CHECK')"))

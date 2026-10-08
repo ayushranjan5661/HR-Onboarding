@@ -72,11 +72,6 @@
               understand that any false or misleading information may lead to withdrawal of the offer or
               termination of employment. *</label>
           </div>
-          <div class="grid-2" style="margin-top:10px;">
-            <div><label>Upload Candidate Signature *</label>
-              <input type="file" name="ref_signature" accept=".jpg,.jpeg,.png,.gif" required>
-              <div class="file-hint">JPG, PNG or GIF</div></div>
-          </div>
         </div>
 
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
@@ -102,7 +97,6 @@
     document.getElementById("whoami").textContent = getName();
 
     const formEl = document.getElementById("refForm");
-    enableLocalPreviews(formEl);   // let the candidate confirm the signature they attach
     // Save Draft must work before any network call finishes.
     wireDraftSave({ formType: "REFERENCE_CHECK", formEl });
 
@@ -125,9 +119,6 @@
                         { title: "Already submitted", tone: "info" });
         window.location.href = "home.html"; return;
       }
-
-      // The CIF signature is reused unless the candidate picks a new one.
-      await runAutoFill("REFERENCE_CHECK", formEl, document.querySelector(".form-card"));
 
       // Carry the CIF answers forward so nothing is typed twice.
       if (data.profile) setIfEmpty("candidate_name", data.profile.full_name);

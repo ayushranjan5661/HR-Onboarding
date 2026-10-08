@@ -107,7 +107,7 @@ const FORM_FILE_FIELDS = {
     "passport_size_photo", "pan_card", "aadhar_card", "passport_copy",
     "address_proof", "id_proof",
   ],
-  REFERENCE_CHECK: ["ref_signature"],
+  REFERENCE_CHECK: [],
 };
 
 // Repeating-row tables: table name (API) -> column order for display

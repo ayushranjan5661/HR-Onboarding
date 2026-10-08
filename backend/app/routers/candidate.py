@@ -83,7 +83,7 @@ def my_status(db: Session = Depends(get_db), current: Candidate = Depends(get_cu
         .first()
     )
     return MyStatusOut(stage=candidate.stage.value, candidate_type=candidate.candidate_type.value,
-                        forms=candidate.submissions, profile=candidate.profile)
+                        forms=candidate.visible_submissions, profile=candidate.profile)
 
 
 @router.get("/me/cif-summary")
@@ -582,6 +582,8 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
 def _submit_followup_form(form_type: str, form, db: Session, current: Candidate):
     if form_type not in ("BGV", "DOCUMENT_COLLECTION", "REFERENCE_CHECK"):
         raise HTTPException(status_code=404, detail="Unknown form")
+    if form_type == "REFERENCE_CHECK" and not current.uses_reference_check:
+        raise HTTPException(status_code=404, detail="Unknown form")
     # HR may still send a follow-up form after marking onboarding complete
     # (e.g. a Reference Check added later); the PENDING check below is the gate.
     if current.stage not in (CandidateStage.APPROVED_FOR_BGV, CandidateStage.ONBOARDING_COMPLETE):
@@ -636,18 +638,8 @@ def _submit_followup_form(form_type: str, form, db: Session, current: Candidate)
             db.add(details)
         if details.declaration_accepted != "Yes" and form.get("declaration_accepted") != "Yes":
             raise HTTPException(status_code=400, detail="Please accept the declaration.")
-        # The signature is mandatory: a new upload, one on record, or one in the draft.
         provided_ref = {k for k in REF_CHECK_FILE_FIELDS
                          if hasattr(form.get(k), "filename") and form.get(k).filename}
-        on_record = {d.field_key for d in db.query(Document).filter(
-            Document.candidate_id == current.id,
-            Document.form_type == FormType.REFERENCE_CHECK).all()}
-        on_record |= _draft_document_fields(db, current.id, FormType.REFERENCE_CHECK)
-        # The CIF signature is carried over below if no new one was given.
-        on_record |= {d["target_field"] for d in prefill_agent.build_prefill(
-            db, current.id, "REFERENCE_CHECK")["documents"] if d.get("available", True)}
-        if "ref_signature" not in provided_ref | on_record:
-            raise HTTPException(status_code=400, detail="Please upload your signature.")
         _apply_fields(details, form, REF_CHECK_FIELDS)
         replaced = _save_files(db, form, current, "REFERENCE_CHECK", REF_CHECK_FILE_FIELDS)
         _promote_draft_documents(db, current.id, FormType.REFERENCE_CHECK, provided_ref)
