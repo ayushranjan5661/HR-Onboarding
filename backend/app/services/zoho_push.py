@@ -219,13 +219,14 @@ def push_reference_check(candidate: Candidate) -> dict:
     if not form:
         raise ZohoPushError("Zoho push is not configured: set "
                             "ZOHO_REFERENCE_CHECK_WRITE_FORM in .env.")
-    if not candidate.ref_check_details:
-        raise ZohoPushError("The candidate has not submitted the Reference Check form yet.")
+    from app.services import reference_pdf
+    reason = reference_pdf.not_ready_reason(candidate)
+    if reason:
+        raise ZohoPushError(reason)
     email = candidate.email or ""
     if not email:
         raise ZohoPushError("Candidate has no email on record — Zoho's duplicate check needs one.")
 
-    from app.services import reference_pdf
     pdf = reference_pdf.build(candidate)
     safe = "".join(ch if ch.isalnum() else "_" for ch in (candidate.name or "candidate")).strip("_")
     filename = f"Referee_Check_{safe or candidate.id}.pdf"

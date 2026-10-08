@@ -294,10 +294,10 @@ def reference_check_pdf(candidate_id: int, db: Session = Depends(get_db),
                         current: HRUser = Depends(get_current_staff)):
     """Reference Check form plus each referee's feedback, as a styled PDF."""
     candidate = scope.get_scoped_candidate(db, candidate_id, current)
-    if not candidate.ref_check_details:
-        raise HTTPException(status_code=400,
-                             detail="The candidate has not submitted the Reference Check form yet")
     from app.services import reference_pdf
+    reason = reference_pdf.not_ready_reason(candidate)
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
     pdf = reference_pdf.build(candidate)
     safe = "".join(ch if ch.isalnum() else "_" for ch in (candidate.name or "candidate")).strip("_")
     filename = f"Referee_Check_{safe or candidate.id}.pdf"

@@ -242,6 +242,24 @@ def _feedback(rep: _Report, fb: Optional[RefereeFeedback], accent: str, tint: st
     rep.small("Rating scale:  1 = Poor  ·  2 = Fair  ·  3 = Good  ·  4 = Excellent")
 
 
+def pending_referees(candidate: Candidate) -> list[int]:
+    """Referees (1, 2) who have not submitted feedback yet. The PDF is only
+    generated once this is empty."""
+    done = {f.ref_index for f in candidate.referee_feedback}
+    return [n for n in (1, 2) if n not in done]
+
+
+def not_ready_reason(candidate: Candidate) -> Optional[str]:
+    """Why the PDF can't be generated yet, or None when it can."""
+    if not candidate.ref_check_details:
+        return "The candidate has not submitted the Reference Check form yet"
+    pending = pending_referees(candidate)
+    if pending:
+        who = " and ".join(f"Referee {n}" for n in pending)
+        return f"The PDF is generated once both referees submit feedback. Waiting for {who}."
+    return None
+
+
 def build(candidate: Candidate) -> bytes:
     """The report as PDF bytes. Caller ensures ref_check_details exists."""
     d = candidate.ref_check_details
