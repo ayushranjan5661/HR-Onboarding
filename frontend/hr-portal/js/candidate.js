@@ -770,8 +770,14 @@ function render() {
     const reviewControls = canReview && !editing ? `
       <button class="btn btn-success btn-small" onclick="reviewSubmission(${sub.id}, 'APPROVED')">Approve</button>
       <button class="btn btn-danger btn-small" onclick="reviewSubmission(${sub.id}, 'REJECTED')">Reject</button>` : "";
+    // The PDF is only generated once both referees have submitted feedback.
+    const pendingRefs = pendingReferees(c);
     const pdfControl = type === "REFERENCE_CHECK" && submitted && !editing && cfg.data
-      ? `<button class="btn btn-outline btn-small" onclick="downloadReferencePdf(this)">Download PDF</button>` : "";
+      ? (pendingRefs.length
+          ? `<button class="btn btn-outline btn-small" disabled title="${escapeHtml(
+              `Available once both referees submit feedback (waiting for ${pendingRefs.map(n => `Referee ${n}`).join(" and ")})`)}">Download PDF</button>`
+          : `<button class="btn btn-outline btn-small" onclick="downloadReferencePdf(this)">Download PDF</button>`)
+      : "";
     wrap.innerHTML = `
       <div class="section-title collapsible" onclick="toggleCollapse(this)">
         <h3>${cfg.title} <span class="badge badge-${sub.status.toLowerCase()}">${sub.status.replaceAll("_"," ")}</span></h3>
@@ -855,6 +861,12 @@ const ZOHO_TARGETS = {
   },
 };
 
+// Referees (1, 2) with no feedback yet; mirrors reference_pdf.pending_referees.
+function pendingReferees(c) {
+  const done = new Set((c.referee_feedback || []).map(r => r.ref_index));
+  return [1, 2].filter(n => !done.has(n));
+}
+
 function renderZoho(c, target) {
   const t = ZOHO_TARGETS[target];
   const recordId = c[t.prefix + "record_id"];
@@ -872,10 +884,16 @@ function renderZoho(c, target) {
   const errorLine = lastError
     ? `<div style="color:var(--danger);margin-top:6px;font-size:0.85rem;">Last attempt failed: ${escapeHtml(lastError)}</div>`
     : "";
+  // The Referee Check PDF only exists once both referees have submitted.
+  const pendingRefs = target === "reference" ? pendingReferees(c) : [];
+  const waitLine = pendingRefs.length
+    ? `<p style="color:#92400e;font-size:0.85rem;">Waiting for ${pendingRefs.map(n => `Referee ${n}`).join(" and ")} `
+      + "to submit feedback — the PDF is generated once both have.</p>"
+    : "";
   document.getElementById(t.bodyId).innerHTML = `
     <p style="color:#6b7280;font-size:0.88rem;">${statusLine}</p>
-    ${errorLine}
-    <button class="btn btn-primary" id="${t.btnId}" onclick="pushToZoho('${target}')">
+    ${errorLine}${waitLine}
+    <button class="btn btn-primary" id="${t.btnId}" onclick="pushToZoho('${target}')"${pendingRefs.length ? " disabled" : ""}>
       ${pushed ? `Re-sync to ${t.label}` : `Publish to ${t.label}`}
     </button>`;
 }
