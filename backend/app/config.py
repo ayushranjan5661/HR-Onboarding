@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     PORTAL_BASE_URL: str = "http://127.0.0.1:5500"
     # How long a one-click invite link stays valid. HR can always reissue.
     INVITE_LINK_EXPIRY_DAYS: int = 3
+    # Public page a candidate's reference opens to give feedback. Each
+    # reference gets this URL plus their own signed ?token=.
+    REFEREE_FORM_URL: str = "http://127.0.0.1:5500/referee%20form-portal/referee-form.html"
 
     # --- AI cross-form mapping agent (Azure OpenAI) ---
     # Reads the VITE_*-prefixed values already present in .env.

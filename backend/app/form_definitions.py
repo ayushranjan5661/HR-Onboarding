@@ -178,7 +178,7 @@ REF_CHECK_FIELDS = [
     "declaration_accepted",
 ]
 REF_CHECK_OPTIONAL = {"message_to_hiring_team"}
-REF_CHECK_FILE_FIELDS = ["ref_signature"]   # mandatory
+REF_CHECK_FILE_FIELDS: list[str] = []   # no uploads (signature removed)
 
 # --- Document Collection: the real LevelShift form (40 uploads) -------------
 # Two variants share the same fields; only which ones are mandatory differs.

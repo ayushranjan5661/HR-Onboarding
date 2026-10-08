@@ -184,6 +184,7 @@ class Candidate(Base):
     bgv_details = relationship("BGVDetails", uselist=False, cascade="all, delete-orphan")
     doc_details = relationship("DocCollectionDetails", uselist=False, cascade="all, delete-orphan")
     ref_check_details = relationship("ReferenceCheckDetails", uselist=False, cascade="all, delete-orphan")
+    referee_feedback = relationship("RefereeFeedback", cascade="all, delete-orphan")
     education = relationship("EducationDetail", cascade="all, delete-orphan")
     employment = relationship("EmploymentDetail", cascade="all, delete-orphan")
     references = relationship("ReferenceDetail", cascade="all, delete-orphan")
@@ -192,6 +193,17 @@ class Candidate(Base):
     bgv_employment = relationship("BGVEmploymentCheck", cascade="all, delete-orphan")
     bgv_references = relationship("BGVReferenceCheck", cascade="all, delete-orphan")
     bgv_gaps = relationship("BGVGap", cascade="all, delete-orphan")
+
+    # The Reference Check is a Fresher / Trainee form only; experienced
+    # candidates go straight from Document Collection to BGV.
+    @property
+    def uses_reference_check(self) -> bool:
+        return self.candidate_type == CandidateType.FRESHER
+
+    @property
+    def visible_submissions(self) -> list:
+        return [s for s in self.submissions
+                if self.uses_reference_check or s.form_type != FormType.REFERENCE_CHECK]
 
 
 class CandidateProfile(Base):
@@ -412,6 +424,29 @@ class ReferenceCheckDetails(Base):
     ref2_phone = Column(String(20))
     message_to_hiring_team = Column(Text)
     declaration_accepted = Column(String(10))
+
+
+class RefereeFeedback(Base):
+    """Answers a reference gives on the public referee form. One row per
+    (candidate, reference 1 or 2); the link is signed, see app/referee_links.py."""
+    __tablename__ = "referee_feedback"
+    __table_args__ = (UniqueConstraint("candidate_id", "ref_index", name="uq_referee_feedback_ref"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id"), nullable=False, index=True)
+    ref_index = Column(Integer, nullable=False)   # 1 or 2
+
+    referee_name = Column(String(150))
+    referee_email = Column(String(255))
+    relationship_with_candidate = Column(Text)
+    candidate_strengths = Column(Text)
+    candidate_development_areas = Column(Text)
+    rating_reliability = Column(Integer)
+    rating_punctuality = Column(Integer)
+    rating_attendance = Column(Integer)
+    rating_professionalism = Column(Integer)
+    additional_comments = Column(Text)
+    submitted_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class Document(Base):

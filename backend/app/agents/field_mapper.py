@@ -36,8 +36,6 @@ CURATED: dict[tuple[str, str], tuple[str, str]] = {
     ("DOCUMENT_COLLECTION", "passport_size_photo"): ("CIF", "profile_picture"),
     # The signature given on the CIF declaration serves the BGV declaration.
     ("BGV", "bgv_signature"): ("CIF", "signature"),
-    # ...and the Reference Check declaration too.
-    ("REFERENCE_CHECK", "ref_signature"): ("CIF", "signature"),
     # Passport copy is collected once, during document collection.
     ("BGV", "passport_copy_bgv"): ("DOCUMENT_COLLECTION", "passport_copy"),
     # Legal name for verification is the name already on file.

@@ -151,20 +151,73 @@ function fieldRows(form, fieldList, data, opts = {}) {
 }
 
 // Reference Check: candidate details, then each reference in its own box.
-const REF_BOX_LABELS = { name: "Reference Name", title: "Title", email: "Reference Mail ID",
-                         phone: "Reference Phone No." };
+const REF_BOX_LABELS = { name: "Referee Name", title: "Title", email: "Referee Mail ID",
+                         phone: "Referee Phone No." };
 function refCheckRows(data, opts = {}) {
   if (!data) return "<p style='color:#6b7280'>Not submitted yet.</p>";
   const rows = list => list.map(f => fieldRow("REFERENCE_CHECK", f, data[f], opts)).join("");
   const box = n => `
     <div class="ref-box">
-      <h4>Reference Detail ${n}</h4>
+      <h4>Referee Detail ${n}</h4>
       ${Object.entries(REF_BOX_LABELS).map(([k, label]) =>
         fieldRow("REFERENCE_CHECK", `ref${n}_${k}`, data[`ref${n}_${k}`], { ...opts, label })).join("")}
+      ${opts.editing ? "" : refereeFeedbackBlock((opts.referee || []).find(r => r.ref_index === n))}
     </div>`;
   return rows(["candidate_name", "reference_check_date", "position_applied_for"])
     + box(1) + box(2)
     + rows(["message_to_hiring_team", "declaration_accepted"]);
+}
+
+// Under each reference: the link to their own feedback form, and the answers
+// once they submit it (see backend app/referee_links.py).
+const REFEREE_QUESTIONS = [
+  ["relationship_with_candidate", "Relationship with the candidate"],
+  ["candidate_strengths", "Strengths"],
+  ["candidate_development_areas", "Development areas"],
+];
+const REFEREE_RATINGS = [
+  ["rating_reliability", "Reliability"], ["rating_punctuality", "Punctuality"],
+  ["rating_attendance", "Attendance"], ["rating_professionalism", "Professionalism"],
+];
+function refereeFeedbackBlock(fb) {
+  if (!fb) return "";
+  const url = escapeHtml(fb.form_url);
+  const link = `
+    <div class="referee-link">
+      <span class="fname">Referee Form Link</span>
+      <a href="${url}" target="_blank" rel="noopener">${url}</a>
+      <button class="btn btn-outline btn-small" type="button"
+              onclick="copyRefereeLink(this, '${url}')">Copy Link</button>
+    </div>`;
+  if (!fb.submitted) {
+    return link + `<div class="referee-status">Waiting for the referee to submit feedback.</div>`;
+  }
+  const a = fb.answers || {};
+  const row = (label, v) => `
+    <div class="field-row">
+      <div class="fname">${escapeHtml(label)}</div>
+      <div class="fval ${v ? "" : "empty"}">${v ? escapeHtml(String(v)) : "Not provided"}</div>
+    </div>`;
+  const when = fb.submitted_at ? new Date(fb.submitted_at).toLocaleString() : "";
+  return link + `
+    <div class="referee-feedback">
+      <h5>Referee Feedback <span class="badge badge-approved">SUBMITTED</span>
+        ${when ? `<small>${escapeHtml(when)}</small>` : ""}</h5>
+      ${REFEREE_QUESTIONS.map(([k, label]) => row(label, a[k])).join("")}
+      ${REFEREE_RATINGS.map(([k, label]) => row(`${label} (1-4)`, a[k])).join("")}
+      ${row("Additional comments", a.additional_comments)}
+    </div>`;
+}
+
+async function copyRefereeLink(btn, url) {
+  try {
+    await navigator.clipboard.writeText(url);
+    const original = btn.textContent;
+    btn.textContent = "Copied!";
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  } catch {
+    window.prompt("Copy the referee form link:", url);
+  }
 }
 
 // Repeating-row table (education / employment / references). In edit mode every
@@ -570,12 +623,14 @@ function render() {
   const docsOpen = c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE";
   // Reference Check opens only once the documents are approved (see sendGate).
   const docSub = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
-  const refsOpen = docsOpen && docSub?.status === "APPROVED";
+  // Reference Check is a Fresher / Trainee form only.
+  const refsOpen = c.candidate_type === "FRESHER" && docsOpen && docSub?.status === "APPROVED";
   applyEmailDraftVisibility();
   const emailOpts = {
     templates: ["CIF", ...(docsOpen ? ["DOCUMENT_COLLECTION"] : []), ...(refsOpen ? ["REFERENCE_CHECK"] : []),
                 // Once the candidate has named their references, HR can mail each one.
-                ...[1, 2].filter(n => (c.ref_check_details || {})[`ref${n}_email`])
+                ...[1, 2].filter(n => c.candidate_type === "FRESHER"
+                                       && (c.ref_check_details || {})[`ref${n}_email`])
                          .map(n => `REFERENCE_${n}`)],
     template: refsOpen && c.stage === "APPROVED_FOR_BGV" ? "REFERENCE_CHECK"
       : c.stage === "APPROVED_FOR_BGV" ? "DOCUMENT_COLLECTION" : "CIF",
@@ -692,7 +747,7 @@ function render() {
         <span class="chevron">&#9660;</span>
       </div>
       ${!submitted ? "<p style='color:#6b7280'>Waiting for candidate to submit.</p>" :
-        (type === "REFERENCE_CHECK" ? refCheckRows(cfg.data, { editing })
+        (type === "REFERENCE_CHECK" ? refCheckRows(cfg.data, { editing, referee: c.referee_feedback })
                                     : fieldRows(type, cfg.fields, cfg.data, { editing }))
           + (type === "BGV" ? bgvTables(c, { editing, showDelete: editing }) : "")
           + `<div id="${FORM_DOCS_ID[type]}">${renderDocs(c.documents, type, { editing })}</div>`}
@@ -749,11 +804,11 @@ function render() {
 const ZOHO_TARGETS = {
   confirmation: {
     prefix: "zoho_", bodyId: "zohoBody", btnId: "zohoPushBtn",
-    path: "zoho/push", label: "Zoho People",
+    path: "zoho/push", label: "Zoho Candidate Information Form",
   },
   candidate: {
     prefix: "zoho_cand_", bodyId: "zohoCandBody", btnId: "zohoCandPushBtn",
-    path: "zoho/candidate-form/push", label: "Zoho Candidate Form",
+    path: "zoho/candidate-form/push", label: "Zoho Candidate Onboarding Form",
   },
 };
 
@@ -900,7 +955,13 @@ function sendGate(form, c) {
                reason: "Available once you approve their Document Collection form above." };
     }
   }
-  if (form === "BGV") {
+  if (form === "BGV" && c.candidate_type !== "FRESHER") {
+    const docs = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
+    if (!docs || docs.status !== "APPROVED") {
+      return { canSend: false,
+               reason: "Available once you approve their Document Collection form above." };
+    }
+  } else if (form === "BGV") {
     const refs = c.submissions.find(s => s.form_type === "REFERENCE_CHECK");
     if (!refs || refs.status !== "APPROVED") {
       return { canSend: false,

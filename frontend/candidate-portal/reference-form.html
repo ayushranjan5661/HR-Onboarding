@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#3730a3">
 <title>Reference Check Form</title>
-<link rel="stylesheet" href="css/style.css?v=20261007c">
+<link rel="stylesheet" href="css/style.css?v=20261008a">
 <style>
   .form-card { max-width: 1000px; }
 </style>
@@ -37,22 +37,22 @@
         </div>
 
         <div class="form-section">
-          <h3>Reference Detail 1</h3>
+          <h3>Referee Detail 1</h3>
           <div class="grid-2">
-            <div><label>Reference Name *</label><input name="ref1_name" required></div>
+            <div><label>Referee Name *</label><input name="ref1_name" required></div>
             <div><label>Title *</label><input name="ref1_title" required placeholder="e.g. Engineering Manager"></div>
-            <div><label>Reference Mail ID *</label><input type="email" name="ref1_email" required></div>
-            <div><label>Reference Phone No. *</label><input type="tel" name="ref1_phone" required></div>
+            <div><label>Referee Mail ID *</label><input type="email" name="ref1_email" required></div>
+            <div><label>Referee Phone No. *</label><input type="tel" name="ref1_phone" required></div>
           </div>
         </div>
 
         <div class="form-section">
-          <h3>Reference Detail 2</h3>
+          <h3>Referee Detail 2</h3>
           <div class="grid-2">
-            <div><label>Reference Name *</label><input name="ref2_name" required></div>
+            <div><label>Referee Name *</label><input name="ref2_name" required></div>
             <div><label>Title *</label><input name="ref2_title" required placeholder="e.g. Team Lead"></div>
-            <div><label>Reference Mail ID *</label><input type="email" name="ref2_email" required></div>
-            <div><label>Reference Phone No. *</label><input type="tel" name="ref2_phone" required></div>
+            <div><label>Referee Mail ID *</label><input type="email" name="ref2_email" required></div>
+            <div><label>Referee Phone No. *</label><input type="tel" name="ref2_phone" required></div>
           </div>
         </div>
 
@@ -71,11 +71,6 @@
               to the best of my knowledge. I authorise LevelShift to contact the references listed above, and I
               understand that any false or misleading information may lead to withdrawal of the offer or
               termination of employment. *</label>
-          </div>
-          <div class="grid-2" style="margin-top:10px;">
-            <div><label>Upload Candidate Signature *</label>
-              <input type="file" name="ref_signature" accept=".jpg,.jpeg,.png,.gif" required>
-              <div class="file-hint">JPG, PNG or GIF</div></div>
           </div>
         </div>
 
@@ -102,7 +97,6 @@
     document.getElementById("whoami").textContent = getName();
 
     const formEl = document.getElementById("refForm");
-    enableLocalPreviews(formEl);   // let the candidate confirm the signature they attach
     // Save Draft must work before any network call finishes.
     wireDraftSave({ formType: "REFERENCE_CHECK", formEl });
 
@@ -125,9 +119,6 @@
                         { title: "Already submitted", tone: "info" });
         window.location.href = "home.html"; return;
       }
-
-      // The CIF signature is reused unless the candidate picks a new one.
-      await runAutoFill("REFERENCE_CHECK", formEl, document.querySelector(".form-card"));
 
       // Carry the CIF answers forward so nothing is typed twice.
       if (data.profile) setIfEmpty("candidate_name", data.profile.full_name);

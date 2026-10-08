@@ -260,3 +260,13 @@ body.cand-page .brand-mark { background: linear-gradient(135deg, #6366f1, #ec489
            margin: 14px 0; background: #fafafc; }
 .ref-box h4 { margin: 8px 0 4px; font-size: 0.85rem; color: #3730a3; letter-spacing: 0.02em; }
 .ref-box .field-row:last-child { border-bottom: none; }
+.referee-link { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 0;
+  border-top: 1px dashed #c7d2fe; }
+.referee-link .fname { min-width: 180px; }
+.referee-link a { word-break: break-all; color: #3730a3; font-size: 0.85rem; flex: 1 1 260px; }
+.referee-status { color: #6b7280; font-size: 0.85rem; padding: 0 0 8px; }
+.referee-feedback { margin: 4px 0 8px; padding: 6px 12px; border-radius: 8px; background: #fff;
+  border: 1px solid #e5e7eb; }
+.referee-feedback h5 { margin: 8px 0 4px; font-size: 0.85rem; color: #3730a3; display: flex;
+  align-items: center; gap: 8px; flex-wrap: wrap; }
+.referee-feedback h5 small { color: #6b7280; font-weight: 400; }

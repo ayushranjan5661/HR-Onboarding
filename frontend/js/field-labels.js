@@ -107,7 +107,7 @@ const FORM_FILE_FIELDS = {
     "passport_size_photo", "pan_card", "aadhar_card", "passport_copy",
     "address_proof", "id_proof",
   ],
-  REFERENCE_CHECK: ["ref_signature"],
+  REFERENCE_CHECK: [],
 };
 
 // Repeating-row tables: table name (API) -> column order for display
@@ -302,10 +302,10 @@ const FIELD_LABELS = {
   passport_copy: "Passport Copy", address_proof: "Address Proof", id_proof: "ID Proof",
   // Reference Check
   candidate_name: "Candidate Name", reference_check_date: "Date",
-  ref1_name: "Reference 1 — Name", ref1_title: "Reference 1 — Title",
-  ref1_email: "Reference 1 — Mail ID", ref1_phone: "Reference 1 — Phone No.",
-  ref2_name: "Reference 2 — Name", ref2_title: "Reference 2 — Title",
-  ref2_email: "Reference 2 — Mail ID", ref2_phone: "Reference 2 — Phone No.",
+  ref1_name: "Referee 1 — Name", ref1_title: "Referee 1 — Title",
+  ref1_email: "Referee 1 — Mail ID", ref1_phone: "Referee 1 — Phone No.",
+  ref2_name: "Referee 2 — Name", ref2_title: "Referee 2 — Title",
+  ref2_email: "Referee 2 — Mail ID", ref2_phone: "Referee 2 — Phone No.",
   message_to_hiring_team: "Message to Hiring Team",
   ref_signature: "Candidate Signature",
 };

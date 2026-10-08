@@ -110,13 +110,11 @@ CATALOG = {
             ("id_proof", "ID Proof"),
         ],
     },
-    # Only the signature is catalogued: it is the one thing carried over from
-    # the CIF (name and position are filled in by the page itself).
+    # Nothing catalogued: name and position are filled in by the page itself.
     "REFERENCE_CHECK": {
         "field": [
         ],
         "document": [
-            ("ref_signature", "Candidate Signature"),
         ],
     },
     "BGV": {
