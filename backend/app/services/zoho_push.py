@@ -201,3 +201,91 @@ def push_candidate(db: Session, candidate: Candidate, target: str = "confirmatio
         "tabular_columns": len(tabular),
         "tabular_rows": sum(subform_counts.values()),
     }
+
+
+# "Documents Collection - Trainee" — the Reference Check PDF goes into its
+# Reference_check file field; the record is matched on Candidate_Email_ID.
+REF_EMAIL_FIELD = "Candidate_Email_ID"
+REF_NAME_FIELD = "Candidate_Name"
+REF_FILE_FIELD = "Reference_check"
+
+
+def push_reference_check(candidate: Candidate) -> dict:
+    """Upload the generated Reference Check PDF (app/services/reference_pdf.py)
+    to ZOHO_REFERENCE_CHECK_WRITE_FORM. Updates the record already linked to
+    this candidate, else the one Zoho has for their email, else inserts one.
+    Returns {"record_id", "status", "created"}; raises ZohoPushError."""
+    form = settings.ZOHO_REFERENCE_CHECK_WRITE_FORM
+    if not form:
+        raise ZohoPushError("Zoho push is not configured: set "
+                            "ZOHO_REFERENCE_CHECK_WRITE_FORM in .env.")
+    if not candidate.ref_check_details:
+        raise ZohoPushError("The candidate has not submitted the Reference Check form yet.")
+    email = candidate.email or ""
+    if not email:
+        raise ZohoPushError("Candidate has no email on record — Zoho's duplicate check needs one.")
+
+    from app.services import reference_pdf
+    pdf = reference_pdf.build(candidate)
+    safe = "".join(ch if ch.isalnum() else "_" for ch in (candidate.name or "candidate")).strip("_")
+    filename = f"Referee_Check_{safe or candidate.id}.pdf"
+
+    try:
+        token = _zc.access_token(force=True)
+    except _zc.ZohoUnreachable as exc:
+        raise ZohoPushError(_network_message(exc)) from exc
+    except _zc.ZohoError as exc:
+        raise ZohoPushError(f"Could not authenticate with Zoho: {exc}") from exc
+
+    record_id = candidate.zoho_ref_record_id
+    if not record_id:
+        try:
+            existing = _zc.find_by_email(token, form, email, REF_EMAIL_FIELD)
+        except _zc.ZohoUnreachable as exc:
+            raise ZohoPushError(_network_message(exc)) from exc
+        except _zc.ZohoError as exc:
+            raise ZohoPushError(
+                f"Duplicate check against Zoho failed, refusing to insert: {exc}") from exc
+        if len(existing) > 1:
+            raise ZohoPushError(
+                f"{len(existing)} records for {email} already exist on '{form}'. "
+                "Remove the duplicates in Zoho first, then publish again.")
+        if existing:
+            # getRecords keys each hit by its record id: [{"<id>": [{fields}]}]
+            hit = existing[0] if isinstance(existing[0], dict) else {}
+            record_id = next((str(k) for k in hit if str(k).isdigit()), "")
+            if not record_id:
+                raise ZohoPushError(f"Could not read the id of the existing Zoho record: "
+                                    f"{str(existing[0])[:400]}")
+
+    # The PDF is uploaded straight from memory: no temp file, since
+    # tempfile hangs on this machine (its temp dir refuses new files and
+    # Python retries effectively forever).
+    files = [(REF_FILE_FIELD, filename, "application/pdf", pdf)]
+    # On an existing record only the PDF is touched; a new one also gets
+    # the email/name it is matched on next time.
+    payload = {} if record_id else {REF_EMAIL_FIELD: email, REF_NAME_FIELD: candidate.name or ""}
+    _zc.log("push.request", source="hr-portal", target="reference_check", form=form,
+            candidate_id=candidate.id, email=email, record_id=record_id, files=[REF_FILE_FIELD])
+    try:
+        response = (_zc.update_record(token, form, record_id, payload, files=files)
+                    if record_id
+                    else _zc.insert_record(token, form, payload, files=files))
+    except _zc.ZohoUnreachable as exc:
+        _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
+                reason="unreachable", message=str(exc))
+        raise ZohoPushError(_network_message(exc)) from exc
+    except _zc.ZohoError as exc:
+        _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
+                message=str(exc))
+        raise ZohoPushError(f"Zoho rejected the push: {exc}") from exc
+
+    _zc.log("push.response", source="hr-portal", form=form, candidate_id=candidate.id,
+            response=response)
+    if _zc.has_errors(response):
+        raise ZohoPushError(f"Zoho reported an error: {str(response)[:600]}")
+
+    new_id = record_id or _zc.record_id_from(response)
+    if not new_id:
+        raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
+    return {"record_id": new_id, "status": "SYNCED", "created": not record_id}

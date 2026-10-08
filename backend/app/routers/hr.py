@@ -413,6 +413,10 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         zoho_cand_status=candidate.zoho_cand_status,
         zoho_cand_synced_at=candidate.zoho_cand_synced_at,
         zoho_cand_last_error=candidate.zoho_cand_last_error,
+        zoho_ref_record_id=candidate.zoho_ref_record_id,
+        zoho_ref_status=candidate.zoho_ref_status,
+        zoho_ref_synced_at=candidate.zoho_ref_synced_at,
+        zoho_ref_last_error=candidate.zoho_ref_last_error,
     )
 
 
@@ -953,6 +957,35 @@ def push_candidate_to_zoho_candidate_form(candidate_id: int, db: Session = Depen
     Nothing is sent unless ZOHO_CANDIDATE_PROFILE_WRITE_FORM is set in .env."""
     candidate = scope.get_scoped_candidate(db, candidate_id, current)
     return _run_zoho_push(db, candidate, "candidate")
+
+
+@router.post("/candidates/{candidate_id}/zoho/reference-check/push")
+def push_reference_check_to_zoho(candidate_id: int, db: Session = Depends(get_db),
+                                 current: HRUser = Depends(get_current_staff)):
+    """Upload the generated Reference Check PDF (same file as
+    /reference-check/pdf) into the Reference_check field of Zoho's
+    "Documents Collection - Trainee" form. Tracked in zoho_ref_* columns."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    if candidate.stage not in _ZOHO_PUSH_STAGES:
+        raise HTTPException(
+            status_code=400,
+            detail="Only candidates approved for BGV, or fully onboarded, can be "
+                    "published to Zoho People.")
+    try:
+        result = zoho_push.push_reference_check(candidate)
+    except zoho_push.ZohoPushError as exc:
+        candidate.zoho_ref_last_error = str(exc)[:2000]
+        db.commit()
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    candidate.zoho_ref_record_id = result["record_id"]
+    candidate.zoho_ref_status = result["status"]
+    candidate.zoho_ref_synced_at = datetime.now(timezone.utc)
+    candidate.zoho_ref_last_error = None
+    db.commit()
+    verb = "Created" if result["created"] else "Updated"
+    return {"detail": f"{verb} Zoho Documents Collection record {result['record_id']} "
+                      "with the Referee Check PDF.", **result}
 
 
 # ---------------------------------------------------------------------------
