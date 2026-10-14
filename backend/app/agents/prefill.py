@@ -19,7 +19,7 @@ import time
 
 from sqlalchemy.orm import Session
 
-from app.agents import doc_validator, field_mapper
+from app.agents import doc_check_queue, doc_validator, field_mapper
 from app.config import settings
 from app.models import (
     BGVDetails,
@@ -188,6 +188,8 @@ def carry_documents(db: Session, candidate_id: int, target_form: str,
         # mapping only pairs like-for-like fields, so the expected type is
         # the same on both sides.)
         doc_validator.copy_between(src, doc)
+        if src.ai_checked_at is None and doc_check_queue.deferred():
+            doc_check_queue.mark(db, doc)   # source's check not done yet; check the copy
         db.add(doc)
         carried.append(target)
     return carried
