@@ -57,7 +57,7 @@ from app.models import (
     ReferenceCheckDetails,
     ReferenceDetail,
 )
-from app.agents import doc_validator
+from app.agents import doc_check_queue, doc_validator
 from app.agents import prefill as prefill_agent
 from app.schemas import MyStatusOut
 from app.utils.file_storage import (save_bytes, save_upload, snapshot_document,
@@ -284,7 +284,7 @@ def _save_draft(ft: FormType, form, db: Session, current: Candidate):
             row = FormDraftDocument(candidate_id=current.id, form_type=ft, field_key=field_key,
                                     original_filename=original, stored_filename=stored,
                                     content_type=upload.content_type)
-            doc_validator.apply_to(row, verdict)
+            _record_verdict(db, row, verdict)
             db.add(row)
     except Exception:
         db.rollback()
@@ -292,6 +292,7 @@ def _save_draft(ft: FormType, form, db: Session, current: Candidate):
         raise
 
     db.commit()
+    doc_check_queue.flush_pending(db)
     _remove_files(replaced_paths)
 
     saved_docs = db.query(FormDraftDocument).filter(
@@ -356,6 +357,8 @@ def _promote_draft_documents(db, candidate_id: int, ft: FormType, provided: set[
                        original_filename=draft_doc.original_filename,
                        stored_filename=stored, content_type=draft_doc.content_type)
         doc_validator.copy_between(draft_doc, doc)   # same bytes: the draft's verdict stands
+        if draft_doc.ai_checked_at is None and doc_check_queue.deferred():
+            doc_check_queue.mark(db, doc)   # draft's check still queued; check the copy too
         db.add(doc)
         promoted.append(draft_doc.field_key)
     return promoted
@@ -423,13 +426,20 @@ def _remove_files(paths: list[str]) -> None:
             pass
 
 
-def _check_document(current: Candidate, stored: str, upload, field_key: str) -> doc_validator.Verdict:
+def _check_document(current: Candidate, stored: str, upload,
+                    field_key: str) -> doc_validator.Verdict | None:
     """Run the document-validation agent on a file that has just been written.
 
     In "block" mode a confident mismatch is refused here, as a 400 the page
     shows under the field. The caller's cleanup removes the written file — the
     check runs before any row for it exists, so there is nothing else to undo.
+
+    Otherwise the verdict is only for HR, so the candidate is not made to wait
+    for OCR: this returns None and `_record_verdict` queues the row to be
+    checked after commit (app/agents/doc_check_queue.py).
     """
+    if doc_check_queue.deferred():
+        return None
     verdict = doc_validator.validate_path(
         upload_path(stored), upload.content_type, upload.filename or "", field_key,
         doc_validator.profile_dict(current.profile))
@@ -437,6 +447,13 @@ def _check_document(current: Candidate, stored: str, upload, field_key: str) -> 
         label = field_key.replace("_", " ")
         raise HTTPException(status_code=400, detail=f"{label}: {verdict.note}")
     return verdict
+
+
+def _record_verdict(db, row, verdict: doc_validator.Verdict | None) -> None:
+    if verdict is None:
+        doc_check_queue.mark(db, row)    # checked in the background after commit
+    else:
+        doc_validator.apply_to(row, verdict)
 
 
 def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> list[str]:
@@ -473,7 +490,7 @@ def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> li
             doc = Document(candidate_id=current.id, form_type=FormType(form_type), field_key=field_key,
                            original_filename=original, stored_filename=stored,
                            content_type=upload.content_type)
-            doc_validator.apply_to(doc, verdict)
+            _record_verdict(db, doc, verdict)
             db.add(doc)
     except Exception:
         _remove_files(written_paths)
@@ -567,6 +584,7 @@ def _submit_cif(form, db: Session, current: Candidate):
 
     current.stage = CandidateStage.CIF_SUBMITTED   # unchanged on a resubmit
     db.commit()
+    doc_check_queue.flush_pending(db)
     _remove_files(replaced)   # replaced uploads go only once the new state is safe
     return {"detail": "CIF submitted. HR will review your details shortly."}
 
@@ -688,6 +706,7 @@ def _submit_followup_form(form_type: str, form, db: Session, current: Candidate)
     submission.submitted_at = datetime.now(timezone.utc)
     replaced += _discard_draft(db, current.id, FormType(form_type))
     db.commit()
+    doc_check_queue.flush_pending(db)
     _remove_files(replaced)   # replaced uploads go only once the new state is safe
     detail = "Form submitted. HR will review it shortly."
     if carried:
@@ -780,6 +799,7 @@ def _apply_granted_edits(form, db: Session, current: Candidate):
             perm.resolved_at = datetime.now(timezone.utc)
             applied += 1
         db.commit()
+        doc_check_queue.flush_pending(db)
     except Exception:
         db.rollback()
         _remove_files(written_paths)   # a failed attempt leaves no orphans
@@ -873,7 +893,7 @@ def _apply_granted_document(db: Session, current: Candidate, perm: FieldEditPerm
     new_doc = Document(candidate_id=current.id, form_type=ft, field_key=perm.field_name,
                         original_filename=original, stored_filename=stored,
                         content_type=upload.content_type)
-    doc_validator.apply_to(new_doc, verdict)
+    _record_verdict(db, new_doc, verdict)
     db.add(new_doc)
     db.flush()
     new_snapshot = snapshot_document(db, new_doc)

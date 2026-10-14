@@ -111,22 +111,31 @@
 
         <!-- Publish this candidate's data into Zoho People. Only shown once
              BGV has been reached — see backend _ZOHO_PUSH_STAGES. -->
-        <div class="card section-card hidden" id="zohoCard">
-          <div class="section-title"><h3>Zoho Data Push - Candidate Information Form</h3></div>
+        <div class="card section-card hidden collapsed" id="zohoCard">
+          <div class="section-title collapsible" onclick="toggleCollapse(this)">
+            <h3>Zoho Data Push - Candidate Information Form</h3>
+            <span class="chevron">&#9660;</span>
+          </div>
           <div id="zohoBody"></div>
         </div>
 
         <!-- Separate push into Zoho's "Candidate" form (own record, own map:
              integrations/zoho/field_map_candidate.json). Same stage gate. -->
-        <div class="card section-card hidden" id="zohoCandCard">
-          <div class="section-title"><h3>Zoho Data Push - Candidate Onboarding Form</h3></div>
+        <div class="card section-card hidden collapsed" id="zohoCandCard">
+          <div class="section-title collapsible" onclick="toggleCollapse(this)">
+            <h3>Zoho Data Push - Candidate Onboarding Form</h3>
+            <span class="chevron">&#9660;</span>
+          </div>
           <div id="zohoCandBody"></div>
         </div>
 
         <!-- Reference Check PDF -> Reference_check file field of Zoho's
              "Documents Collection - Trainee" form. Same stage gate. -->
-        <div class="card section-card hidden" id="zohoRefCard">
-          <div class="section-title"><h3>Zoho Data Push - Referee Check Form</h3></div>
+        <div class="card section-card hidden collapsed" id="zohoRefCard">
+          <div class="section-title collapsible" onclick="toggleCollapse(this)">
+            <h3>Zoho Data Push - Referee Check Form</h3>
+            <span class="chevron">&#9660;</span>
+          </div>
           <div id="zohoRefBody"></div>
         </div>
       </div>
