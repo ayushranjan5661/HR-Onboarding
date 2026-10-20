@@ -122,6 +122,7 @@ class CandidateListItem(BaseModel):
     assigned_hr_role: Optional[str] = None  # lets the list label an owner outside the viewer's scope
     manager_id: Optional[int] = None      # the owner's Manager (or the owner, if a Manager)
     manager_name: Optional[str] = None
+    doc_status: Optional[str] = None      # Document Collection form status, if the form exists
 
     class Config:
         from_attributes = True

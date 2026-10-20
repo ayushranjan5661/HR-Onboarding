@@ -212,11 +212,23 @@ function refereeFeedbackBlock(fb) {
 // The PDF endpoint needs the Authorization header, so fetch it as a blob and
 // hand it to the browser as a download.
 async function downloadReferencePdf(btn) {
+  return downloadPdf(btn, "reference-check", "Referee_Check.pdf");
+}
+
+async function downloadDocCollectionPdf(btn) {
+  return downloadPdf(btn, "document-collection", "Document_Collection.pdf");
+}
+
+async function downloadCifPdf(btn) {
+  return downloadPdf(btn, "cif", "CIF.pdf");
+}
+
+async function downloadPdf(btn, path, fallbackName) {
   const original = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Preparing…";
   try {
-    const res = await fetch(`${API_BASE}/hr/candidates/${candidateId}/reference-check/pdf`, {
+    const res = await fetch(`${API_BASE}/hr/candidates/${candidateId}/${path}/pdf`, {
       headers: { Authorization: `Bearer ${getToken()}` },
     });
     if (!res.ok) {
@@ -227,7 +239,7 @@ async function downloadReferencePdf(btn) {
     const url = URL.createObjectURL(await res.blob());
     const a = document.createElement("a");
     a.href = url;
-    a.download = match ? match[1] : "Referee_Check.pdf";
+    a.download = match ? match[1] : fallbackName;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -699,8 +711,10 @@ function render() {
   // same Send / Withdraw controls the follow-up cards get, plus a NOT SENT
   // badge that says why a sent form has gone quiet on the candidate's side.
   const cifSub = c.submissions.find(s => s.form_type === "CIF");
+  const cifPdfControl = c.cif_details && !editModes.CIF
+    ? `<button class="btn btn-outline btn-small" onclick="downloadCifPdf(this)">Download PDF</button>` : "";
   document.getElementById("actions-CIF").innerHTML =
-    (editModes.CIF ? "" : accessControls("CIF", cifSub, c)) + formEditControls("CIF");
+    cifPdfControl + (editModes.CIF ? "" : accessControls("CIF", cifSub, c)) + formEditControls("CIF");
   document.getElementById("cifBadge").innerHTML =
     cifSub && cifSub.status === "LOCKED"
       ? `<span class="badge badge-locked">NOT SENT</span>` : "";
@@ -777,7 +791,9 @@ function render() {
           ? `<button class="btn btn-outline btn-small" disabled title="${escapeHtml(
               `Available once both referees submit feedback (waiting for ${pendingRefs.map(n => `Referee ${n}`).join(" and ")})`)}">Download PDF</button>`
           : `<button class="btn btn-outline btn-small" onclick="downloadReferencePdf(this)">Download PDF</button>`)
-      : "";
+      : type === "DOCUMENT_COLLECTION" && submitted && !editing
+        ? `<button class="btn btn-outline btn-small" onclick="downloadDocCollectionPdf(this)">Download PDF</button>`
+        : "";
     wrap.innerHTML = `
       <div class="section-title collapsible" onclick="toggleCollapse(this)">
         <h3>${cfg.title} <span class="badge badge-${sub.status.toLowerCase()}">${sub.status.replaceAll("_"," ")}</span></h3>

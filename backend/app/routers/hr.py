@@ -289,6 +289,38 @@ def reference_email_ai(candidate_id: int, db: Session = Depends(get_db),
     return reference_email.generate(candidate.ref_check_details)
 
 
+@router.get("/candidates/{candidate_id}/cif/pdf")
+def cif_pdf(candidate_id: int, db: Session = Depends(get_db),
+            current: HRUser = Depends(get_current_staff)):
+    """Candidate Details (CIF) — profile, CIF answers and row tables — as a PDF."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    from app.services import cif_pdf as cif_pdf_service
+    reason = cif_pdf_service.not_ready_reason(candidate)
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+    pdf = cif_pdf_service.build(candidate)
+    safe = "".join(ch if ch.isalnum() else "_" for ch in (candidate.name or "candidate")).strip("_")
+    filename = f"CIF_{safe or candidate.id}.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.get("/candidates/{candidate_id}/document-collection/pdf")
+def document_collection_pdf(candidate_id: int, db: Session = Depends(get_db),
+                            current: HRUser = Depends(get_current_staff)):
+    """Document Collection checklist plus every uploaded file, as one PDF."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    from app.services import doc_pdf
+    reason = doc_pdf.not_ready_reason(candidate)
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+    pdf = doc_pdf.build(candidate)
+    safe = "".join(ch if ch.isalnum() else "_" for ch in (candidate.name or "candidate")).strip("_")
+    filename = f"Document_Collection_{safe or candidate.id}.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @router.get("/candidates/{candidate_id}/reference-check/pdf")
 def reference_check_pdf(candidate_id: int, db: Session = Depends(get_db),
                         current: HRUser = Depends(get_current_staff)):
@@ -345,8 +377,15 @@ def list_candidates(db: Session = Depends(get_db), current: HRUser = Depends(get
     rows = (scope.filter_candidates(db.query(Candidate), db, current)
               .order_by(Candidate.created_at.desc()).all())
     owners = _owner_columns(db, rows)
+    # One query for every row's Document Collection status, so the list can
+    # filter "docs submitted – awaiting review" without loading submissions.
+    doc_status = dict(db.query(FormSubmission.candidate_id, FormSubmission.status).filter(
+        FormSubmission.candidate_id.in_([c.id for c in rows]),
+        FormSubmission.form_type == FormType.DOCUMENT_COLLECTION).all()) if rows else {}
     return [CandidateListItem(id=c.id, name=c.name, email=c.email, stage=c.stage.value,
-                              created_at=c.created_at, **owners.get(c.assigned_hr_id, {}))
+                              created_at=c.created_at,
+                              doc_status=doc_status[c.id].value if c.id in doc_status else None,
+                              **owners.get(c.assigned_hr_id, {}))
             for c in rows]
 
 

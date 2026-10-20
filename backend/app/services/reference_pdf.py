@@ -67,7 +67,8 @@ def _wrap(text: str, font: str, size: float, width: float) -> list[str]:
 
 
 class _Report:
-    def __init__(self) -> None:
+    def __init__(self, title: str = "Referee Check Form") -> None:
+        self.title = title
         self.doc = pymupdf.open()
         self.page = None
         self.y = 0.0
@@ -81,7 +82,7 @@ class _Report:
             return
         # Continuation pages get a slim reminder of what they belong to.
         self.page.draw_rect(pymupdf.Rect(0, 0, _PAGE.width, 6), color=None, fill=_rgb("#312e81"))
-        self.page.insert_text((_LEFT, 24), "Referee Check Form (continued)",
+        self.page.insert_text((_LEFT, 24), f"{self.title} (continued)",
                               fontname=_BOLD, fontsize=8, color=_rgb(_MUTED))
         self.y = _TOP
 
@@ -99,7 +100,7 @@ class _Report:
         # A soft violet panel on the right for a bit of depth.
         self.page.draw_rect(pymupdf.Rect(_RIGHT - 150, r.y0, _RIGHT, r.y1), color=None,
                             fill=_rgb("#4338ca"), radius=0.12)
-        self._text(r.x0 + 18, r.y0 + 30, "Referee Check Form", _BOLD, 20, "#ffffff")
+        self._text(r.x0 + 18, r.y0 + 30, self.title, _BOLD, 20, "#ffffff")
         self._text(r.x0 + 18, r.y0 + 50, f"Candidate: {candidate_name}", _REG, 10, "#c7d2fe")
         stamp = datetime.now().strftime("%d/%m/%Y, %I:%M %p")
         for i, s in enumerate(("LevelShift", f"Generated {stamp}")):
