@@ -33,7 +33,7 @@ async function initCandidatesPage(mode) {
         <option value="">All stages</option>
         <option value="INVITED">Invited</option>
         <option value="CIF_SUBMITTED">CIF submitted</option>
-        <option value="APPROVED_FOR_BGV">Approved for BGV</option>
+        <option value="DOCS_SUBMITTED">Docs submitted</option>
         <option value="ONBOARDING_COMPLETE">Onboarding complete</option>
         <option value="REJECTED">Rejected</option>
       </select>
@@ -119,10 +119,14 @@ async function initCandidatesPage(mode) {
     const owner = document.getElementById("ownerFilter").value;
     const stage = document.getElementById("stageFilter").value;
     const mgr = isAdmin ? document.getElementById("managerFilter").value : "";
+    // Not a candidate stage: the Document Collection form is in, waiting on HR.
+    const matchesStage = c => stage === "DOCS_SUBMITTED"
+      ? c.stage === "APPROVED_FOR_BGV" && ["SUBMITTED", "UNDER_REVIEW"].includes(c.doc_status)
+      : c.stage === stage;
     return candidates.filter(c =>
       (!q || c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q)) &&
       (!owner || String(c.assigned_hr_id) === owner) &&
-      (!stage || c.stage === stage) &&
+      (!stage || matchesStage(c)) &&
       (!mgr || String(c.manager_id) === mgr));
   }
 
