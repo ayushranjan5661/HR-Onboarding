@@ -59,6 +59,8 @@ def main():
         exists = conn.execute(text("SELECT 1 FROM pg_type WHERE typname = 'formtype'")).first()
         if exists:
             conn.execute(text("ALTER TYPE formtype ADD VALUE IF NOT EXISTS 'REFERENCE_CHECK'"))
+            conn.execute(text("ALTER TYPE formtype ADD VALUE IF NOT EXISTS 'DECLARATION'"))
+            conn.execute(text("ALTER TYPE formtype ADD VALUE IF NOT EXISTS 'EXPERIENCE_DECLARATION'"))
 
     Base.metadata.create_all(bind=engine)
 
@@ -169,6 +171,24 @@ def main():
             "WHERE d.form_type = 'DOCUMENT_COLLECTION' AND NOT EXISTS ("
             "  SELECT 1 FROM form_submissions r WHERE r.candidate_id = d.candidate_id "
             "  AND r.form_type = 'REFERENCE_CHECK')"))
+
+        # Declaration (pending educational documents) applies to every
+        # candidate type; existing candidates get it unsent (LOCKED).
+        conn.execute(text(
+            "INSERT INTO form_submissions (candidate_id, form_type, status) "
+            "SELECT d.candidate_id, 'DECLARATION', 'LOCKED' FROM form_submissions d "
+            "WHERE d.form_type = 'DOCUMENT_COLLECTION' AND NOT EXISTS ("
+            "  SELECT 1 FROM form_submissions r WHERE r.candidate_id = d.candidate_id "
+            "  AND r.form_type = 'DECLARATION')"))
+
+        # Declaration (pending relieving / experience letters): every
+        # candidate; existing ones get it unsent (LOCKED).
+        conn.execute(text(
+            "INSERT INTO form_submissions (candidate_id, form_type, status) "
+            "SELECT d.candidate_id, 'EXPERIENCE_DECLARATION', 'LOCKED' FROM form_submissions d "
+            "WHERE d.form_type = 'DOCUMENT_COLLECTION' AND NOT EXISTS ("
+            "  SELECT 1 FROM form_submissions r WHERE r.candidate_id = d.candidate_id "
+            "  AND r.form_type = 'EXPERIENCE_DECLARATION')"))
 
     db = SessionLocal()
     try:

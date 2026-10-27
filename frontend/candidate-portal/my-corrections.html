@@ -6,11 +6,22 @@
 <meta name="theme-color" content="#3730a3">
 <title>Candidate Portal — Corrections</title>
 <link rel="stylesheet" href="css/style.css?v=20261008a">
+<style>
+  /* A whole reopened section, edited as a table like on the CIF. */
+  .tbl-wrap { overflow-x: auto; margin: 8px 0 10px; }
+  table.rep { width: 100%; border-collapse: collapse; }
+  table.rep th { background: #eceef4; font-size: 0.75rem; padding: 8px; white-space: nowrap; }
+  table.rep th .req { color: #ef4444; }
+  table.rep td { padding: 6px; border-bottom: 1px solid var(--border); }
+  table.rep input, table.rep select { min-width: 120px; }
+  .btn-addrow { background: #dbeafe; color: var(--brand); border: none; padding: 7px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.82rem; }
+  .del-row { background: none; border: none; cursor: pointer; font-size: 1rem; }
+</style>
 </head>
 <body>
   <div class="topbar">
     <div class="brand">Candidate Portal</div>
-    <div class="who">
+    <div class="who" id="whoBar">
       <span id="whoami"></span>
       <button onclick="candidateLogout()">Log out</button>
     </div>
@@ -21,8 +32,8 @@
     <p class="page-intro">
       Your submitted forms are locked. HR has unlocked only what is listed below. Change
       what you need, say why once at the bottom, and submit — the old value, the new value,
-      your reason and the time are all kept on record. Each one closes again once you
-      submit it.
+      your reason and the time are all kept on record. Everything closes again once you
+      submit.
     </p>
 
     <div id="correctionList"></div>
@@ -32,8 +43,9 @@
       <textarea id="overallReason" rows="3"
         placeholder="Why are you making these corrections? e.g. I entered my Aadhaar and PAN with typos."></textarea>
       <p style="color:#6b7280;font-size:0.85rem;margin:10px 0 12px;">
-        Fill in only the ones you want to change now — the rest stay open for later.
-        Everything you submit together is recorded as one entry, under this reason.
+        Change only what is wrong. Anything you leave as it is will be recorded as
+        already correct, and everything closes once you submit — as one entry, under
+        this reason.
       </p>
       <div class="error-msg" id="submitError"></div>
       <button class="btn btn-primary" id="submitAllBtn"
@@ -42,13 +54,35 @@
   </div>
 
   <script src="../js/config.js?v=20261007b"></script>
-  <script src="../js/date-format.js?v=20261007r"></script>
+  <script src="../js/date-format.js?v=20261025a"></script>
   <script src="js/api.js?v=20260929c"></script>
   <script src="js/dialog.js?v=20260901b"></script>
-  <script src="../js/field-labels.js?v=20261007ref3"></script>
+  <script src="../js/field-labels.js?v=20261027a"></script>
+  <script src="../js/responsive-tables.js?v=20261006m"></script>
   <script>
-    requireAuth();
-    document.getElementById("whoami").textContent = getName();
+    // Declaration forms have no login: their own link (…?form=declaration&token=…)
+    // opens just that form's corrections. Anything else is the logged-in portal.
+    const LINK_FORMS = ["declaration", "experience-declaration"];
+    const params = new URLSearchParams(location.search);
+    const linkForm = LINK_FORMS.includes(params.get("form")) ? params.get("form") : null;
+    const linkToken = linkForm ? params.get("token") || "" : "";
+    if (linkForm) {
+      document.getElementById("whoBar").classList.add("hidden");
+    } else {
+      requireAuth();
+      document.getElementById("whoami").textContent = getName();
+    }
+
+    async function correctionsApi(path, options = {}) {
+      if (!linkForm) return apiFetch(`/candidate/me/edit-access${path}`, options);
+      if (options.body) options.body.append("token", linkToken);
+      const url = `${API_BASE}/${linkForm}/edit-access${path}`
+        + (options.body ? "" : `?token=${encodeURIComponent(linkToken)}`);
+      const res = await fetch(url, options);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(errorMessage(data, res.status));
+      return data;
+    }
 
     function escapeHtml(str) {
       return String(str ?? "")
@@ -81,12 +115,16 @@
       CIF: "Candidate Information Form (CIF)",
       DOCUMENT_COLLECTION: "Document Collection Form",
       REFERENCE_CHECK: "Reference Check Form",
+      DECLARATION: "Declaration Form Education Documents",
+      EXPERIENCE_DECLARATION: "Declaration Form Relieving Letter and Experience Letter",
       BGV: "Background Verification Form",
     };
-    const FORM_ORDER = ["CIF", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "BGV"];
+    const FORM_ORDER = ["CIF", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION",
+                        "EXPERIENCE_DECLARATION", "BGV"];
 
     // "Employment #2 — Acme Ltd → Reason for Leaving", or just the field label.
     function permLabel(perm) {
+      if (perm.field_kind === "SECTION") return `${perm.row_label} — entire section`;
       const field = labelFor(perm.field_name);
       return perm.field_kind === "ROW_FIELD"
         ? `${perm.row_label} → ${field}` : field;
@@ -109,7 +147,69 @@
       }).join("");
     }
 
+    // ---- A whole reopened section (e.g. every UG / PG entry) ----
+    // The candidate can fix entries, add one they forgot, or remove one.
+    const YES_NO_COLUMNS = new Set(["has_marksheet"]);
+    const OPTIONAL_COLUMNS = new Set(["gaps"]);
+
+    function sectionCell(column, value) {
+      if (YES_NO_COLUMNS.has(column)) {
+        return `<td><select data-k="${column}"><option value="">Select</option>${
+          ["Yes", "No"].map(o => `<option${value === o ? " selected" : ""}>${o}</option>`).join("")
+        }</select></td>`;
+      }
+      return `<td><input data-k="${column}" value="${escapeHtml(value ?? "")}"></td>`;
+    }
+
+    function sectionRow(perm, row) {
+      return `<tr${row ? ` data-id="${row.id}"` : ""}>
+        ${perm.columns.map(c => sectionCell(c, row ? row[c] : "")).join("")}
+        <td><button type="button" class="del-row" title="Remove this entry"
+          onclick="this.closest('tr').remove()">🗑️</button></td></tr>`;
+    }
+
+    function addSectionRow(permId) {
+      const perm = currentPermissions.find(p => p.id === permId);
+      document.querySelector(`#value-${permId} tbody`)
+        .insertAdjacentHTML("beforeend", sectionRow(perm, null));
+    }
+
+    function sectionCard(perm) {
+      return `
+        <div class="card correction-item" id="perm-${perm.id}">
+          <div class="correction-field">${escapeHtml(permLabel(perm))}</div>
+          <div class="correction-current">
+            Edit any entry, add one you missed with <strong>+ Add Row</strong>, or
+            remove one with 🗑️.
+          </div>
+          ${perm.hr_note
+            ? `<div class="correction-note">HR's note: ${escapeHtml(perm.hr_note)}</div>`
+            : ""}
+          <div class="tbl-wrap"><table class="rep" id="value-${perm.id}">
+            <thead><tr>${perm.columns.map(c => `<th>${escapeHtml(labelFor(c))}${
+              OPTIONAL_COLUMNS.has(c) ? "" : '<span class="req">*</span>'}</th>`).join("")}<th></th></tr></thead>
+            <tbody>${perm.rows.map(r => sectionRow(perm, r)).join("")}</tbody>
+          </table></div>
+          <button type="button" class="btn-addrow" onclick="addSectionRow(${perm.id})">+ Add Row</button>
+        </div>`;
+    }
+
+    // Filled-in rows as {id?, column: value}; a row with nothing typed is ignored.
+    function readSectionRows(perm) {
+      return Array.from(document.querySelectorAll(`#value-${perm.id} tbody tr`)).map(tr => {
+        const row = tr.dataset.id ? { id: Number(tr.dataset.id) } : {};
+        tr.querySelectorAll("[data-k]").forEach(el => { row[el.dataset.k] = el.value.trim(); });
+        return row;
+      }).filter(row => perm.columns.some(c => row[c]));
+    }
+
+    function sectionChanged(perm, rows) {
+      const shape = r => [r.id ?? "", ...perm.columns.map(c => r[c] ?? "")].join("\u0001");
+      return rows.map(shape).join("\n") !== perm.rows.map(shape).join("\n");
+    }
+
     function permCard(perm) {
+      if (perm.field_kind === "SECTION") return sectionCard(perm);
       return `
         <div class="card correction-item" id="perm-${perm.id}">
           <div class="correction-field">${escapeHtml(permLabel(perm))}</div>
@@ -134,6 +234,10 @@
     // everything else is left open for later.
     function pendingChanges(permissions) {
       return permissions.map(perm => {
+        if (perm.field_kind === "SECTION") {
+          const rows = readSectionRows(perm);
+          return sectionChanged(perm, rows) ? { perm, rows } : null;
+        }
         const valueEl = document.getElementById(`value-${perm.id}`);
         if (valueEl.type === "file") {
           const file = valueEl.files && valueEl.files[0];
@@ -148,10 +252,16 @@
       const submitError = document.getElementById("submitError");
       submitError.textContent = "";
 
+      // Whatever was not changed is handed in as "already correct", so one
+      // submit closes everything HR opened.
       const pending = pendingChanges(currentPermissions);
+      const changedIds = new Set(pending.map(c => c.perm.id));
+      const unchanged = currentPermissions.filter(p => !changedIds.has(p.id));
       if (!pending.length) {
-        submitError.textContent = "Change at least one value before submitting.";
-        return;
+        const ok = await showConfirm(
+          "You have not changed anything. Submit to confirm everything HR opened is already correct?",
+          { title: "Nothing changed", okText: "Confirm all correct", cancelText: "Go back" });
+        if (!ok) return;
       }
       // No <form> wraps these inputs, so the browser never runs its own
       // validation here — check the date shape before sending it on.
@@ -164,6 +274,18 @@
         document.getElementById(`value-${badDate.perm.id}`).focus();
         return;
       }
+      for (const c of pending.filter(c => c.rows)) {
+        if (!c.rows.length) {
+          submitError.textContent = `Keep at least one entry in ${c.perm.row_label}.`;
+          return;
+        }
+        const missing = c.rows.some(r => c.perm.columns.some(col => !OPTIONAL_COLUMNS.has(col) && !r[col]));
+        if (missing) {
+          submitError.textContent =
+            `Fill in every column marked * for each entry in ${c.perm.row_label}.`;
+          return;
+        }
+      }
       const reason = document.getElementById("overallReason").value.trim();
       if (reason.length < 5) {
         submitError.textContent = "Please say why you are making these changes.";
@@ -174,15 +296,16 @@
       const body = new FormData();
       body.append("reason", reason);
       body.append("changes", JSON.stringify(pending.map(c => ({
-        permission_id: c.perm.id, ...(c.file ? {} : { new_value: c.value }),
-      }))));
+        permission_id: c.perm.id,
+        ...(c.rows ? { rows: c.rows } : c.file ? {} : { new_value: c.value }),
+      })).concat(unchanged.map(p => ({ permission_id: p.id, unchanged: true })))));
       pending.filter(c => c.file).forEach(c => body.append(`file_${c.perm.id}`, c.file));
 
       const original = btn.textContent;
       btn.disabled = true;
       btn.textContent = "Submitting…";
       try {
-        const res = await apiFetch("/candidate/me/edit-access/apply", { method: "POST", body });
+        const res = await correctionsApi("/apply", { method: "POST", body });
         await showAlert(res.detail, { title: "Changes recorded" });
         await load();
       } catch (err) {
@@ -204,7 +327,7 @@
     let currentPermissions = [];
 
     async function load() {
-      const access = await apiFetch("/candidate/me/edit-access");
+      const access = await correctionsApi("");
       currentPermissions = access.permissions || [];
       renderCorrections(currentPermissions);
       attachDateInputs(document.getElementById("correctionList"));

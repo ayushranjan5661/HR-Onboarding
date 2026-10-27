@@ -70,6 +70,18 @@ const REF_CHECK_FIELDS = [
   "message_to_hiring_team", "declaration_accepted",
 ];
 
+const DECLARATION_FIELDS = [
+  "candidate_name", "submission_within_days",
+  "semester_marksheets_pending", "consolidated_provisional_pending",
+  "degree_certificate_pending", "pan_card_pending", "pending_semesters",
+  "declaration_accepted", "declaration_date",
+];
+
+const EXP_DECLARATION_FIELDS = [
+  "candidate_name", "submission_within_days", "relieving_experience_pending",
+  "declaration_accepted", "declaration_date",
+];
+
 const FORM_FILE_FIELDS = {
   CIF: ["profile_picture", "signature"],
   BGV: ["signed_consent_form", "passport_copy_bgv", "form16_last_year", "form16_previous_year", "bank_statement_salary", "police_clearance_certificate", "bgv_signature"],
@@ -108,6 +120,8 @@ const FORM_FILE_FIELDS = {
     "address_proof", "id_proof",
   ],
   REFERENCE_CHECK: [],
+  DECLARATION: ["declaration_signature"],
+  EXPERIENCE_DECLARATION: ["exp_declaration_signature"],
 };
 
 // Repeating-row tables: table name (API) -> column order for display
@@ -183,6 +197,9 @@ const FIELD_LABELS = {
   qualification: "Qualification", college_name: "College/University Name",
   specialization: "Specialization", cgpa_percent: "% CGPA",
   year_of_passing: "Year of Passing", has_marksheet: "Has Mark Sheet", gaps: "Gaps",
+  // whole education sections reopened at once (audit lines)
+  UG_PG: "UG / PG Education (entire section)", "12TH": "12th / Diploma Education (entire section)",
+  "10TH": "10th Education (entire section)",
   company_name: "Company", position_held: "Position Held", from_date: "From", to_date: "To",
   currently_working: "Currently Working", reason_for_leaving: "Reason for Leaving",
   offer_letter: "Offer Letter", relieving_letter_status: "Relieving Letter",
@@ -308,6 +325,16 @@ const FIELD_LABELS = {
   ref2_email: "Referee 2 — Mail ID", ref2_phone: "Referee 2 — Phone No.",
   message_to_hiring_team: "Message to Hiring Team",
   ref_signature: "Candidate Signature",
+  // Declaration
+  submission_within_days: "Submit Within (Days)",
+  semester_marksheets_pending: "Individual Semester Mark Statements",
+  consolidated_provisional_pending: "Consolidated Mark Statement & Provisional Certificate",
+  degree_certificate_pending: "Degree Certificate",
+  pan_card_pending: "PAN Card",
+  pending_semesters: "Pending Semesters",
+  relieving_experience_pending: "Relieving Letter and Experience Letter",
+  declaration_signature: "Signature of the Employee",
+  exp_declaration_signature: "Signature of the Employee",
 };
 
 function labelFor(key) { return FIELD_LABELS[key] || key.replaceAll("_", " "); }

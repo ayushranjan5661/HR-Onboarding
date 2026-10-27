@@ -10,19 +10,26 @@ let currentData = null;
 let editAccess = { submitted: {}, grantable: {}, permissions: [] };
 // Whole-form edit mode, tracked per card and limited to one card at a time.
 // PROFILE fields are shown inside the CIF card, so they follow CIF's mode.
-const editModes = { CIF: false, DOCUMENT_COLLECTION: false, REFERENCE_CHECK: false, BGV: false };
+const editModes = { CIF: false, DOCUMENT_COLLECTION: false, REFERENCE_CHECK: false, DECLARATION: false,
+                    EXPERIENCE_DECLARATION: false, BGV: false };
 
 const FORM_TITLES = {
   CIF: "Candidate Details (CIF)",
   DOCUMENT_COLLECTION: "Document Collection Form",
   REFERENCE_CHECK: "Referee Check Form",
+  DECLARATION: "Declaration Form Education Documents",
+  EXPERIENCE_DECLARATION: "Declaration Form Relieving Letter and Experience Letter",
   BGV: "Background Verification Form",
 };
 // The CIF card is static markup; the follow-up cards are built by render().
 const FORM_CARD_ID = { CIF: "cifCard", DOCUMENT_COLLECTION: "card-DOCUMENT_COLLECTION",
-                       REFERENCE_CHECK: "card-REFERENCE_CHECK", BGV: "card-BGV" };
+                       REFERENCE_CHECK: "card-REFERENCE_CHECK",
+                       DECLARATION: "card-DECLARATION",
+                       EXPERIENCE_DECLARATION: "card-EXPERIENCE_DECLARATION", BGV: "card-BGV" };
 const FORM_DOCS_ID = { CIF: "cifDocs", DOCUMENT_COLLECTION: "docs-DOCUMENT_COLLECTION",
-                       REFERENCE_CHECK: "docs-REFERENCE_CHECK", BGV: "docs-BGV" };
+                       REFERENCE_CHECK: "docs-REFERENCE_CHECK",
+                       DECLARATION: "docs-DECLARATION",
+                       EXPERIENCE_DECLARATION: "docs-EXPERIENCE_DECLARATION", BGV: "docs-BGV" };
 
 // Values long enough that a single-line input is unusable.
 const LONG_TEXT_FIELDS = new Set([
@@ -163,9 +170,9 @@ function refCheckRows(data, opts = {}) {
         fieldRow("REFERENCE_CHECK", `ref${n}_${k}`, data[`ref${n}_${k}`], { ...opts, label })).join("")}
       ${opts.editing ? "" : refereeFeedbackBlock((opts.referee || []).find(r => r.ref_index === n))}
     </div>`;
-  return rows(["candidate_name", "reference_check_date", "position_applied_for"])
-    + box(1) + box(2)
-    + rows(["message_to_hiring_team", "declaration_accepted"]);
+  return rows(["candidate_name", "reference_check_date", "position_applied_for",
+               "message_to_hiring_team", "declaration_accepted"])
+    + box(1) + box(2);
 }
 
 // Under each reference: the link to their own feedback form, and the answers
@@ -213,6 +220,14 @@ function refereeFeedbackBlock(fb) {
 // hand it to the browser as a download.
 async function downloadReferencePdf(btn) {
   return downloadPdf(btn, "reference-check", "Referee_Check.pdf");
+}
+
+async function downloadDeclarationPdf(btn) {
+  return downloadPdf(btn, "declaration", "Declaration Form Education Documents.pdf");
+}
+
+async function downloadExperienceDeclarationPdf(btn) {
+  return downloadPdf(btn, "experience-declaration", "Declaration Form Relieving Letter and Experience Letter.pdf");
 }
 
 async function downloadDocCollectionPdf(btn) {
@@ -650,7 +665,8 @@ function render() {
     <div class="field-row"><div class="fname">Login Link</div>
       <div class="fval"><a class="link-truncate" href="${escapeHtml(c.login_url || "")}"
         target="_blank" rel="noopener noreferrer"
-        title="${escapeHtml(c.login_url || "")}">${escapeHtml(c.login_url || "—")}</a></div>
+        title="${escapeHtml(c.login_url || "")}">${escapeHtml(c.login_url || "—")}</a>
+        ${linkExpiryNote(c.login_link_expires_at)}</div>
       <div class="field-actions">
         <button class="btn btn-outline btn-small" onclick="copyLoginLink(this)">Copy Link</button>
         <button class="btn btn-outline btn-small" onclick="regenerateLink()">New Link</button>
@@ -671,7 +687,11 @@ function render() {
   const refsOpen = c.candidate_type === "FRESHER" && docsOpen && docSub?.status === "APPROVED";
   applyEmailDraftVisibility();
   const emailOpts = {
-    templates: ["CIF", ...(docsOpen ? ["DOCUMENT_COLLECTION"] : []), ...(refsOpen ? ["REFERENCE_CHECK"] : []),
+    templates: ["CIF", ...(docsOpen ? ["DOCUMENT_COLLECTION", "DECLARATION", "EXPERIENCE_DECLARATION"] : []),
+                ...(refsOpen ? ["REFERENCE_CHECK"] : []),
+                // Reopened values on a submitted Declaration go out by its link.
+                ...["DECLARATION", "EXPERIENCE_DECLARATION"]
+                  .filter(t => openEditsFor(t).length).map(t => `${t}_CORRECTION`),
                 // Once the candidate has named their references, HR can mail each one.
                 ...[1, 2].filter(n => c.candidate_type === "FRESHER"
                                        && (c.ref_check_details || {})[`ref${n}_email`])
@@ -749,6 +769,9 @@ function render() {
   const followupConfig = {
     DOCUMENT_COLLECTION: { title: FORM_TITLES.DOCUMENT_COLLECTION, fields: DOC_FIELDS, data: c.doc_details },
     REFERENCE_CHECK: { title: FORM_TITLES.REFERENCE_CHECK, fields: REF_CHECK_FIELDS, data: c.ref_check_details },
+    DECLARATION: { title: FORM_TITLES.DECLARATION, fields: DECLARATION_FIELDS, data: c.declaration_details },
+    EXPERIENCE_DECLARATION: { title: FORM_TITLES.EXPERIENCE_DECLARATION, fields: EXP_DECLARATION_FIELDS,
+                              data: c.exp_declaration_details },
     BGV: { title: FORM_TITLES.BGV, fields: BGV_FIELDS, data: c.bgv_details },
   };
   Object.entries(followupConfig).forEach(([type, cfg]) => {
@@ -768,7 +791,8 @@ function render() {
         <p style="color:#6b7280;">${gate.canSend
           ? "The candidate cannot see this form until you send it. If you do not need it, "
             + "you can mark the onboarding complete without it."
-          : escapeHtml(gate.reason)}</p>`;
+          : escapeHtml(gate.reason)}</p>
+        ${declarationLinkRow(type, c, false)}`;
       document.getElementById("followupForms").appendChild(wrap);
       return;
     }
@@ -793,6 +817,10 @@ function render() {
           : `<button class="btn btn-outline btn-small" onclick="downloadReferencePdf(this)">Download PDF</button>`)
       : type === "DOCUMENT_COLLECTION" && submitted && !editing
         ? `<button class="btn btn-outline btn-small" onclick="downloadDocCollectionPdf(this)">Download PDF</button>`
+      : type === "DECLARATION" && submitted && !editing && cfg.data
+        ? `<button class="btn btn-outline btn-small" onclick="downloadDeclarationPdf(this)">Download PDF</button>`
+      : type === "EXPERIENCE_DECLARATION" && submitted && !editing && cfg.data
+        ? `<button class="btn btn-outline btn-small" onclick="downloadExperienceDeclarationPdf(this)">Download PDF</button>`
         : "";
     wrap.innerHTML = `
       <div class="section-title collapsible" onclick="toggleCollapse(this)">
@@ -802,6 +830,8 @@ function render() {
         </div>
         <span class="chevron">&#9660;</span>
       </div>
+      ${!submitted ? declarationLinkRow(type, c, true)
+        : openEditsFor(type).length ? declarationLinkRow(type, c, true, true) : ""}
       ${!submitted ? "<p style='color:#6b7280'>Waiting for candidate to submit.</p>" :
         (type === "REFERENCE_CHECK" ? refCheckRows(cfg.data, { editing, referee: c.referee_feedback })
                                     : fieldRows(type, cfg.fields, cfg.data, { editing }))
@@ -846,11 +876,13 @@ function render() {
   const zohoEligible = c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE";
   document.getElementById("zohoCard").classList.toggle("hidden", !zohoEligible);
   document.getElementById("zohoCandCard").classList.toggle("hidden", !zohoEligible);
-  document.getElementById("zohoRefCard").classList.toggle("hidden", !zohoEligible);
+  // The Reference Check is a Fresher / Trainee form only, so is its push.
+  const refPushEligible = zohoEligible && c.candidate_type === "FRESHER";
+  document.getElementById("zohoRefCard").classList.toggle("hidden", !refPushEligible);
   if (zohoEligible) {
     renderZoho(c, "confirmation");
     renderZoho(c, "candidate");
-    renderZoho(c, "reference");
+    if (refPushEligible) renderZoho(c, "reference");
   }
 
   // Edit-mode date cells are rebuilt on every render, so re-wire them here.
@@ -955,6 +987,21 @@ async function regenerateLink() {
   }
 }
 
+// Renews one Declaration link only; the login link is left alone.
+async function regenerateDeclarationLink(type = "DECLARATION") {
+  if (!currentData) return;
+  if (!await showConfirm("The Declaration link already sent to this candidate will stop working immediately.",
+      { title: "Issue a new Declaration link?", confirmText: "Issue New Link" })) return;
+  try {
+    await apiFetch(`/hr/candidates/${candidateId}/${DECLARATION_LINKS[type].regenerate}`, { method: "POST" });
+    await load();
+    await showAlert("Copy the new Declaration link and send it to the candidate. The old one no longer works.",
+                     { title: "New Declaration link issued" });
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
 // The AI reading of the candidate's "Message to Hiring Team", which tailors
 // the two reference mails. Fetched once per message, not on every re-render.
 const refAi = { message: null, loading: false, result: null };
@@ -994,18 +1041,66 @@ function toggleEmailDraft() {
 }
 
 // Copies the login link only — that's the one thing HR sends the candidate.
-async function copyLoginLink(btn) {
+// key picks another link, e.g. "declaration_url" for the Declaration form.
+async function copyLoginLink(btn, key = "login_url") {
   if (!currentData) return;
   const original = btn.textContent;
   try {
-    await navigator.clipboard.writeText(currentData.login_url);
+    await navigator.clipboard.writeText(currentData[key]);
     btn.textContent = "Copied!";
   } catch {
     // Clipboard API needs a secure context; fall back to a selectable prompt.
-    window.prompt("Copy the login link:", currentData.login_url);
+    window.prompt("Copy the link:", currentData[key]);
     return;
   }
   setTimeout(() => { btn.textContent = original; }, 1500);
+}
+
+// "This link will expire on 30/10/2026 at 9:28 AM." The login and Declaration
+// links each have their own expiry and their own "New Link".
+// `lead` goes in front on the same line, e.g. "Works once you send the form."
+function linkExpiryNote(expiresAt, lead = "") {
+  const exp = expiresAt ? new Date(expiresAt) : null;
+  if (!exp || isNaN(exp)) {
+    return lead ? `<div style="color:#6b7280;font-size:0.8rem;font-weight:600;">${lead}</div>` : "";
+  }
+  const when = `${toDisplayDate(`${exp.getFullYear()}-${String(exp.getMonth() + 1).padStart(2, "0")}-${
+    String(exp.getDate()).padStart(2, "0")}`)} at ${
+    exp.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+  return exp < new Date()
+    ? `<div style="color:#b91c1c;font-size:0.8rem;font-weight:600;">${lead ? lead + " " : ""}This link expired on ${when}. Click "New Link" to issue a fresh one.</div>`
+    : `<div style="color:#6b7280;font-size:0.8rem;font-weight:600;">${lead ? lead + " " : ""}This link will expire on ${when}.</div>`;
+}
+
+// Each Declaration has its own link, opening that form directly.
+const DECLARATION_LINKS = {
+  DECLARATION: { url: "declaration_url", expires: "declaration_link_expires_at",
+                 regenerate: "regenerate-declaration-link" },
+  EXPERIENCE_DECLARATION: { url: "exp_declaration_url", expires: "exp_declaration_link_expires_at",
+                            regenerate: "regenerate-experience-declaration-link" },
+};
+
+// Values HR has reopened on one form and the candidate has not used yet.
+function openEditsFor(form) {
+  return (editAccess.permissions || []).filter(p => p.status === "ACTIVE" && p.form === form);
+}
+
+// `correction`: the form is submitted and HR reopened values on it — the
+// same link now leads the candidate to just those values.
+function declarationLinkRow(type, c, sent, correction = false) {
+  const keys = DECLARATION_LINKS[type];
+  const url = keys && c[keys.url];
+  if (!url) return "";
+  return `<div class="field-row"><div class="fname">${correction ? "Correction Link" : "Declaration Link"}</div>
+      <div class="fval"><a class="link-truncate" href="${escapeHtml(url)}"
+        target="_blank" rel="noopener noreferrer"
+        title="${escapeHtml(url)}">${escapeHtml(url)}</a>
+        ${linkExpiryNote(c[keys.expires], sent ? "" : "Works once you send the form.")}</div>
+      <div class="field-actions">
+        <button class="btn btn-outline btn-small" onclick="copyLoginLink(this, '${keys.url}')">Copy Link</button>
+        <button class="btn btn-outline btn-small" onclick="regenerateDeclarationLink('${type}')">New Link</button>
+      </div>
+    </div>`;
 }
 
 // ---- Whole-form edit ----
@@ -1022,7 +1117,8 @@ function sendGate(form, c) {
   if (c.stage === "REJECTED") {
     return { canSend: false, reason: "This application is rejected — no form can be sent." };
   }
-  if (form === "DOCUMENT_COLLECTION" && (c.stage === "INVITED" || c.stage === "CIF_SUBMITTED")) {
+  if ((form === "DOCUMENT_COLLECTION" || form === "DECLARATION" || form === "EXPERIENCE_DECLARATION")
+      && (c.stage === "INVITED" || c.stage === "CIF_SUBMITTED")) {
     return { canSend: false, reason: "Available once you approve their CIF above." };
   }
   if (form === "REFERENCE_CHECK") {
@@ -1324,6 +1420,9 @@ function accessKey(item) {
 
 // "Employment #2 — Acme Ltd → Reason for Leaving", or just the field label.
 function accessLabel(item) {
+  if (item.field_kind === "SECTION") {
+    return `${item.row_label} (entire section — edit, add or remove entries)`;
+  }
   const field = labelFor(item.field_name);
   if (item.field_kind === "ROW_FIELD") return `${item.row_label} → ${field}`;
   if (item.field_kind === "DOCUMENT") return `${field} (document)`;
@@ -1374,8 +1473,15 @@ function openGrantModal(form) {
 
   document.getElementById("grantModalTitle").textContent =
     `Allow the candidate to edit specific values — ${FORM_TITLES[form]}`;
+  const openable = items.filter(item => !openKeys.has(accessKey(item))).length;
+  // One tick opens the whole form (or everything the search still shows).
+  const selectAll = openable > 1 ? `
+          <label class="grant-option grant-all" style="border-bottom:1px solid var(--border);">
+            <input type="checkbox" id="grantSelectAll">
+            <span class="grant-label"><strong>Select all — edit the entire form</strong></span>
+          </label>` : "";
   document.getElementById("grantList").innerHTML = items.length
-    ? items.map(item => {
+    ? selectAll + items.map(item => {
         const key = accessKey(item);
         const isOpen = openKeys.has(key);
         const label = accessLabel(item);
@@ -1399,11 +1505,34 @@ function closeGrantModal() {
   document.getElementById("grantModal").classList.add("hidden");
 }
 
+// The ticks "Select all" acts on: visible and not already open.
+function grantSelectable() {
+  return Array.from(document.querySelectorAll(
+    "#grantList .grant-option:not(.grant-all):not(.hidden) input[type=checkbox]:not(:disabled)"));
+}
+
+function syncGrantSelectAll() {
+  const all = document.getElementById("grantSelectAll");
+  if (!all) return;
+  const boxes = grantSelectable();
+  const ticked = boxes.filter(cb => cb.checked).length;
+  all.checked = boxes.length > 0 && ticked === boxes.length;
+  all.indeterminate = ticked > 0 && ticked < boxes.length;
+}
+
+document.getElementById("grantList").addEventListener("change", (e) => {
+  if (e.target.id === "grantSelectAll") {
+    grantSelectable().forEach(cb => { cb.checked = e.target.checked; });
+  }
+  syncGrantSelectAll();
+});
+
 document.getElementById("grantSearch").addEventListener("input", (e) => {
   const q = e.target.value.trim().toLowerCase();
-  document.querySelectorAll("#grantList .grant-option").forEach(el => {
+  document.querySelectorAll("#grantList .grant-option:not(.grant-all)").forEach(el => {
     el.classList.toggle("hidden", !!q && !el.dataset.search.includes(q));
   });
+  syncGrantSelectAll();
 });
 
 document.getElementById("grantModal").addEventListener("click", (e) => {
@@ -1412,7 +1541,7 @@ document.getElementById("grantModal").addEventListener("click", (e) => {
 
 async function submitGrants(btn) {
   const checked = Array.from(
-    document.querySelectorAll("#grantList input[type=checkbox]:checked"));
+    document.querySelectorAll("#grantList .grant-option:not(.grant-all) input[type=checkbox]:checked"));
   const error = document.getElementById("grantError");
   if (!checked.length) {
     error.textContent = "Tick at least one value.";
@@ -1564,7 +1693,9 @@ function auditFileBar(e) {
 
 // One line per change inside a set.
 function auditChangeLine(e, showReason, inRevokeSet = false) {
-  const body = e.action === "REVOKE"
+  const body = e.action === "CONFIRM"
+    ? `<span class="audit-access">Candidate confirmed it is already correct — not changed.</span>`
+    : e.action === "REVOKE"
     // In a set of revokes the heading already says it — repeating the sentence
     // on every line would drown out which fields were closed.
     ? (inRevokeSet ? ""
@@ -1575,7 +1706,8 @@ function auditChangeLine(e, showReason, inRevokeSet = false) {
   return `
     <div class="audit-change">
       <div class="audit-change-name">${escapeHtml(auditFieldLabel(e.field_name))}${
-        e.action === "DELETE" ? ` <span class="audit-action">cleared</span>` : ""}</div>
+        e.action === "DELETE" ? ` <span class="audit-action">cleared</span>`
+        : e.action === "ADD" ? ` <span class="audit-action">added</span>` : ""}</div>
       ${body ? `<div class="audit-diff">${body}</div>` : ""}
       ${auditFileBar(e)}
       ${showReason && e.reason

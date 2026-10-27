@@ -1,5 +1,5 @@
 // Staff audit trail: who created, deactivated, deleted, reset, moved or
-// reassigned what. Global for the admins, team-scoped for a Manager.
+// reassigned what, and who invited or deleted which candidate. Global for the admins, team-scoped for a Manager.
 
 async function initAuditPage(mode) {
   const isAdmin = mode === "admin";
@@ -15,7 +15,7 @@ async function initAuditPage(mode) {
       <button class="btn btn-outline" id="refreshBtn">Refresh</button>
     </div>
     <p style="color:var(--muted);font-size:0.88rem;margin-top:-10px;">
-      Employee account and candidate ownership changes${isAdmin ? " across every team" : " touching your team"}, newest first.
+      Employee account changes, candidate invites, deletions and ownership changes${isAdmin ? " across every team" : " touching your team"}, newest first.
       Edits to a candidate's submitted data are on that candidate's own page.
     </p>
     <div class="filters">
@@ -23,7 +23,7 @@ async function initAuditPage(mode) {
       <select id="typeFilter">
         <option value="">All actions</option>
         <option value="STAFF">Employee accounts</option>
-        <option value="CANDIDATE">Candidate ownership</option>
+        <option value="CANDIDATE">Candidates</option>
       </select>
     </div>
     <div class="card" id="auditCard"></div>`;

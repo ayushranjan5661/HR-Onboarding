@@ -185,6 +185,8 @@ const ACTION_LABELS = {
   STAFF_PASSWORD_RESET: "Password reset",
   STAFF_MOVED: "Moved to another team",
   STAFF_MOVED_OUT: "Moved out of team",
+  CANDIDATE_INVITED: "Candidate invited",
+  CANDIDATE_DELETED: "Candidate deleted",
   CANDIDATE_ASSIGNED: "Candidate assigned",
   CANDIDATE_REASSIGNED: "Candidate reassigned",
   CANDIDATE_MOVED_OUT: "Candidate moved out of team",
