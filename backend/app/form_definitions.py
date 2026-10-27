@@ -7,8 +7,6 @@ Declares which submitted field goes to which table/column.
 - DOC_FIELDS          -> doc_collection_details
 - EDUCATION_COLUMNS / EMPLOYMENT_COLUMNS / REFERENCE_COLUMNS
                       -> row tables (one row per entry the candidate adds)
-- DECLARATION_FIELDS  -> declaration_details
-- EXP_DECLARATION_FIELDS -> experience_declaration_details
 - <FORM>_FILE_FIELDS  -> documents table + file on disk
 """
 
@@ -181,41 +179,6 @@ REF_CHECK_FIELDS = [
 ]
 REF_CHECK_OPTIONAL = {"message_to_hiring_team"}
 REF_CHECK_FILE_FIELDS: list[str] = []   # no uploads (signature removed)
-
-# --- Declaration (pending educational documents) ---------------------------
-# Same form for Experienced and Fresher candidates. The candidate ticks which
-# documents are still owed and within how many days of their final results.
-DECLARATION_DOCS = [
-    ("semester_marksheets_pending", "Individual semester mark statements"),
-    ("consolidated_provisional_pending", "Consolidated mark statement and Provisional certificate"),
-    ("degree_certificate_pending", "Degree Certificate"),
-    ("pan_card_pending", "PAN Card"),
-]
-DECLARATION_FIELDS = [
-    "candidate_name", "submission_within_days",
-    *[key for key, _ in DECLARATION_DOCS],
-    "pending_semesters",
-    "declaration_accepted", "declaration_date",
-]
-# Required only in context: pending_semesters when semester marksheets are
-# ticked; the document ticks themselves are checked as "at least one".
-DECLARATION_OPTIONAL = {key for key, _ in DECLARATION_DOCS} | {"pending_semesters"}
-DECLARATION_FILE_FIELDS = ["declaration_signature"]
-
-# --- Declaration (pending relieving / experience letters) -------------------
-# Experienced candidates only. The period is fixed by policy: 45 days from
-# the date of joining.
-EXP_DECLARATION_DAYS = "45"
-EXP_DECLARATION_DOCS = [
-    ("relieving_experience_pending", "Relieving Letter and Experience Letter"),
-]
-EXP_DECLARATION_FIELDS = [
-    "candidate_name", "submission_within_days",
-    *[key for key, _ in EXP_DECLARATION_DOCS],
-    "declaration_accepted", "declaration_date",
-]
-EXP_DECLARATION_OPTIONAL = {"submission_within_days"} | {key for key, _ in EXP_DECLARATION_DOCS}
-EXP_DECLARATION_FILE_FIELDS = ["exp_declaration_signature"]
 
 # --- Document Collection: the real LevelShift form (40 uploads) -------------
 # Two variants share the same fields; only which ones are mandatory differs.

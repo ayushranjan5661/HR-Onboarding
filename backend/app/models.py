@@ -40,8 +40,6 @@ class FormType(str, enum.Enum):
     BGV = "BGV"                             # Background Verification Form
     DOCUMENT_COLLECTION = "DOCUMENT_COLLECTION"
     REFERENCE_CHECK = "REFERENCE_CHECK"     # after Document Collection, before BGV
-    DECLARATION = "DECLARATION"             # pending educational documents undertaking
-    EXPERIENCE_DECLARATION = "EXPERIENCE_DECLARATION"   # relieving / experience letters owed
 
 
 class FormStatus(str, enum.Enum):
@@ -150,14 +148,6 @@ class Candidate(Base):
     # so treat it as a credential: it is revocable (regenerate) and expires.
     invite_token = Column(String(64), unique=True, index=True, nullable=True)
     invite_token_expires_at = Column(DateTime(timezone=True), nullable=True)
-    # The Declaration link's own secret and expiry, set the first time either
-    # link is renewed, so renewing one never retires the other. Until then the
-    # Declaration link rides on the invite token (see app/declaration_links.py).
-    declaration_link_secret = Column(String(255), nullable=True)
-    declaration_link_expires_at = Column(DateTime(timezone=True), nullable=True)
-    # Same, for the relieving / experience letter Declaration.
-    exp_declaration_link_secret = Column(String(255), nullable=True)
-    exp_declaration_link_expires_at = Column(DateTime(timezone=True), nullable=True)
 
     stage = Column(Enum(CandidateStage), default=CandidateStage.INVITED, nullable=False)
     candidate_type = Column(Enum(CandidateType), default=CandidateType.EXPERIENCED, nullable=False)
@@ -200,9 +190,6 @@ class Candidate(Base):
     bgv_details = relationship("BGVDetails", uselist=False, cascade="all, delete-orphan")
     doc_details = relationship("DocCollectionDetails", uselist=False, cascade="all, delete-orphan")
     ref_check_details = relationship("ReferenceCheckDetails", uselist=False, cascade="all, delete-orphan")
-    declaration_details = relationship("DeclarationDetails", uselist=False, cascade="all, delete-orphan")
-    exp_declaration_details = relationship("ExperienceDeclarationDetails", uselist=False,
-                                           cascade="all, delete-orphan")
     referee_feedback = relationship("RefereeFeedback", cascade="all, delete-orphan")
     education = relationship("EducationDetail", cascade="all, delete-orphan")
     employment = relationship("EmploymentDetail", cascade="all, delete-orphan")
@@ -443,43 +430,6 @@ class ReferenceCheckDetails(Base):
     ref2_phone = Column(String(20))
     message_to_hiring_team = Column(Text)
     declaration_accepted = Column(String(10))
-
-
-class DeclarationDetails(Base):
-    """Declaration Form for the submission of educational documents: which
-    documents the candidate still owes, and within how many days of their
-    final results. One row per candidate; Experienced and Fresher alike."""
-    __tablename__ = "declaration_details"
-
-    id = Column(Integer, primary_key=True, index=True)
-    candidate_id = Column(Integer, ForeignKey("candidates.id"), unique=True, nullable=False)
-
-    candidate_name = Column(String(150))
-    submission_within_days = Column(String(10))
-    # "Yes" when the document is still to be submitted, blank otherwise.
-    semester_marksheets_pending = Column(String(10))
-    pending_semesters = Column(String(255))
-    consolidated_provisional_pending = Column(String(10))
-    degree_certificate_pending = Column(String(10))
-    pan_card_pending = Column(String(10))
-    declaration_accepted = Column(String(10))
-    declaration_date = Column(String(20))
-
-
-class ExperienceDeclarationDetails(Base):
-    """Declaration Form for the submission of pending documents: the relieving
-    and experience letters an Experienced hire will produce within 45 days of
-    joining. One row per candidate."""
-    __tablename__ = "experience_declaration_details"
-
-    id = Column(Integer, primary_key=True, index=True)
-    candidate_id = Column(Integer, ForeignKey("candidates.id"), unique=True, nullable=False)
-
-    candidate_name = Column(String(150))
-    submission_within_days = Column(String(10))
-    relieving_experience_pending = Column(String(10))   # "Yes" when still owed
-    declaration_accepted = Column(String(10))
-    declaration_date = Column(String(20))
 
 
 class RefereeFeedback(Base):

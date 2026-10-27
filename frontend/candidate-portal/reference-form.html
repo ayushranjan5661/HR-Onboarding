@@ -85,12 +85,12 @@
   </div>
 
   <script src="../js/config.js?v=20261007b"></script>
-  <script src="../js/date-format.js?v=20261025a"></script>
+  <script src="../js/date-format.js?v=20261007r"></script>
   <script src="js/api.js?v=20260929c"></script>
   <script src="js/dialog.js?v=20260901b"></script>
   <script src="js/doc-viewer.js?v=20261005a"></script>
   <script src="js/edit-mode.js?v=20261007a"></script>
-  <script src="js/auto-fill.js?v=20261026a"></script>
+  <script src="js/auto-fill.js?v=20261007r"></script>
   <script src="js/draft.js?v=20261007a"></script>
   <script>
     requireAuth();
@@ -126,7 +126,10 @@
         const cif = await apiFetch("/candidate/me/submission/CIF");
         setIfEmpty("position_applied_for", (cif.fields || {}).position_applied_for);
       } catch (err) { /* no CIF answers to carry over */ }
-      setIfEmpty("reference_check_date", todayDisplayDate());
+      const d = new Date();
+      setIfEmpty("reference_check_date",
+                 [d.getDate(), d.getMonth() + 1].map(n => String(n).padStart(2, "0")).join("/")
+                 + "/" + d.getFullYear());
 
       await offerDraftRestore({ formType: "REFERENCE_CHECK", formEl });
     })().catch(err => {

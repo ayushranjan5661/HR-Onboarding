@@ -19,18 +19,9 @@ from app.form_definitions import (
     BGV_TABLE_SECTIONS,
     CIF_FIELDS,
     CIF_FILE_FIELDS,
-    DECLARATION_DOCS,
-    DECLARATION_FIELDS,
-    DECLARATION_FILE_FIELDS,
-    DECLARATION_OPTIONAL,
     DOC_FIELDS,
     DOC_FILE_FIELDS,
     DOC_REQUIRED_BY_TYPE,
-    EXP_DECLARATION_DAYS,
-    EXP_DECLARATION_DOCS,
-    EXP_DECLARATION_FIELDS,
-    EXP_DECLARATION_FILE_FIELDS,
-    EXP_DECLARATION_OPTIONAL,
     EDUCATION_COLUMNS,
     EDUCATION_SECTIONS,
     EMPLOYMENT_COLUMNS,
@@ -51,13 +42,11 @@ from app.models import (
     CandidateProfile,
     CandidateStage,
     CIFDetails,
-    DeclarationDetails,
     DocCollectionDetails,
     Document,
     EditPermissionStatus,
     EducationDetail,
     EmploymentDetail,
-    ExperienceDeclarationDetails,
     FieldEditLog,
     FieldEditPermission,
     FormDraft,
@@ -114,8 +103,7 @@ def my_submission(form_type: str, db: Session = Depends(get_db),
                    current: Candidate = Depends(get_current_candidate)):
     """The candidate's own saved answers for one form, so they can edit and
     resubmit instead of filling everything in again."""
-    if form_type not in ("CIF", "BGV", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION",
-                         "EXPERIENCE_DECLARATION"):
+    if form_type not in ("CIF", "BGV", "DOCUMENT_COLLECTION", "REFERENCE_CHECK"):
         raise HTTPException(status_code=404, detail="Unknown form")
 
     out: dict = {"fields": {}, "tables": {}, "documents": []}
@@ -160,16 +148,6 @@ def my_submission(form_type: str, db: Session = Depends(get_db),
             ReferenceCheckDetails.candidate_id == current.id).first()
         if details:
             out["fields"] = {f: getattr(details, f) for f in REF_CHECK_FIELDS}
-    elif form_type == "DECLARATION":
-        details = db.query(DeclarationDetails).filter(
-            DeclarationDetails.candidate_id == current.id).first()
-        if details:
-            out["fields"] = {f: getattr(details, f) for f in DECLARATION_FIELDS}
-    elif form_type == "EXPERIENCE_DECLARATION":
-        details = db.query(ExperienceDeclarationDetails).filter(
-            ExperienceDeclarationDetails.candidate_id == current.id).first()
-        if details:
-            out["fields"] = {f: getattr(details, f) for f in EXP_DECLARATION_FIELDS}
     else:
         details = db.query(DocCollectionDetails).filter(
             DocCollectionDetails.candidate_id == current.id).first()
@@ -196,8 +174,7 @@ def my_prefill(form_type: str, db: Session = Depends(get_db),
     """What this form can inherit from the candidate's earlier submissions —
     matched by the cross-form mapping agent, including uploads that can be
     carried over rather than re-uploaded."""
-    if form_type not in ("DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION",
-                         "EXPERIENCE_DECLARATION", "BGV"):
+    if form_type not in ("DOCUMENT_COLLECTION", "REFERENCE_CHECK", "BGV"):
         return {"fields": {}, "documents": [], "company_labels": {}}
     return prefill_agent.build_prefill(db, current.id, form_type)
 
@@ -212,8 +189,6 @@ _DRAFT_FILE_FIELDS = {
     "BGV": BGV_FILE_FIELDS,
     "DOCUMENT_COLLECTION": DOC_FILE_FIELDS,
     "REFERENCE_CHECK": REF_CHECK_FILE_FIELDS,
-    "DECLARATION": DECLARATION_FILE_FIELDS,
-    "EXPERIENCE_DECLARATION": EXP_DECLARATION_FILE_FIELDS,
 }
 
 
@@ -617,18 +592,13 @@ def _submit_cif(form, db: Session, current: Candidate):
 @router.post("/forms/{form_type}/submit")
 async def submit_followup_form(form_type: str, request: Request, db: Session = Depends(get_db),
                                 current: Candidate = Depends(get_current_candidate)):
-    if form_type in ("DECLARATION", "EXPERIENCE_DECLARATION"):
-        # Filled only through its own link (routers/declaration.py).
-        raise HTTPException(status_code=403,
-                            detail="Fill the Declaration form using the link HR sent you.")
     form = await request.form()
     # Blocking from here on (database, OCR, prefill mapping) — off the event loop.
     return await run_in_threadpool(_submit_followup_form, form_type, form, db, current)
 
 
 def _submit_followup_form(form_type: str, form, db: Session, current: Candidate):
-    if form_type not in ("BGV", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION",
-                         "EXPERIENCE_DECLARATION"):
+    if form_type not in ("BGV", "DOCUMENT_COLLECTION", "REFERENCE_CHECK"):
         raise HTTPException(status_code=404, detail="Unknown form")
     if form_type == "REFERENCE_CHECK" and not current.uses_reference_check:
         raise HTTPException(status_code=404, detail="Unknown form")
@@ -691,94 +661,6 @@ def _submit_followup_form(form_type: str, form, db: Session, current: Candidate)
         _apply_fields(details, form, REF_CHECK_FIELDS)
         replaced = _save_files(db, form, current, "REFERENCE_CHECK", REF_CHECK_FILE_FIELDS)
         _promote_draft_documents(db, current.id, FormType.REFERENCE_CHECK, provided_ref)
-    elif form_type == "DECLARATION":
-        _reject_invalid_dates({f: form.get(f) for f in DECLARATION_FIELDS if f in form})
-        missing = [f for f in DECLARATION_FIELDS
-                   if f not in DECLARATION_OPTIONAL and not str(form.get(f) or "").strip()]
-        if missing:
-            raise HTTPException(status_code=400,
-                                 detail="Please fill in every field: " + ", ".join(missing))
-        days = str(form.get("submission_within_days") or "").strip()
-        if not days.isdigit() or not 1 <= int(days) <= 730:
-            raise HTTPException(status_code=400,
-                                 detail="Number of days must be a whole number between 1 and 730.")
-        if not any(form.get(key) == "Yes" for key, _ in DECLARATION_DOCS):
-            raise HTTPException(status_code=400,
-                                 detail="Tick at least one document you still need to submit.")
-        if (form.get("semester_marksheets_pending") == "Yes"
-                and not str(form.get("pending_semesters") or "").strip()):
-            raise HTTPException(status_code=400,
-                                 detail="Say which semesters' mark statements are pending.")
-        if form.get("declaration_accepted") != "Yes":
-            raise HTTPException(status_code=400, detail="Please accept the declaration.")
-        details = db.query(DeclarationDetails).filter(
-            DeclarationDetails.candidate_id == current.id).first()
-        if not details:
-            details = DeclarationDetails(candidate_id=current.id)
-            db.add(details)
-        # Unticked checkboxes are absent from the form; store them as blank
-        # rather than keeping a tick from an earlier save.
-        for key, _ in DECLARATION_DOCS:
-            setattr(details, key, "Yes" if form.get(key) == "Yes" else None)
-        _apply_fields(details, form, [f for f in DECLARATION_FIELDS
-                                      if f not in dict(DECLARATION_DOCS)])
-        if details.semester_marksheets_pending != "Yes":
-            details.pending_semesters = None
-        provided_decl = {k for k in DECLARATION_FILE_FIELDS
-                          if hasattr(form.get(k), "filename") and form.get(k).filename}
-        # The signature is required, but the CIF signature carries over when
-        # no new one is given (see field_mapper.CURATED).
-        has_signature = (
-            provided_decl
-            or db.query(Document).filter(Document.candidate_id == current.id,
-                                         Document.form_type == FormType.DECLARATION,
-                                         Document.field_key == "declaration_signature").first()
-            or "declaration_signature" in _draft_document_fields(db, current.id, FormType.DECLARATION)
-            or any(d["target_field"] == "declaration_signature" and d.get("available", True)
-                   for d in prefill_agent.build_prefill(db, current.id, "DECLARATION")["documents"]))
-        if not has_signature:
-            raise HTTPException(status_code=400, detail="Please upload your signature.")
-        replaced = _save_files(db, form, current, "DECLARATION", DECLARATION_FILE_FIELDS)
-        _promote_draft_documents(db, current.id, FormType.DECLARATION, provided_decl)
-    elif form_type == "EXPERIENCE_DECLARATION":
-        _reject_invalid_dates({f: form.get(f) for f in EXP_DECLARATION_FIELDS if f in form})
-        missing = [f for f in EXP_DECLARATION_FIELDS
-                   if f not in EXP_DECLARATION_OPTIONAL and not str(form.get(f) or "").strip()]
-        if missing:
-            raise HTTPException(status_code=400,
-                                 detail="Please fill in every field: " + ", ".join(missing))
-        if not any(form.get(key) == "Yes" for key, _ in EXP_DECLARATION_DOCS):
-            raise HTTPException(status_code=400,
-                                 detail="Tick the documents you still need to submit.")
-        if form.get("declaration_accepted") != "Yes":
-            raise HTTPException(status_code=400, detail="Please accept the declaration.")
-        details = db.query(ExperienceDeclarationDetails).filter(
-            ExperienceDeclarationDetails.candidate_id == current.id).first()
-        if not details:
-            details = ExperienceDeclarationDetails(candidate_id=current.id)
-            db.add(details)
-        for key, _ in EXP_DECLARATION_DOCS:
-            setattr(details, key, "Yes" if form.get(key) == "Yes" else None)
-        _apply_fields(details, form, ["candidate_name", "declaration_accepted", "declaration_date"])
-        details.submission_within_days = EXP_DECLARATION_DAYS   # fixed by policy, not the candidate
-        provided_exp = {k for k in EXP_DECLARATION_FILE_FIELDS
-                         if hasattr(form.get(k), "filename") and form.get(k).filename}
-        # Signature: as on the education Declaration, the CIF one carries over.
-        has_signature = (
-            provided_exp
-            or db.query(Document).filter(Document.candidate_id == current.id,
-                                         Document.form_type == FormType.EXPERIENCE_DECLARATION,
-                                         Document.field_key == "exp_declaration_signature").first()
-            or "exp_declaration_signature" in _draft_document_fields(
-                db, current.id, FormType.EXPERIENCE_DECLARATION)
-            or any(d["target_field"] == "exp_declaration_signature" and d.get("available", True)
-                   for d in prefill_agent.build_prefill(db, current.id,
-                                                        "EXPERIENCE_DECLARATION")["documents"]))
-        if not has_signature:
-            raise HTTPException(status_code=400, detail="Please upload your signature.")
-        replaced = _save_files(db, form, current, "EXPERIENCE_DECLARATION",
-                               EXP_DECLARATION_FILE_FIELDS)
-        _promote_draft_documents(db, current.id, FormType.EXPERIENCE_DECLARATION, provided_exp)
     else:
         details = db.query(DocCollectionDetails).filter(DocCollectionDetails.candidate_id == current.id).first()
         if not details:
@@ -814,9 +696,8 @@ def _submit_followup_form(form_type: str, form, db: Session, current: Candidate)
 
     # Anything the candidate already gave us on an earlier form and did not
     # re-upload here is copied across automatically.
-    file_fields = {"BGV": BGV_FILE_FIELDS, "REFERENCE_CHECK": REF_CHECK_FILE_FIELDS,
-                   "DECLARATION": DECLARATION_FILE_FIELDS,
-                   "EXPERIENCE_DECLARATION": EXP_DECLARATION_FILE_FIELDS}.get(form_type, DOC_FILE_FIELDS)
+    file_fields = {"BGV": BGV_FILE_FIELDS, "REFERENCE_CHECK": REF_CHECK_FILE_FIELDS}.get(
+        form_type, DOC_FILE_FIELDS)
     provided = {k for k in file_fields
                  if hasattr(form.get(k), "filename") and form.get(k).filename}
     carried = prefill_agent.carry_documents(db, current.id, form_type, provided)
@@ -859,21 +740,9 @@ def my_edit_access(db: Session = Depends(get_db),
                 "hr_note": p.hr_note,
                 "granted_at": p.granted_at,
                 "current_value": edit_access.current_value(db, current.id, p),
-                **(_section_payload(db, current.id, p) if p.field_kind == "SECTION" else {}),
             }
             for p in permissions
         ]
-    }
-
-
-def _section_payload(db: Session, candidate_id: int, perm: FieldEditPermission) -> dict:
-    """A reopened section's columns and entries, for the page to edit as a table."""
-    columns = edit_access.ROW_TABLES[perm.row_table][1]
-    return {
-        "columns": columns,
-        "rows": [{"id": r.id, **{c: getattr(r, c) for c in columns}}
-                 for r in edit_access.section_rows(db, candidate_id, perm.row_table,
-                                                    perm.field_name)],
     }
 
 
@@ -914,36 +783,21 @@ def _apply_granted_edits(form, db: Session, current: Candidate):
     change_set_id = uuid4().hex
     written_paths: list[str] = []    # this request's files, removed if it fails
     applied = 0
-    confirmed = 0
     try:
         for change in changes:
             if not isinstance(change, dict):
                 raise HTTPException(status_code=400, detail="Malformed change.")
             perm = _active_permission(db, current.id, change.get("permission_id"))
-            if change.get("unchanged"):
-                # Checked and already right: close it, and say so on record.
-                db.add(FieldEditLog(
-                    candidate_id=current.id, form_type=edit_access.owning_form(perm.form_type),
-                    field_name=edit_access.audit_field_name(perm),
-                    old_value=None, new_value=None, action="CONFIRM", reason=reason,
-                    actor_role="CANDIDATE", edited_by_candidate_id=current.id,
-                    permission_id=perm.id, change_set_id=change_set_id))
-            elif perm.field_kind == "DOCUMENT":
+            if perm.field_kind == "DOCUMENT":
                 written_paths += _apply_granted_document(
                     db, current, perm, form.get(f"file_{perm.id}"), reason, change_set_id)
-            elif perm.field_kind == "SECTION":
-                _apply_granted_section(db, current, perm, change.get("rows"),
-                                        reason, change_set_id)
             else:
                 _apply_granted_field(db, current, perm, change.get("new_value"),
                                       reason, change_set_id)
 
             perm.status = EditPermissionStatus.USED.value
             perm.resolved_at = datetime.now(timezone.utc)
-            if change.get("unchanged"):
-                confirmed += 1
-            else:
-                applied += 1
+            applied += 1
         db.commit()
         doc_check_queue.flush_pending(db)
     except Exception:
@@ -951,11 +805,8 @@ def _apply_granted_edits(form, db: Session, current: Candidate):
         _remove_files(written_paths)   # a failed attempt leaves no orphans
         raise
 
-    detail = f"{applied} change(s) saved" if applied else "No values changed"
-    if confirmed:
-        detail += f", {confirmed} confirmed as already correct"
-    return {"detail": detail + " — recorded in the audit trail.",
-            "changed": applied, "confirmed": confirmed}
+    return {"detail": f"{applied} change(s) saved and recorded in the audit trail.",
+            "changed": applied}
 
 
 def _active_permission(db: Session, candidate_id: int, permission_id) -> FieldEditPermission:
@@ -1007,76 +858,6 @@ def _apply_granted_field(db: Session, current: Candidate, perm: FieldEditPermiss
         old_value=old_value, new_value=new_value or None, action="EDIT", reason=reason,
         actor_role="CANDIDATE", edited_by_candidate_id=current.id, permission_id=perm.id,
         change_set_id=change_set_id))
-
-
-def _apply_granted_section(db: Session, current: Candidate, perm: FieldEditPermission,
-                            raw_rows, reason: str, change_set_id: str) -> None:
-    """Rewrite one reopened section: entries with an `id` are edited, entries
-    without one are added, and entries left out are removed. Every changed
-    cell is its own audit line, so HR sees exactly what moved."""
-    if not isinstance(raw_rows, list) or not all(isinstance(r, dict) for r in raw_rows):
-        raise HTTPException(status_code=400, detail="Malformed change.")
-    model, columns, _, _, _ = edit_access.ROW_TABLES[perm.row_table]
-    title = edit_access.section_title(perm.row_table, perm.field_name)
-    existing = {r.id: r for r in edit_access.section_rows(
-        db, current.id, perm.row_table, perm.field_name)}
-
-    entries = []
-    for raw in raw_rows:
-        values = {c: normalize_field(c, str(raw.get(c) or "").strip()) or None for c in columns}
-        if any(values.values()):          # a blank row is just an unused one
-            entries.append((raw.get("id"), values))
-    if not entries:
-        raise HTTPException(status_code=400, detail=f"Keep at least one entry in {title}.")
-    for _, values in entries:
-        _reject_invalid_dates({c: v for c, v in values.items() if v})
-
-    def log(column, old, new, action):
-        db.add(FieldEditLog(
-            candidate_id=current.id, form_type=edit_access.owning_form(perm.form_type),
-            field_name=f"{perm.row_table}.{column}", old_value=old, new_value=new,
-            action=action, reason=reason, actor_role="CANDIDATE",
-            edited_by_candidate_id=current.id, permission_id=perm.id,
-            change_set_id=change_set_id))
-
-    changed = False
-    kept = set()
-    for row_id, values in entries:
-        if row_id is None:
-            db.add(model(candidate_id=current.id, section=perm.field_name, **values))
-            for c, v in values.items():
-                if v:
-                    log(c, None, v, "ADD")
-            changed = True
-            continue
-        row = existing.get(row_id)
-        if not row or row_id in kept:
-            raise HTTPException(status_code=400,
-                                 detail="An entry changed while you were editing. Reload the page.")
-        kept.add(row_id)
-        for c, v in values.items():
-            old = getattr(row, c)
-            if (old or "") != (v or ""):
-                setattr(row, c, v)
-                log(c, old, v, "EDIT")
-                changed = True
-    for row_id, row in existing.items():
-        if row_id not in kept:
-            for c in columns:
-                if getattr(row, c):
-                    log(c, getattr(row, c), None, "DELETE")
-            # A cell grant on a removed entry has nothing left to point at.
-            for stale in db.query(FieldEditPermission).filter(
-                    FieldEditPermission.candidate_id == current.id,
-                    FieldEditPermission.row_table == perm.row_table,
-                    FieldEditPermission.row_id == row_id,
-                    FieldEditPermission.status == EditPermissionStatus.ACTIVE.value):
-                stale.status = EditPermissionStatus.USED.value
-                stale.resolved_at = datetime.now(timezone.utc)
-            db.delete(row)
-            changed = True
-    if not changed:
-        raise HTTPException(status_code=400, detail=f"Nothing in {title} has changed.")
 
 
 def _apply_granted_document(db: Session, current: Candidate, perm: FieldEditPermission,

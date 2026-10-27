@@ -13,8 +13,6 @@ of every form:
     DOCUMENT   one uploaded file on a form
     ROW_FIELD  one column of one entry in a repeating section (an education
                row, an employment row, a BGV address, ...)
-    SECTION    a whole education section (UG/PG, 12th, 10th): the candidate
-               may edit, add and remove its entries
 
 This module owns the rules shared by both routers: what may be opened, and
 where a granted value actually lives.
@@ -33,13 +31,9 @@ from app.form_definitions import (
     BGV_REFERENCE_COLUMNS,
     CIF_FIELDS,
     CIF_FILE_FIELDS,
-    DECLARATION_FIELDS,
-    DECLARATION_FILE_FIELDS,
     DOC_FIELDS,
     DOC_FILE_FIELDS,
     EDUCATION_COLUMNS,
-    EXP_DECLARATION_FIELDS,
-    EXP_DECLARATION_FILE_FIELDS,
     EMPLOYMENT_COLUMNS,
     PROFILE_FIELDS,
     REF_CHECK_FIELDS,
@@ -56,12 +50,10 @@ from app.models import (
     Candidate,
     CandidateProfile,
     CIFDetails,
-    DeclarationDetails,
     DocCollectionDetails,
     EditPermissionStatus,
     EducationDetail,
     EmploymentDetail,
-    ExperienceDeclarationDetails,
     FieldEditPermission,
     FormStatus,
     FormSubmission,
@@ -71,31 +63,20 @@ from app.models import (
 )
 
 # The forms a candidate fills in, in sequence. Each locks on submission.
-FORMS = ("CIF", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION",
-         "EXPERIENCE_DECLARATION", "BGV")
+FORMS = ("CIF", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "BGV")
 
 # Filled in by HR for their own tracking, never by the candidate — opening
 # these to the candidate would make no sense.
 _HR_ONLY_CIF_FIELDS = {"hr_candidate_id", "hr_candidate_email"}
 
-# Profile columns no candidate form asks for — there is nothing on the CIF
-# for the candidate to correct.
-_NOT_ON_ANY_FORM = {
-    "highest_qualification", "university_name", "graduation_year",
-    "bank_account_number", "bank_ifsc_code",
-    "emergency_contact_name", "emergency_contact_number",
-}
-
 # Storage key -> the columns HR may open. "PROFILE" and "CIF" are two tables
 # behind one form: both are shown to the candidate as part of their CIF.
 GRANTABLE_FIELDS: dict[str, list[str]] = {
-    "PROFILE": [f for f in PROFILE_FIELDS if f not in _NOT_ON_ANY_FORM],
+    "PROFILE": list(PROFILE_FIELDS),
     "CIF": [f for f in CIF_FIELDS if f not in _HR_ONLY_CIF_FIELDS],
     "BGV": list(BGV_FIELDS),
     "DOCUMENT_COLLECTION": list(DOC_FIELDS),   # uploads only — no text columns
     "REFERENCE_CHECK": list(REF_CHECK_FIELDS),
-    "DECLARATION": list(DECLARATION_FIELDS),
-    "EXPERIENCE_DECLARATION": list(EXP_DECLARATION_FIELDS),
 }
 
 # Uploads that may be replaced under a grant.
@@ -104,8 +85,6 @@ GRANTABLE_DOCUMENTS: dict[str, list[str]] = {
     "BGV": list(BGV_FILE_FIELDS),
     "DOCUMENT_COLLECTION": list(DOC_FILE_FIELDS),
     "REFERENCE_CHECK": list(REF_CHECK_FILE_FIELDS),
-    "DECLARATION": list(DECLARATION_FILE_FIELDS),
-    "EXPERIENCE_DECLARATION": list(EXP_DECLARATION_FILE_FIELDS),
 }
 
 # Repeating sections: table key -> (model, editable columns, owning form,
@@ -132,25 +111,6 @@ _EDUCATION_SECTION_TITLES = {
     "10TH": "10th Education",
 }
 
-# Sections HR can reopen whole (field_kind SECTION): row_table -> {section
-# key (stored in field_name) -> title}. Lets a candidate add a PG row they
-# forgot, not just fix a cell of a row they already gave.
-SECTION_TABLES: dict[str, dict[str, str]] = {
-    "education": _EDUCATION_SECTION_TITLES,
-}
-
-
-def section_title(row_table: str, section: str) -> str:
-    return SECTION_TABLES.get(row_table, {}).get(section, section)
-
-
-def section_rows(db: Session, candidate_id: int, row_table: str, section: str) -> list:
-    """The entries of one section, oldest first."""
-    model = ROW_TABLES[row_table][0]
-    return (db.query(model).filter(model.candidate_id == candidate_id,
-                                    model.section == section)
-              .order_by(model.id.asc()).all())
-
 # Which detail table each storage key maps to.
 _DETAIL_MODELS = {
     "PROFILE": CandidateProfile,
@@ -158,8 +118,6 @@ _DETAIL_MODELS = {
     "BGV": BGVDetails,
     "DOCUMENT_COLLECTION": DocCollectionDetails,
     "REFERENCE_CHECK": ReferenceCheckDetails,
-    "DECLARATION": DeclarationDetails,
-    "EXPERIENCE_DECLARATION": ExperienceDeclarationDetails,
 }
 
 # A storage key belongs to exactly one form the candidate fills in. Profile
@@ -170,8 +128,6 @@ OWNING_FORM = {
     "BGV": "BGV",
     "DOCUMENT_COLLECTION": "DOCUMENT_COLLECTION",
     "REFERENCE_CHECK": "REFERENCE_CHECK",
-    "DECLARATION": "DECLARATION",
-    "EXPERIENCE_DECLARATION": "EXPERIENCE_DECLARATION",
 }
 
 
@@ -180,8 +136,6 @@ FORM_TITLES = {
     "CIF": "Candidate Information Form",
     "DOCUMENT_COLLECTION": "Document Collection",
     "REFERENCE_CHECK": "Reference Check",
-    "DECLARATION": "Declaration",
-    "EXPERIENCE_DECLARATION": "Declaration (Relieving / Experience Letter)",
     "BGV": "Background Verification",
 }
 
@@ -222,21 +176,13 @@ def validate_target(db: Session, candidate_id: int, form_type: str, field_kind: 
             raise HTTPException(status_code=404, detail="That entry no longer exists")
         return
 
-    if field_kind == "SECTION":
-        if field_name not in SECTION_TABLES.get(row_table or "", {}):
-            raise HTTPException(status_code=400, detail="Unknown section")
-        if ROW_TABLES[row_table][2] != owning_form(form_type):
-            raise HTTPException(status_code=400,
-                                 detail=f"'{row_table}' does not belong to the {form_type} form")
-        return
-
     if field_kind == "DOCUMENT":
         allowed = GRANTABLE_DOCUMENTS.get(form_type, [])
     elif field_kind == "FIELD":
         allowed = GRANTABLE_FIELDS.get(form_type, [])
     else:
         raise HTTPException(status_code=400,
-                             detail="field_kind must be FIELD, DOCUMENT, ROW_FIELD or SECTION")
+                             detail="field_kind must be FIELD, DOCUMENT or ROW_FIELD")
     if field_name not in allowed:
         raise HTTPException(
             status_code=400,
@@ -319,11 +265,6 @@ def grantable_items(db: Session, candidate_id: int) -> dict[str, list[dict]]:
         for name in names:
             items[owning_form(storage)].append(item(storage, "DOCUMENT", name))
 
-    for row_table, sections in SECTION_TABLES.items():
-        form = ROW_TABLES[row_table][2]
-        for section, title in sections.items():
-            items[form].append(item(form, "SECTION", section, row_table, None, title))
-
     for row_table, (model, columns, form, _, _) in ROW_TABLES.items():
         rows = (db.query(model).filter(model.candidate_id == candidate_id)
                   .order_by(model.id.asc()).all())
@@ -339,8 +280,6 @@ def grantable_items(db: Session, candidate_id: int) -> dict[str, list[dict]]:
 def row_label_for(db: Session, candidate_id: int, permission: FieldEditPermission) -> str | None:
     """The label a granted row entry had when it was granted — recomputed, so
     it follows the entry if the candidate corrects the identifying column."""
-    if permission.field_kind == "SECTION":
-        return section_title(permission.row_table, permission.field_name)
     if permission.field_kind != "ROW_FIELD" or not permission.row_table:
         return None
     entry = ROW_TABLES.get(permission.row_table)
@@ -379,21 +318,11 @@ def current_value(db: Session, candidate_id: int, permission: FieldEditPermissio
             .first()
         )
         return doc.original_filename if doc else None
-    if permission.field_kind == "SECTION":
-        # A one-line summary of the entries, e.g. "B.Tech — ABC College".
-        name_column = ROW_TABLES[permission.row_table][4]
-        summary = "; ".join(
-            " — ".join(v for v in (getattr(r, name_column), getattr(r, "college_name", None)) if v)
-            or "(blank entry)"
-            for r in section_rows(db, candidate_id, permission.row_table, permission.field_name))
-        return summary or None
     if permission.field_kind == "ROW_FIELD":
         row = table_row(db, permission.row_table, candidate_id, permission.row_id)
         return getattr(row, permission.field_name) if row else None
     row = detail_row(db, permission.form_type, candidate_id)
-    # Old grants can name a field that has since been retired — show no value
-    # rather than failing the whole list.
-    return getattr(row, permission.field_name, None) if row else None
+    return getattr(row, permission.field_name) if row else None
 
 
 def audit_field_name(permission: FieldEditPermission) -> str:

@@ -49,13 +49,6 @@ function toDisplayDate(value) {
   return text;
 }
 
-// Today as DD/MM/YYYY, for declaration dates the candidate should not type.
-function todayDisplayDate() {
-  const d = new Date();
-  return [d.getDate(), d.getMonth() + 1].map(n => String(n).padStart(2, "0")).join("/")
-         + "/" + d.getFullYear();
-}
-
 // Slashes appear as they type, so nobody has to punctuate 8 digits by hand.
 function _autoSlash(text) {
   const digits = String(text).replace(/\D/g, "").slice(0, 8);

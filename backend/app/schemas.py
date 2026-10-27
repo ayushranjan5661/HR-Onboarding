@@ -133,9 +133,8 @@ class CandidateListItem(BaseModel):
 class GrantItem(BaseModel):
     form_type: str                 # where the value is stored / which form it is on
     field_name: str
-    field_kind: str = "FIELD"      # FIELD | DOCUMENT | ROW_FIELD | SECTION
-    # ROW_FIELD: which repeating section and which entry in it.
-    # SECTION: row_table only; field_name is the section key (e.g. UG_PG).
+    field_kind: str = "FIELD"      # FIELD | DOCUMENT | ROW_FIELD
+    # ROW_FIELD only: which repeating section and which entry in it.
     row_table: Optional[str] = None
     row_id: Optional[int] = None
 
@@ -300,10 +299,6 @@ class CandidateDetailOut(BaseModel):
     assigned_hr_name: Optional[str] = None
     temp_password: Optional[str] = None   # decrypted on demand for HR view
     login_url: Optional[str] = None
-    declaration_url: Optional[str] = None   # opens the Declaration form directly
-    declaration_link_expires_at: Optional[datetime] = None
-    exp_declaration_url: Optional[str] = None   # relieving / experience letter Declaration
-    exp_declaration_link_expires_at: Optional[datetime] = None
     login_page_url: Optional[str] = None
     login_link_expires_at: Optional[datetime] = None
     profile: Optional[CandidateProfileOut] = None
@@ -314,8 +309,6 @@ class CandidateDetailOut(BaseModel):
     bgv_details: Optional[dict[str, Any]] = None
     doc_details: Optional[dict[str, Any]] = None
     ref_check_details: Optional[dict[str, Any]] = None
-    declaration_details: Optional[dict[str, Any]] = None
-    exp_declaration_details: Optional[dict[str, Any]] = None
     # One entry per named reference: its form link and, once given, the answers.
     referee_feedback: list[dict[str, Any]] = []
     education: dict[str, list[dict[str, Any]]] = {}

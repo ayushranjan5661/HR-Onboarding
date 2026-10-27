@@ -13,14 +13,12 @@ from app.config import settings
 from app.database import get_db
 from app.deps import get_current_staff, get_current_staff_allow_reset
 from app import edit_access
-from app import declaration_links, referee_links, scope, staff_service
+from app import referee_links, scope, staff_service
 from app import date_format
 from app.date_format import normalize_field
 from app.form_definitions import (BGV_FIELDS, BGV_FILE_FIELDS, BGV_TABLE_SECTIONS,
-                                    CIF_FIELDS, CIF_FILE_FIELDS, DECLARATION_FIELDS,
-                                    DECLARATION_FILE_FIELDS, DOC_FIELDS,
-                                    DOC_FILE_FIELDS, EXP_DECLARATION_FIELDS,
-                                    EXP_DECLARATION_FILE_FIELDS, PROFILE_FIELDS, REF_CHECK_FIELDS,
+                                    CIF_FIELDS, CIF_FILE_FIELDS, DOC_FIELDS,
+                                    DOC_FILE_FIELDS, PROFILE_FIELDS, REF_CHECK_FIELDS,
                                     REF_CHECK_FILE_FIELDS)
 from app.models import (
     BGVAddressHistory,
@@ -34,14 +32,12 @@ from app.models import (
     CandidateStage,
     CandidateType,
     CIFDetails,
-    DeclarationDetails,
     DocCollectionDetails,
     Document,
     DocumentSnapshot,
     EditPermissionStatus,
     EducationDetail,
     EmploymentDetail,
-    ExperienceDeclarationDetails,
     FieldEditLog,
     FieldEditPermission,
     FormDraft,
@@ -226,11 +222,10 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
     _issue_invite_token(candidate)
     db.add(candidate)
     db.flush()
-    kind = "Fresher / Trainee" if candidate.candidate_type == CandidateType.FRESHER else "Experienced"
-    staff_service.audit(db, current, "CANDIDATE_INVITED", target_type="CANDIDATE", target=candidate,
-                        detail=f"Invited {candidate.email} as {kind}"
-                               + (f", assigned to {owner.name}" if owner.id != current.id else ""),
-                        team_manager_id=staff_service.team_of(owner))
+    if owner.id != current.id:
+        staff_service.audit(db, current, "CANDIDATE_ASSIGNED", target_type="CANDIDATE",
+                            target=candidate, detail=f"Invited and assigned to {owner.name}",
+                            team_manager_id=staff_service.team_of(owner))
 
     db.add(CandidateProfile(candidate_id=candidate.id, full_name=payload.name, email=payload.email))
     db.add(FormSubmission(candidate_id=candidate.id, form_type=FormType.CIF, status=FormStatus.PENDING))
@@ -342,43 +337,6 @@ def reference_check_pdf(candidate_id: int, db: Session = Depends(get_db),
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
-def _pdf_name(candidate: Candidate) -> str:
-    """The candidate's name as it can sit in a download filename (ASCII,
-    single spaces), or their id when nothing usable is left."""
-    name = "".join(ch if ch.isascii() and ch.isalnum() else " " for ch in (candidate.name or ""))
-    return " ".join(name.split()) or str(candidate.id)
-
-
-@router.get("/candidates/{candidate_id}/declaration/pdf")
-def declaration_pdf(candidate_id: int, db: Session = Depends(get_db),
-                    current: HRUser = Depends(get_current_staff)):
-    """The candidate's Declaration, laid out like the LevelShift template."""
-    candidate = scope.get_scoped_candidate(db, candidate_id, current)
-    from app.services import declaration_pdf as declaration_service
-    reason = declaration_service.not_ready_reason(candidate)
-    if reason:
-        raise HTTPException(status_code=400, detail=reason)
-    pdf = declaration_service.build(candidate)
-    filename = f"Declaration Form Education Documents - {_pdf_name(candidate)}.pdf"
-    return Response(content=pdf, media_type="application/pdf",
-                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
-
-
-@router.get("/candidates/{candidate_id}/experience-declaration/pdf")
-def experience_declaration_pdf(candidate_id: int, db: Session = Depends(get_db),
-                               current: HRUser = Depends(get_current_staff)):
-    """The relieving / experience letter Declaration, as the LevelShift template."""
-    candidate = scope.get_scoped_candidate(db, candidate_id, current)
-    from app.services import declaration_pdf as declaration_service
-    reason = declaration_service.experience_not_ready_reason(candidate)
-    if reason:
-        raise HTTPException(status_code=400, detail=reason)
-    pdf = declaration_service.build_experience(candidate)
-    filename = f"Declaration Form Relieving Letter and Experience Letter - {_pdf_name(candidate)}.pdf"
-    return Response(content=pdf, media_type="application/pdf",
-                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
-
-
 @router.post("/candidates/{candidate_id}/documents/recheck")
 def recheck_documents(candidate_id: int, only_unchecked: bool = False,
                       db: Session = Depends(get_db),
@@ -440,8 +398,6 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
             joinedload(Candidate.documents), joinedload(Candidate.cif_details),
             joinedload(Candidate.bgv_details), joinedload(Candidate.doc_details),
             joinedload(Candidate.ref_check_details), joinedload(Candidate.referee_feedback),
-            joinedload(Candidate.declaration_details),
-            joinedload(Candidate.exp_declaration_details),
             joinedload(Candidate.education), joinedload(Candidate.employment),
             joinedload(Candidate.references),
             joinedload(Candidate.bgv_addresses), joinedload(Candidate.bgv_education),
@@ -467,10 +423,6 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         assigned_hr_name=owner.get("assigned_hr_name"),
         temp_password=decrypt_password(candidate.temp_password_enc),
         login_url=_candidate_login_url(candidate),
-        declaration_url=declaration_links.form_url(candidate),
-        declaration_link_expires_at=declaration_links.expires_at(candidate),
-        exp_declaration_url=declaration_links.EXPERIENCE.form_url(candidate),
-        exp_declaration_link_expires_at=declaration_links.EXPERIENCE.expires_at(candidate),
         login_page_url=_login_page_url(),
         login_link_expires_at=_link_expiry(candidate),
         profile=candidate.profile,
@@ -481,12 +433,6 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         doc_details=_row_dict(candidate.doc_details, DOC_FIELDS, include_id=False) if candidate.doc_details else None,
         ref_check_details=(_row_dict(candidate.ref_check_details, REF_CHECK_FIELDS, include_id=False)
                            if candidate.ref_check_details else None),
-        declaration_details=(_row_dict(candidate.declaration_details, DECLARATION_FIELDS,
-                                       include_id=False)
-                             if candidate.declaration_details else None),
-        exp_declaration_details=(_row_dict(candidate.exp_declaration_details,
-                                           EXP_DECLARATION_FIELDS, include_id=False)
-                                 if candidate.exp_declaration_details else None),
         referee_feedback=referee_links.feedback_for_hr(candidate),
         education={
             section: [_row_dict(e, EDUCATION_COLUMNS) for e in candidate.education if e.section == section]
@@ -519,7 +465,6 @@ def regenerate_invite_link(candidate_id: int, db: Session = Depends(get_db),
     """Issue a fresh one-click link, immediately invalidating the previous one.
     Use this if a link was sent to the wrong person or has expired."""
     candidate = scope.get_scoped_candidate(db, candidate_id, current)
-    declaration_links.detach(candidate)   # the Declaration links are renewed on their own
     _issue_invite_token(candidate)
     db.add(FieldEditLog(candidate_id=candidate_id, form_type="ACCOUNT", field_name="invite_token",
                          old_value="(previous link revoked)", new_value="(new link issued)",
@@ -528,38 +473,6 @@ def regenerate_invite_link(candidate_id: int, db: Session = Depends(get_db),
     return {"detail": "New link issued. The previous link no longer works.",
             "login_url": _candidate_login_url(candidate),
             "login_link_expires_at": _link_expiry(candidate)}
-
-
-@router.post("/candidates/{candidate_id}/regenerate-declaration-link")
-def regenerate_declaration_link(candidate_id: int, db: Session = Depends(get_db),
-                                 current: HRUser = Depends(get_current_staff)):
-    """Issue a fresh Declaration link only; the login link is untouched."""
-    candidate = scope.get_scoped_candidate(db, candidate_id, current)
-    declaration_links.issue(candidate)
-    db.add(FieldEditLog(candidate_id=candidate_id, form_type="ACCOUNT",
-                         field_name="declaration_link_secret",
-                         old_value="(previous link revoked)", new_value="(new link issued)",
-                         action="EDIT", edited_by_hr_id=current.id))
-    db.commit()
-    return {"detail": "New Declaration link issued. The previous one no longer works.",
-            "declaration_url": declaration_links.form_url(candidate),
-            "declaration_link_expires_at": declaration_links.expires_at(candidate)}
-
-
-@router.post("/candidates/{candidate_id}/regenerate-experience-declaration-link")
-def regenerate_experience_declaration_link(candidate_id: int, db: Session = Depends(get_db),
-                                            current: HRUser = Depends(get_current_staff)):
-    """Issue a fresh relieving / experience letter Declaration link only."""
-    candidate = scope.get_scoped_candidate(db, candidate_id, current)
-    declaration_links.EXPERIENCE.issue(candidate)
-    db.add(FieldEditLog(candidate_id=candidate_id, form_type="ACCOUNT",
-                         field_name="exp_declaration_link_secret",
-                         old_value="(previous link revoked)", new_value="(new link issued)",
-                         action="EDIT", edited_by_hr_id=current.id))
-    db.commit()
-    return {"detail": "New Declaration link issued. The previous one no longer works.",
-            "exp_declaration_url": declaration_links.EXPERIENCE.form_url(candidate),
-            "exp_declaration_link_expires_at": declaration_links.EXPERIENCE.expires_at(candidate)}
 
 
 @router.post("/candidates/{candidate_id}/reset-password")
@@ -606,12 +519,6 @@ def delete_candidate(candidate_id: int, db: Session = Depends(get_db),
         FieldEditPermission.candidate_id == candidate_id).delete()
     db.query(FormDraftDocument).filter(FormDraftDocument.candidate_id == candidate_id).delete()
     db.query(FormDraft).filter(FormDraft.candidate_id == candidate_id).delete()
-    # The trail keeps the name and email as text, so it outlives the candidate.
-    owner = db.get(HRUser, candidate.assigned_hr_id) if candidate.assigned_hr_id else None
-    staff_service.audit(db, current, "CANDIDATE_DELETED", target_type="CANDIDATE", target=candidate,
-                        detail=f"Deleted {candidate.email} ({candidate.stage.value.replace('_', ' ').lower()})"
-                               + (f", owned by {owner.name}" if owner else ""),
-                        team_manager_id=staff_service.team_of(owner))
     db.delete(candidate)  # cascades to profile, submissions, documents, detail tables
     db.commit()
     return {"detail": "Invitation deleted. The candidate can no longer log in."}
@@ -628,9 +535,6 @@ _DETAIL_TABLES = {
     "BGV": (BGVDetails, "bgv_details", set(BGV_FIELDS)),
     "DOCUMENT_COLLECTION": (DocCollectionDetails, "doc_details", set(DOC_FIELDS)),
     "REFERENCE_CHECK": (ReferenceCheckDetails, "ref_check_details", set(REF_CHECK_FIELDS)),
-    "DECLARATION": (DeclarationDetails, "declaration_details", set(DECLARATION_FIELDS)),
-    "EXPERIENCE_DECLARATION": (ExperienceDeclarationDetails, "exp_declaration_details",
-                               set(EXP_DECLARATION_FIELDS)),
 }
 
 
@@ -969,13 +873,10 @@ def approve_candidate(candidate_id: int, payload: DecisionRequest, db: Session =
     # until HR presses Send (/candidates/{id}/forms/DOCUMENT_COLLECTION/send).
     # Reference Check waits for the documents to be approved, and BGV for the
     # Reference Check — each then needs its own Send.
-    # Reference Check is created for Fresher / Trainee candidates only; both
-    # Declarations for everyone (each sendable once the CIF is approved).
-    follow_ups = ((FormType.DOCUMENT_COLLECTION, FormType.REFERENCE_CHECK,
-                   FormType.DECLARATION, FormType.EXPERIENCE_DECLARATION, FormType.BGV)
+    # Reference Check is created for Fresher / Trainee candidates only.
+    follow_ups = ((FormType.DOCUMENT_COLLECTION, FormType.REFERENCE_CHECK, FormType.BGV)
                   if candidate.uses_reference_check
-                  else (FormType.DOCUMENT_COLLECTION, FormType.DECLARATION,
-                        FormType.EXPERIENCE_DECLARATION, FormType.BGV))
+                  else (FormType.DOCUMENT_COLLECTION, FormType.BGV))
     for form_type in follow_ups:
         existing = db.query(FormSubmission).filter(FormSubmission.candidate_id == candidate_id,
                                                      FormSubmission.form_type == form_type).first()
@@ -1179,8 +1080,6 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
         if submission.form_type == FormType.REFERENCE_CHECK:
             return {"detail": "Reference Check approved. Send the BGV form if you need it, "
                                "or mark the onboarding complete."}
-        if submission.form_type in (FormType.DECLARATION, FormType.EXPERIENCE_DECLARATION):
-            return {"detail": "Declaration approved."}
     return {"detail": "Submission reviewed"}
 
 
@@ -1211,12 +1110,6 @@ def _send_blocker(form: FormType, candidate: Candidate, db: Session) -> str | No
         if candidate.stage in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
             return ("Approve this candidate's CIF before opening the "
                     "Document Collection form.")
-    elif form is FormType.DECLARATION:
-        if candidate.stage in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
-            return "Approve this candidate's CIF before sending the Declaration form."
-    elif form is FormType.EXPERIENCE_DECLARATION:
-        if candidate.stage in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
-            return "Approve this candidate's CIF before sending the Declaration form."
     elif form is FormType.REFERENCE_CHECK:
         if not candidate.uses_reference_check:
             return "The Reference Check is only for Fresher / Trainee candidates."
@@ -1332,8 +1225,6 @@ _FORM_FILE_FIELDS = {
     FormType.BGV: set(BGV_FILE_FIELDS),
     FormType.DOCUMENT_COLLECTION: set(DOC_FILE_FIELDS),
     FormType.REFERENCE_CHECK: set(REF_CHECK_FILE_FIELDS),
-    FormType.DECLARATION: set(DECLARATION_FILE_FIELDS),
-    FormType.EXPERIENCE_DECLARATION: set(EXP_DECLARATION_FILE_FIELDS),
 }
 
 

@@ -117,22 +117,6 @@ CATALOG = {
         "document": [
         ],
     },
-    # Only the signature is mapped; name and date are filled in by the page.
-    "DECLARATION": {
-        "field": [
-        ],
-        "document": [
-            ("declaration_signature", "Signature of the Employee"),
-        ],
-    },
-    # Same for the relieving / experience letter Declaration.
-    "EXPERIENCE_DECLARATION": {
-        "field": [
-        ],
-        "document": [
-            ("exp_declaration_signature", "Signature of the Employee"),
-        ],
-    },
     "BGV": {
         "field": [
             ("consent_bgv", "I authorise background verification"),
