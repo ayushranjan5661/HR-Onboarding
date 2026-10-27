@@ -42,12 +42,18 @@ CURATED: dict[tuple[str, str], tuple[str, str]] = {
     ("BGV", "name_as_per_records"): ("CIF", "full_name"),
     # Where the candidate signed the CIF is where they'll sign the BGV.
     ("BGV", "declaration_place"): ("CIF", "declaration_place"),
+    # The CIF signature also signs the educational documents declaration.
+    ("DECLARATION", "declaration_signature"): ("CIF", "signature"),
+    # ...and the relieving / experience letter declaration.
+    ("EXPERIENCE_DECLARATION", "exp_declaration_signature"): ("CIF", "signature"),
 }
 
 # Which forms may feed which. A form can only draw from earlier stages.
 UPSTREAM = {
     "DOCUMENT_COLLECTION": ["CIF"],
     "REFERENCE_CHECK": ["CIF"],
+    "DECLARATION": ["CIF"],
+    "EXPERIENCE_DECLARATION": ["CIF"],
     "BGV": ["CIF", "DOCUMENT_COLLECTION"],
 }
 
