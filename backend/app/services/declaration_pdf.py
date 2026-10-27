@@ -24,6 +24,22 @@ _SIZE, _LH = 11.0, 1.5
 _LOGO_H, _LOGO_W = 44.0, 182   # certification strip: height in pt, width in layout units
 _GPTW_PERIOD = "SEP 2026-SEP 2027"   # update when the certification renews
 _log = logging.getLogger("uvicorn.error")   # shows in the uvicorn console
+_WORDMARK_H = 16.0   # LevelShift wordmark cap height, pt
+_WM_BG, _WM_DARK, _WM_CYAN = "#ffffff", "#111111", "#1ca3dc"   # light-background variant
+_WM_T = 17           # stroke, in units of a 100-unit cap height
+# Each letter: (width, bars as (x, y, w, h)), in units of a 100-unit cap height.
+_WM_GLYPHS = {
+    "L": (90, [(0, 0, _WM_T, 100), (0, 100 - _WM_T, 90, _WM_T)]),
+    "E": (90, [(0, 0, _WM_T, 100), (0, 0, 90, _WM_T), (0, 50 - _WM_T / 2, 80, _WM_T),
+               (0, 100 - _WM_T, 90, _WM_T)]),
+    "S": (100, [(0, 0, 100, _WM_T), (0, 0, _WM_T, 50 + _WM_T / 2),
+                (0, 50 - _WM_T / 2, 100, _WM_T), (100 - _WM_T, 50 - _WM_T / 2, _WM_T, 50 + _WM_T / 2),
+                (0, 100 - _WM_T, 100, _WM_T)]),
+    "H": (100, [(0, 0, _WM_T, 100), (100 - _WM_T, 0, _WM_T, 100), (0, 50 - _WM_T / 2, 100, _WM_T)]),
+    "I": (_WM_T, [(0, 0, _WM_T, 100)]),
+    "F": (90, [(0, 0, _WM_T, 100), (0, 0, 90, _WM_T), (0, 50 - _WM_T / 2, 80, _WM_T)]),
+    "T": (100, [(0, 0, 100, _WM_T), (50 - _WM_T / 2, 0, _WM_T, 100)]),
+}
 
 
 def not_ready_reason(candidate: Candidate) -> Optional[str]:
@@ -43,6 +59,38 @@ def _signature(candidate: Candidate, form_type: FormType, field_key: str) -> Opt
     doc = next((d for d in candidate.documents
                 if d.form_type == form_type and d.field_key == field_key), None)
     return _image_stream(doc) if doc else None
+
+
+def _draw_wordmark(page) -> None:
+    """The LevelShift logo at the left of the header, in its light-background
+    form: dark LE·EL, blue SHIFT and the striped blue triangle for the V.
+    Drawn as vectors, like the certification strip."""
+    s, gap, vw = _WORDMARK_H / 100, 24, 130
+    x0, y0 = _LEFT, 52 - _WORDMARK_H
+    letters = [("L", _WM_DARK), ("E", _WM_DARK), ("V", _WM_CYAN), ("E", _WM_DARK),
+               ("L", _WM_DARK), ("S", _WM_CYAN), ("H", _WM_CYAN), ("I", _WM_CYAN),
+               ("F", _WM_CYAN), ("T", _WM_CYAN)]
+
+    def pt(x, y):
+        return pymupdf.Point(x0 + x * s, y0 + y * s)
+
+    def bar(x, y, w, h, color):
+        page.draw_rect(pymupdf.Rect(pt(x, y), pt(x + w, y + h)), color=None, fill=_rgb(color))
+
+    cx = 0
+    for c, color in letters:
+        if c == "V":
+            # Inverted triangle, solid at the top, striped towards the apex.
+            page.draw_polyline([pt(cx, 0), pt(cx + vw, 0), pt(cx + vw / 2, 100), pt(cx, 0)],
+                               color=None, fill=_rgb(color), closePath=True)
+            for sy in (40, 56, 72, 88):
+                bar(cx, sy, vw, 6, _WM_BG)
+            cx += vw + gap
+            continue
+        w, bars = _WM_GLYPHS[c]
+        for bx, by, bw, bh in bars:
+            bar(cx + bx, by, bw, bh, color)
+        cx += w + gap
 
 
 def _draw_logos(page) -> None:
@@ -143,8 +191,8 @@ def _render(candidate: Candidate, d, title: str, para: str,
     def text(x, y, s, font=_REG, size=_SIZE, color=_INK):
         page.insert_text((x, y), s, fontname=font, fontsize=size, color=_rgb(color))
 
-    # Header: company name and a rule, as on the letterhead.
-    text(_LEFT, 52, "LevelShift", _BOLD, 18, _ACCENT)
+    # Header: company logo, certifications and a rule, as on the letterhead.
+    _draw_wordmark(page)
     _draw_logos(page)
     page.draw_line((_LEFT, 64), (_RIGHT, 64), color=_rgb(_ACCENT), width=1.5)
 
