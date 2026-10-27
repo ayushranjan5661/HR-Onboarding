@@ -107,6 +107,8 @@ class InviteCandidateResponse(BaseModel):
     email: EmailStr
     temp_password: str
     login_url: str
+    login_page_url: str
+    login_link_expires_at: Optional[datetime] = None
 
 
 class CandidateListItem(BaseModel):
@@ -117,8 +119,10 @@ class CandidateListItem(BaseModel):
     created_at: datetime
     assigned_hr_id: Optional[int] = None
     assigned_hr_name: Optional[str] = None
+    assigned_hr_role: Optional[str] = None  # lets the list label an owner outside the viewer's scope
     manager_id: Optional[int] = None      # the owner's Manager (or the owner, if a Manager)
     manager_name: Optional[str] = None
+    doc_status: Optional[str] = None      # Document Collection form status, if the form exists
 
     class Config:
         from_attributes = True
@@ -237,6 +241,13 @@ class DocumentOut(BaseModel):
     content_type: Optional[str] = None   # lets the portal preview inline
     file_available: bool = True          # False if the file vanished from disk
     uploaded_at: datetime
+    # Document-validation verdict (app/agents/doc_validator.py); all None on
+    # rows that were never checked.
+    ai_status: Optional[str] = None
+    ai_doc_type: Optional[str] = None
+    ai_confidence: Optional[int] = None
+    ai_id_match: Optional[bool] = None
+    ai_note: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -288,6 +299,8 @@ class CandidateDetailOut(BaseModel):
     assigned_hr_name: Optional[str] = None
     temp_password: Optional[str] = None   # decrypted on demand for HR view
     login_url: Optional[str] = None
+    login_page_url: Optional[str] = None
+    login_link_expires_at: Optional[datetime] = None
     profile: Optional[CandidateProfileOut] = None
     submissions: list[FormSubmissionOut] = []
     documents: list[DocumentOut] = []
@@ -295,6 +308,9 @@ class CandidateDetailOut(BaseModel):
     cif_details: Optional[dict[str, Any]] = None
     bgv_details: Optional[dict[str, Any]] = None
     doc_details: Optional[dict[str, Any]] = None
+    ref_check_details: Optional[dict[str, Any]] = None
+    # One entry per named reference: its form link and, once given, the answers.
+    referee_feedback: list[dict[str, Any]] = []
     education: dict[str, list[dict[str, Any]]] = {}
     employment: list[dict[str, Any]] = []
     references: list[dict[str, Any]] = []
@@ -304,6 +320,14 @@ class CandidateDetailOut(BaseModel):
     zoho_status: Optional[str] = None
     zoho_synced_at: Optional[datetime] = None
     zoho_last_error: Optional[str] = None
+    zoho_cand_record_id: Optional[str] = None
+    zoho_cand_status: Optional[str] = None
+    zoho_cand_synced_at: Optional[datetime] = None
+    zoho_cand_last_error: Optional[str] = None
+    zoho_ref_record_id: Optional[str] = None
+    zoho_ref_status: Optional[str] = None
+    zoho_ref_synced_at: Optional[datetime] = None
+    zoho_ref_last_error: Optional[str] = None
 
     class Config:
         from_attributes = True

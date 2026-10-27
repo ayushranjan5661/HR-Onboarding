@@ -2,10 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#3730a3">
 <title>HR Portal — Dashboard</title>
-<link rel="stylesheet" href="css/style.css?v=20260929b">
+<link rel="stylesheet" href="css/style.css?v=20261008a">
+<link rel="stylesheet" href="css/portal-theme.css?v=20261006s">
 </head>
-<body>
+<body class="themed">
   <div class="app-shell">
     <aside class="sidebar">
       <div class="sidebar-brand"><span class="brand-mark">LS</span><span>HR Portal</span></div>
@@ -15,7 +18,7 @@
       <div class="sidebar-footer">
         <div class="user-chip">
           <span class="avatar" id="whoamiAvatar"></span>
-          <span class="user-name" id="whoami"></span>
+          <span class="user-name"><span id="whoami"></span><span class="user-role" id="whoamiRole"></span></span>
         </div>
         <a class="back-link" href="../change-password.html" style="display:block;margin:0 0 8px 2px;font-size:0.78rem;">Change password</a>
         <button class="logout-btn" onclick="hrLogout()">Log out</button>
@@ -25,7 +28,10 @@
     <div class="main-area">
       <div class="container">
         <div class="page-header">
-          <h2>Candidates</h2>
+          <div>
+            <h2>Candidates</h2>
+            <p class="page-sub">Track every hire from invite to onboarding.</p>
+          </div>
           <button class="btn btn-primary" onclick="document.getElementById('inviteModal').classList.remove('hidden')">+ Invite Candidate</button>
         </div>
 
@@ -48,17 +54,19 @@
           </div>
         </div>
 
-        <div class="toolbar">
-          <input type="text" class="search-input" id="searchInput" placeholder="Search by name or email...">
-        </div>
-
-        <div class="card">
-          <table id="candTable">
-            <thead>
-              <tr><th>Name</th><th>Email</th><th>Stage</th><th>Invited On</th><th>Actions</th></tr>
-            </thead>
-            <tbody id="candBody"></tbody>
-          </table>
+        <div class="card list-card">
+          <div class="list-card-head">
+            <h3>All candidates</h3>
+            <input type="search" class="search-input" id="searchInput" placeholder="Search by name or email" aria-label="Search candidates">
+          </div>
+          <div class="table-scroll">
+            <table id="candTable" class="stack">
+              <thead>
+                <tr><th>Name</th><th>Email</th><th>Stage</th><th>Invited On</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="candBody"></tbody>
+            </table>
+          </div>
           <div class="empty-state hidden" id="emptyState">No candidates yet. Click "Invite Candidate" to get started.</div>
         </div>
       </div>
@@ -113,12 +121,13 @@
     </div>
   </div>
 
-  <script src="../js/config.js?v=20260901b"></script>
+  <script src="../js/config.js?v=20261007b"></script>
   <script src="js/api.js?v=20260929c"></script>
   <script>
     requireAuth(["HR"]);   // Managers and the Super Admin have their own candidate pages
     document.getElementById("whoami").textContent = getName();
     document.getElementById("whoamiAvatar").textContent = getName().charAt(0).toUpperCase();
+    document.getElementById("whoamiRole").textContent = roleLabel(getRole());
 
     function badge(stage) {
       return `<span class="badge badge-${stage.toLowerCase()}">${stage.replaceAll("_", " ")}</span>`;
@@ -156,8 +165,8 @@
         const tr = document.createElement("tr");
         tr.onclick = () => window.location.href = `candidate.html?id=${c.id}`;
         tr.innerHTML = `<td><div class="name-cell"><span class="row-avatar">${escapeHtml(initials(c.name))}</span>${escapeHtml(c.name)}</div></td>
-          <td>${escapeHtml(c.email)}</td>
-          <td>${badge(c.stage)}</td><td>${new Date(c.created_at).toLocaleDateString()}</td>`;
+          <td class="cell-muted">${escapeHtml(c.email)}</td>
+          <td>${badge(c.stage)}</td><td class="cell-muted">${new Date(c.created_at).toLocaleDateString()}</td>`;
 
         const actions = document.createElement("td");
         const del = document.createElement("button");
@@ -217,6 +226,13 @@
     document.getElementById("deleteConfirmInput").addEventListener("input", (e) => {
       document.getElementById("confirmDeleteBtn").disabled =
         !pendingDelete || e.target.value !== pendingDelete.candidate.name;
+    });
+
+    // Enter confirms once the name matches; Escape cancels.
+    document.getElementById("deleteConfirmInput").addEventListener("keydown", (e) => {
+      const btn = document.getElementById("confirmDeleteBtn");
+      if (e.key === "Enter" && !btn.disabled) { e.preventDefault(); btn.click(); }
+      else if (e.key === "Escape") { e.preventDefault(); closeDeleteModal(); }
     });
 
     document.getElementById("confirmDeleteBtn").addEventListener("click", async () => {
@@ -348,6 +364,7 @@
             <button type="button" class="btn btn-primary" onclick="closeInviteModal(); loadCandidates();">Done</button>
           </div>
         `;
+        box.querySelector(".cred-actions .btn-primary").focus();  // Enter = Done
         loadCandidates();
       } catch (err) {
         errorMsg.textContent = err.message;

@@ -110,6 +110,13 @@ CATALOG = {
             ("id_proof", "ID Proof"),
         ],
     },
+    # Nothing catalogued: name and position are filled in by the page itself.
+    "REFERENCE_CHECK": {
+        "field": [
+        ],
+        "document": [
+        ],
+    },
     "BGV": {
         "field": [
             ("consent_bgv", "I authorise background verification"),

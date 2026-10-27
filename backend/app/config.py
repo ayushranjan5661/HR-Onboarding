@@ -28,7 +28,10 @@ class Settings(BaseSettings):
     # --- Portal (used to build the candidate's direct login URL) ---
     PORTAL_BASE_URL: str = "http://127.0.0.1:5500"
     # How long a one-click invite link stays valid. HR can always reissue.
-    INVITE_LINK_EXPIRY_DAYS: int = 30
+    INVITE_LINK_EXPIRY_DAYS: int = 3
+    # Public page a candidate's reference opens to give feedback. Each
+    # reference gets this URL plus their own signed ?token=.
+    REFEREE_FORM_URL: str = "http://127.0.0.1:5500/referee%20form-portal/referee-form.html"
 
     # --- AI cross-form mapping agent (Azure OpenAI) ---
     # Reads the VITE_*-prefixed values already present in .env.
@@ -54,6 +57,52 @@ class Settings(BaseSettings):
     AI_INSIGHTS_ENABLED: bool = True
     AI_INSIGHTS_TIMEOUT: int = 30
 
+    # --- Document validation (app/agents/doc_validator.py) ---
+    # Checks that an uploaded file is the kind of document its field asks for
+    # (a PAN card in the Aadhaar slot, a transfer certificate as a 10th
+    # marksheet, ...). Entirely local: Tesseract OCR reads the text and a
+    # keyword/pattern scorer rates it. Nothing is sent to any AI service —
+    # identity documents are sensitive and stay on this server.
+    #   off   -> never run; nothing is recorded
+    #   warn  -> record the score and show it to the candidate and HR, but
+    #            never refuse the upload (the safe default while the scorer's
+    #            accuracy on real uploads is still being measured)
+    #   block -> refuse an upload scoring below MISMATCH_SCORE; anything in
+    #            between is accepted and flagged for HR
+    DOC_VALIDATION_MODE: str = "warn"
+    # Score (0-100) at or above which the file counts as the right document,
+    # and below which it counts as the wrong one. In between = "please check".
+    DOC_VALIDATION_MATCH_SCORE: int = 80
+    DOC_VALIDATION_MISMATCH_SCORE: int = 40
+    # PDFs: the embedded text layer is used when there is one (e-Aadhaar,
+    # bank statements); scanned pages are rasterised and OCR'd, this many.
+    DOC_VALIDATION_MAX_PAGES: int = 2
+    # Tesseract. TESSERACT_CMD is only needed when it is not on PATH;
+    # TESSDATA_DIR holds the language packs. backend/tessdata ships English
+    # plus every major Indian script (Devanagari for Hindi/Marathi/Nepali,
+    # Bengali/Assamese, Odia, Gurmukhi, Gujarati, Tamil, Telugu, Kannada,
+    # Malayalam, Urdu), because candidates' Aadhaar cards and board
+    # certificates are printed in English plus their state's language.
+    # Two passes: OCR_PRIMARY_LANGUAGES first (fast, and the most accurate
+    # read of the English that carries most documents); if that is not a
+    # clear match, OCR_LANGUAGES — "auto" = every pack found in
+    # TESSDATA_DIR — reads the regional half too, and the better-scoring
+    # pass wins. Or list packs explicitly: "eng+hin+tam".
+    TESSERACT_CMD: str = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    TESSDATA_DIR: str = "tessdata"
+    OCR_PRIMARY_LANGUAGES: str = "eng+hin"
+    OCR_LANGUAGES: str = "auto"
+    OCR_TIMEOUT: int = 30      # seconds per page; a hung OCR must not hang the upload
+
+    @field_validator("TESSDATA_DIR")
+    @classmethod
+    def _anchor_tessdata_dir(cls, v: str) -> str:
+        # Relative means backend/<dir>, whatever the server's CWD is.
+        path = Path(v)
+        if v and not path.is_absolute():
+            path = Path(__file__).resolve().parents[1] / path
+        return str(path) if v else ""
+
     # --- Zoho People push (integrations/zoho/zoho_client.py) ---
     # Both URLs must match the data centre where the OAuth client was created.
     ZOHO_ACCOUNTS_BASE_URL: str = "https://accounts.zoho.in"
@@ -72,6 +121,14 @@ class Settings(BaseSettings):
     # the payload has round-tripped against that form via the CLI (see
     # integrations/zoho/README.md). Leave blank to keep the button disabled.
     ZOHO_CANDIDATE_WRITE_FORM: str = ""
+    # The second button, "Publish to Zoho Candidate Form", writes ONLY here
+    # (normally "Candidate"), with integrations/zoho/field_map_candidate.json.
+    # Blank keeps that button refusing, independent of the one above.
+    ZOHO_CANDIDATE_PROFILE_WRITE_FORM: str = ""
+    # The "Publish Referee Check" button uploads the generated Reference Check
+    # PDF into this form's Reference_check file field ("Documents Collection -
+    # Trainee"). Blank keeps that button refusing.
+    ZOHO_REFERENCE_CHECK_WRITE_FORM: str = "documents_collection_trainee"
     ZOHO_TIMEOUT: int = 30
 
     # --- File uploads ---

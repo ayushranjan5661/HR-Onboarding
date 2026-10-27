@@ -10,22 +10,25 @@ let currentData = null;
 let editAccess = { submitted: {}, grantable: {}, permissions: [] };
 // Whole-form edit mode, tracked per card and limited to one card at a time.
 // PROFILE fields are shown inside the CIF card, so they follow CIF's mode.
-const editModes = { CIF: false, DOCUMENT_COLLECTION: false, BGV: false };
+const editModes = { CIF: false, DOCUMENT_COLLECTION: false, REFERENCE_CHECK: false, BGV: false };
 
 const FORM_TITLES = {
   CIF: "Candidate Details (CIF)",
   DOCUMENT_COLLECTION: "Document Collection Form",
+  REFERENCE_CHECK: "Referee Check Form",
   BGV: "Background Verification Form",
 };
 // The CIF card is static markup; the follow-up cards are built by render().
-const FORM_CARD_ID = { CIF: "cifCard", DOCUMENT_COLLECTION: "card-DOCUMENT_COLLECTION", BGV: "card-BGV" };
-const FORM_DOCS_ID = { CIF: "cifDocs", DOCUMENT_COLLECTION: "docs-DOCUMENT_COLLECTION", BGV: "docs-BGV" };
+const FORM_CARD_ID = { CIF: "cifCard", DOCUMENT_COLLECTION: "card-DOCUMENT_COLLECTION",
+                       REFERENCE_CHECK: "card-REFERENCE_CHECK", BGV: "card-BGV" };
+const FORM_DOCS_ID = { CIF: "cifDocs", DOCUMENT_COLLECTION: "docs-DOCUMENT_COLLECTION",
+                       REFERENCE_CHECK: "docs-REFERENCE_CHECK", BGV: "docs-BGV" };
 
 // Values long enough that a single-line input is unusable.
 const LONG_TEXT_FIELDS = new Set([
   "current_address", "permanent_address", "skills_technologies",
   "technical_certifications", "understanding_of_levelshift", "aspirations",
-  "other_offers", "declaration_place",
+  "other_offers", "declaration_place", "message_to_hiring_team",
 ]);
 
 function badge(stage) {
@@ -56,18 +59,26 @@ function showConfirm(message, { title = "Please confirm", confirmText = "Confirm
   okBtn.textContent = confirmText;
   okBtn.className = `btn ${danger ? "btn-danger" : "btn-primary"}`;
   modal.classList.remove("hidden");
+  okBtn.focus();
 
   return new Promise((resolve) => {
     function done(result) {
       modal.classList.add("hidden");
       okBtn.removeEventListener("click", onOk);
       cancelBtn.removeEventListener("click", onCancel);
+      document.removeEventListener("keydown", onKey);
       resolve(result);
     }
     function onOk() { done(true); }
     function onCancel() { done(false); }
+    // Enter confirms, Escape cancels; a focused Cancel keeps its own Enter.
+    function onKey(e) {
+      if (e.key === "Escape") { e.preventDefault(); done(false); }
+      else if (e.key === "Enter" && e.target !== cancelBtn) { e.preventDefault(); done(true); }
+    }
     okBtn.addEventListener("click", onOk);
     cancelBtn.addEventListener("click", onCancel);
+    document.addEventListener("keydown", onKey);
   });
 }
 
@@ -90,9 +101,14 @@ function showAlert(message, { title = "Done", okText = "OK", danger = false } = 
       modal.classList.add("hidden");
       cancelBtn.classList.remove("hidden");   // restore it for the next showConfirm
       okBtn.removeEventListener("click", done);
+      document.removeEventListener("keydown", onKey);
       resolve();
     }
+    function onKey(e) {
+      if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); done(); }
+    }
     okBtn.addEventListener("click", done);
+    document.addEventListener("keydown", onKey);
     okBtn.focus();
   });
 }
@@ -107,7 +123,7 @@ function showError(message) {
 // a whole (one Edit button in the card header) rather than field by field, so
 // a row is either read-only text or — with `opts.editing` — an input.
 function fieldRow(form, field, value, opts = {}) {
-  const { editing = false } = opts;
+  const { editing = false, label = labelFor(field) } = opts;
   const hasValue = value !== null && value !== undefined && value !== "";
   if (editing) {
     const v = escapeHtml(String(value ?? ""));
@@ -115,7 +131,7 @@ function fieldRow(form, field, value, opts = {}) {
       + (isDateField(field) ? " data-date" : "");
     return `
       <div class="field-row">
-        <div class="fname">${labelFor(field)}</div>
+        <div class="fname">${escapeHtml(label)}</div>
         <div class="fval">${LONG_TEXT_FIELDS.has(field)
           ? `<textarea rows="2" ${attrs}>${v}</textarea>`
           : `<input type="text" ${attrs} value="${v}">`}</div>
@@ -123,7 +139,7 @@ function fieldRow(form, field, value, opts = {}) {
   }
   return `
     <div class="field-row">
-      <div class="fname">${labelFor(field)}</div>
+      <div class="fname">${escapeHtml(label)}</div>
       <div class="fval ${hasValue ? "" : "empty"}">${hasValue ? escapeHtml(String(value)) : "Not provided"}</div>
     </div>`;
 }
@@ -132,6 +148,119 @@ function fieldRows(form, fieldList, data, opts = {}) {
   if (!fieldList.length) return "";   // e.g. Document Collection — uploads only
   if (!data) return "<p style='color:#6b7280'>Not submitted yet.</p>";
   return fieldList.map(f => fieldRow(form, f, data[f], opts)).join("");
+}
+
+// Reference Check: candidate details, then each reference in its own box.
+const REF_BOX_LABELS = { name: "Referee Name", title: "Title", email: "Referee Mail ID",
+                         phone: "Referee Phone No." };
+function refCheckRows(data, opts = {}) {
+  if (!data) return "<p style='color:#6b7280'>Not submitted yet.</p>";
+  const rows = list => list.map(f => fieldRow("REFERENCE_CHECK", f, data[f], opts)).join("");
+  const box = n => `
+    <div class="ref-box">
+      <h4>Referee Detail ${n}</h4>
+      ${Object.entries(REF_BOX_LABELS).map(([k, label]) =>
+        fieldRow("REFERENCE_CHECK", `ref${n}_${k}`, data[`ref${n}_${k}`], { ...opts, label })).join("")}
+      ${opts.editing ? "" : refereeFeedbackBlock((opts.referee || []).find(r => r.ref_index === n))}
+    </div>`;
+  return rows(["candidate_name", "reference_check_date", "position_applied_for"])
+    + box(1) + box(2)
+    + rows(["message_to_hiring_team", "declaration_accepted"]);
+}
+
+// Under each reference: the link to their own feedback form, and the answers
+// once they submit it (see backend app/referee_links.py).
+const REFEREE_QUESTIONS = [
+  ["relationship_with_candidate", "Relationship with the candidate"],
+  ["candidate_strengths", "Strengths"],
+  ["candidate_development_areas", "Development areas"],
+];
+const REFEREE_RATINGS = [
+  ["rating_reliability", "Reliability"], ["rating_punctuality", "Punctuality"],
+  ["rating_attendance", "Attendance"], ["rating_professionalism", "Professionalism"],
+];
+function refereeFeedbackBlock(fb) {
+  if (!fb) return "";
+  const url = escapeHtml(fb.form_url);
+  const link = `
+    <div class="referee-link">
+      <span class="fname">Referee Form Link</span>
+      <a href="${url}" target="_blank" rel="noopener">${url}</a>
+      <button class="btn btn-outline btn-small" type="button"
+              onclick="copyRefereeLink(this, '${url}')">Copy Link</button>
+    </div>`;
+  if (!fb.submitted) {
+    return link + `<div class="referee-status">Waiting for the referee to submit feedback.</div>`;
+  }
+  const a = fb.answers || {};
+  const row = (label, v) => `
+    <div class="field-row">
+      <div class="fname">${escapeHtml(label)}</div>
+      <div class="fval ${v ? "" : "empty"}">${v ? escapeHtml(String(v)) : "Not provided"}</div>
+    </div>`;
+  const when = fb.submitted_at ? new Date(fb.submitted_at).toLocaleString() : "";
+  return link + `
+    <div class="referee-feedback">
+      <h5>Referee Feedback <span class="badge badge-approved">SUBMITTED</span>
+        ${when ? `<small>${escapeHtml(when)}</small>` : ""}</h5>
+      ${REFEREE_QUESTIONS.map(([k, label]) => row(label, a[k])).join("")}
+      ${REFEREE_RATINGS.map(([k, label]) => row(`${label} (1-4)`, a[k])).join("")}
+      ${row("Additional comments", a.additional_comments)}
+    </div>`;
+}
+
+// The PDF endpoint needs the Authorization header, so fetch it as a blob and
+// hand it to the browser as a download.
+async function downloadReferencePdf(btn) {
+  return downloadPdf(btn, "reference-check", "Referee_Check.pdf");
+}
+
+async function downloadDocCollectionPdf(btn) {
+  return downloadPdf(btn, "document-collection", "Document_Collection.pdf");
+}
+
+async function downloadCifPdf(btn) {
+  return downloadPdf(btn, "cif", "CIF.pdf");
+}
+
+async function downloadPdf(btn, path, fallbackName) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Preparing…";
+  try {
+    const res = await fetch(`${API_BASE}/hr/candidates/${candidateId}/${path}/pdf`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error((data && data.detail) || "Could not create the PDF");
+    }
+    const match = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "");
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = match ? match[1] : fallbackName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (err) {
+    await showAlert(err.message, { title: "Download failed" });
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+async function copyRefereeLink(btn, url) {
+  try {
+    await navigator.clipboard.writeText(url);
+    const original = btn.textContent;
+    btn.textContent = "Copied!";
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  } catch {
+    window.prompt("Copy the referee form link:", url);
+  }
 }
 
 // Repeating-row table (education / employment / references). In edit mode every
@@ -221,6 +350,109 @@ function docActions(formType, fieldKey, doc, editing, fileAvailable = true) {
   return buttons.length ? `<div class="field-actions">${buttons.join("")}</div>` : "";
 }
 
+// What the OCR document check made of the file (score 0-100). A MATCH is
+// shown quietly; anything else is the reason this line exists — a PAN card
+// in the Aadhaar slot should be obvious from the checklist, not from opening
+// the file.
+const _DOC_CHECK_STYLE = {
+  MATCH:     { cls: "match",    icon: "✅", label: "Verified" },
+  UNCERTAIN: { cls: "uncertain", icon: "⚠️", label: "Please verify" },
+  MISMATCH:  { cls: "mismatch", icon: "❌", label: "Wrong document?" },
+};
+
+// Splits on `sep` only outside parentheses — evidence labels such as
+// "Class 10 (SSC / SSLC / …)" carry their own brackets.
+function _splitTopLevel(text, sep) {
+  const parts = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0 && text.startsWith(sep, i)) {
+      parts.push(text.slice(start, i));
+      start = i + sep.length;
+      i += sep.length - 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+// The stored note reads "Looks like X (score 85%: sign; sign; sign)." —
+// pull the signs out into chips and drop the inline score, which is shown
+// once as a pill instead. Brackets are matched by depth, not by the first
+// ")", since the signs can contain their own. Notes written before the
+// "; " separator used ", ".
+function _splitDocNote(note) {
+  let evidence = [];
+  let message = note;
+  const re = /\s*\(score\s+\d+%/g;
+  let m;
+  while ((m = re.exec(message))) {
+    let depth = 1, i = m.index + m[0].length;
+    for (; i < message.length && depth; i++) {
+      if (message[i] === "(") depth++;
+      else if (message[i] === ")") depth--;
+    }
+    const inner = message.slice(m.index + m[0].length, depth ? i : i - 1);
+    if (!evidence.length && inner.startsWith(":")) {
+      const signs = inner.slice(1).trim();
+      evidence = _splitTopLevel(signs, signs.includes("; ") ? "; " : ", ")
+        .map(s => s.replace(/^only\s+/, "").trim()).filter(Boolean);
+    }
+    message = message.slice(0, m.index) + message.slice(i);
+    re.lastIndex = m.index;
+  }
+  message = message
+    .replace(/\s*\(\d+%\)/g, "")
+    .replace(/\s+([.,])/g, "$1")
+    .trim();
+  return { message, evidence };
+}
+
+function docCheckBadge(doc) {
+  const style = _DOC_CHECK_STYLE[doc.ai_status];
+  if (!style) {
+    // Uploaded before the check existed, or the file could not be read.
+    // Say so rather than leave a gap HR might read as "fine".
+    const why = doc.ai_status === "UNVERIFIED" ? escapeHtml(doc.ai_note || "Could not be checked.")
+                                                : "Not checked yet — use “Re-check documents”.";
+    return `<div class="doc-check doc-check--none">
+      <div class="doc-check__head"><span>◌</span><strong>Not checked</strong></div>
+      <div class="doc-check__msg">${why}</div></div>`;
+  }
+  const { message, evidence } = _splitDocNote(doc.ai_note || "");
+  const score = doc.ai_confidence != null
+    ? `<span class="doc-check__score">${doc.ai_confidence}% match</span>` : "";
+  const chips = evidence.length
+    ? `<div class="doc-check__found"><span class="doc-check__found-label">Found:</span>${
+        evidence.map(e => `<span class="doc-check__chip">${escapeHtml(e)}</span>`).join("")}</div>`
+    : "";
+  return `<div class="doc-check doc-check--${style.cls}">
+    <div class="doc-check__head"><span>${style.icon}</span><strong>${style.label}</strong>${score}</div>
+    ${message ? `<div class="doc-check__msg">${escapeHtml(message)}</div>` : ""}
+    ${chips}</div>`;
+}
+
+// Re-run the OCR check over every document this candidate has on record —
+// for uploads that predate the check, or after the rules were tuned.
+async function recheckDocs(btn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  try {
+    const res = await apiFetch(`/hr/candidates/${candidateId}/documents/recheck`, { method: "POST" });
+    await load();
+    await showAlert(res.detail, { title: "Documents re-checked" });
+  } catch (err) {
+    await showError("Could not re-check documents: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
 function renderDocs(allDocs, formType, opts = {}) {
   const { editing = false } = opts;
   const expected = FORM_FILE_FIELDS[formType] || [];
@@ -243,7 +475,7 @@ function renderDocs(allDocs, formType, opts = {}) {
       return `
         <div class="field-row">
           <div class="fname">${labelFor(fieldKey)}</div>
-          <div class="fval">✅ Submitted — ${escapeHtml(doc.original_filename)}</div>
+          <div class="fval">✅ Submitted — ${escapeHtml(doc.original_filename)}${docCheckBadge(doc)}</div>
           ${docActions(formType, fieldKey, doc, editing)}
         </div>`;
     }
@@ -254,7 +486,15 @@ function renderDocs(allDocs, formType, opts = {}) {
         ${docActions(formType, fieldKey, null, editing)}
       </div>`;
   }).join("");
-  return `<h4 style="margin:16px 0 4px;font-size:0.85rem;color:#6b7280;">UPLOADED DOCUMENTS</h4>${rows}`;
+  // Heading and the re-check action share one row; the button is a sibling
+  // of the heading, not inside it, so heading styles never swallow it.
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin:16px 0 4px;">
+      <h4 style="margin:0;font-size:0.85rem;color:#6b7280;">UPLOADED DOCUMENTS</h4>
+      <button type="button" class="btn btn-outline btn-small" onclick="recheckDocs(this)"
+        title="Run the OCR document check again on every file this candidate has uploaded">
+        ↻ Re-check documents</button>
+    </div>${rows}`;
 }
 
 
@@ -372,10 +612,13 @@ function showLoadError(message) {
   document.getElementById("candName").textContent = "Could not load candidate";
   document.getElementById("candStage").innerHTML = "";
   document.getElementById("credentialsCard").classList.add("hidden");
+  document.getElementById("welcomeEmailCard").classList.add("hidden");
   document.getElementById("decisionCard").classList.add("hidden");
   document.getElementById("cifCard").classList.add("hidden");
   document.getElementById("auditCard").classList.add("hidden");
   document.getElementById("zohoCard").classList.add("hidden");
+  document.getElementById("zohoCandCard").classList.add("hidden");
+  document.getElementById("zohoRefCard").classList.add("hidden");
   document.getElementById("openAccessBanner").innerHTML = "";
   document.getElementById("followupForms").innerHTML = "";
   const notice = document.getElementById("rejectedNotice");
@@ -388,13 +631,14 @@ function showLoadError(message) {
 
 function render() {
   const c = currentData;
+  // showLoadError hides these; a later successful load must bring them back.
+  for (const id of ["credentialsCard", "cifCard", "auditCard"]) {
+    document.getElementById(id).classList.remove("hidden");
+  }
   document.getElementById("candName").textContent = `${c.name} — ${c.email}`;
   const typeLabel = c.candidate_type === "FRESHER" ? "Fresher / Trainee" : "Experienced";
-  const ownerTag = c.assigned_hr_name
-    ? `<span class="badge badge-pending" style="margin-right:6px;" title="Owner">Owner: ${escapeHtml(c.assigned_hr_name)}</span>`
-    : "";
   document.getElementById("candStage").innerHTML =
-    ownerTag + `<span class="badge badge-pending" style="margin-right:6px;">${typeLabel}</span>` + badge(c.stage);
+    `<span class="badge badge-pending" style="margin-right:6px;">${typeLabel}</span>` + badge(c.stage);
 
   // Login credentials issued to this candidate (HR-owned; candidate cannot change them)
   document.getElementById("credentialsBody").innerHTML = `
@@ -417,6 +661,36 @@ function render() {
       "New Link" issues a fresh one and immediately kills the old one.
     </div>`;
 
+  // Rejected candidates don't need onboarding mail.
+  document.getElementById("welcomeEmailCard").classList.toggle("hidden", c.stage === "REJECTED");
+  // Document Collection opens only once the CIF is approved (see sendGate).
+  const docsOpen = c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE";
+  // Reference Check opens only once the documents are approved (see sendGate).
+  const docSub = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
+  // Reference Check is a Fresher / Trainee form only.
+  const refsOpen = c.candidate_type === "FRESHER" && docsOpen && docSub?.status === "APPROVED";
+  applyEmailDraftVisibility();
+  const emailOpts = {
+    templates: ["CIF", ...(docsOpen ? ["DOCUMENT_COLLECTION"] : []), ...(refsOpen ? ["REFERENCE_CHECK"] : []),
+                // Once the candidate has named their references, HR can mail each one.
+                ...[1, 2].filter(n => c.candidate_type === "FRESHER"
+                                       && (c.ref_check_details || {})[`ref${n}_email`])
+                         .map(n => `REFERENCE_${n}`)],
+    template: refsOpen && c.stage === "APPROVED_FOR_BGV" ? "REFERENCE_CHECK"
+      : c.stage === "APPROVED_FOR_BGV" ? "DOCUMENT_COLLECTION" : "CIF",
+  };
+  const drawEmail = () => {
+    const box = document.getElementById("welcomeEmailBody");
+    c.ref_ai = refAi.result;
+    c.ref_ai_loading = refAi.loading;
+    // Keep whichever template HR is looking at when the AI answer arrives.
+    const shown = box.dataset.weTemplate;
+    renderWelcomeEmailDraft(box, c, emailOpts.templates.includes(shown)
+      ? { ...emailOpts, template: shown } : emailOpts);
+  };
+  drawEmail();
+  loadReferenceAi(c, drawEmail);
+
   // Decision card only when awaiting the final-interview decision
   document.getElementById("decisionCard").classList.toggle("hidden", c.stage !== "CIF_SUBMITTED");
 
@@ -437,8 +711,10 @@ function render() {
   // same Send / Withdraw controls the follow-up cards get, plus a NOT SENT
   // badge that says why a sent form has gone quiet on the candidate's side.
   const cifSub = c.submissions.find(s => s.form_type === "CIF");
+  const cifPdfControl = c.cif_details && !editModes.CIF
+    ? `<button class="btn btn-outline btn-small" onclick="downloadCifPdf(this)">Download PDF</button>` : "";
   document.getElementById("actions-CIF").innerHTML =
-    (editModes.CIF ? "" : accessControls("CIF", cifSub, c)) + formEditControls("CIF");
+    cifPdfControl + (editModes.CIF ? "" : accessControls("CIF", cifSub, c)) + formEditControls("CIF");
   document.getElementById("cifBadge").innerHTML =
     cifSub && cifSub.status === "LOCKED"
       ? `<span class="badge badge-locked">NOT SENT</span>` : "";
@@ -469,9 +745,10 @@ function render() {
 
   // ---- Follow-up forms (BGV / Document Collection) ----
   document.getElementById("followupForms").innerHTML = "";
-  // Sequential order: Document Collection is reviewed first, then BGV.
+  // Sequential order: Document Collection, then Reference Check, then BGV.
   const followupConfig = {
     DOCUMENT_COLLECTION: { title: FORM_TITLES.DOCUMENT_COLLECTION, fields: DOC_FIELDS, data: c.doc_details },
+    REFERENCE_CHECK: { title: FORM_TITLES.REFERENCE_CHECK, fields: REF_CHECK_FIELDS, data: c.ref_check_details },
     BGV: { title: FORM_TITLES.BGV, fields: BGV_FIELDS, data: c.bgv_details },
   };
   Object.entries(followupConfig).forEach(([type, cfg]) => {
@@ -507,16 +784,27 @@ function render() {
     const reviewControls = canReview && !editing ? `
       <button class="btn btn-success btn-small" onclick="reviewSubmission(${sub.id}, 'APPROVED')">Approve</button>
       <button class="btn btn-danger btn-small" onclick="reviewSubmission(${sub.id}, 'REJECTED')">Reject</button>` : "";
+    // The PDF is only generated once both referees have submitted feedback.
+    const pendingRefs = pendingReferees(c);
+    const pdfControl = type === "REFERENCE_CHECK" && submitted && !editing && cfg.data
+      ? (pendingRefs.length
+          ? `<button class="btn btn-outline btn-small" disabled title="${escapeHtml(
+              `Available once both referees submit feedback (waiting for ${pendingRefs.map(n => `Referee ${n}`).join(" and ")})`)}">Download PDF</button>`
+          : `<button class="btn btn-outline btn-small" onclick="downloadReferencePdf(this)">Download PDF</button>`)
+      : type === "DOCUMENT_COLLECTION" && submitted && !editing
+        ? `<button class="btn btn-outline btn-small" onclick="downloadDocCollectionPdf(this)">Download PDF</button>`
+        : "";
     wrap.innerHTML = `
       <div class="section-title collapsible" onclick="toggleCollapse(this)">
         <h3>${cfg.title} <span class="badge badge-${sub.status.toLowerCase()}">${sub.status.replaceAll("_"," ")}</span></h3>
         <div class="section-title-actions" onclick="event.stopPropagation()">
-          ${submitted ? formEditControls(type) : ""}${reviewControls}${accessControls(type, sub, c)}
+          ${pdfControl}${submitted ? formEditControls(type) : ""}${reviewControls}${accessControls(type, sub, c)}
         </div>
         <span class="chevron">&#9660;</span>
       </div>
       ${!submitted ? "<p style='color:#6b7280'>Waiting for candidate to submit.</p>" :
-        fieldRows(type, cfg.fields, cfg.data, { editing })
+        (type === "REFERENCE_CHECK" ? refCheckRows(cfg.data, { editing, referee: c.referee_feedback })
+                                    : fieldRows(type, cfg.fields, cfg.data, { editing }))
           + (type === "BGV" ? bgvTables(c, { editing, showDelete: editing }) : "")
           + `<div id="${FORM_DOCS_ID[type]}">${renderDocs(c.documents, type, { editing })}</div>`}
     `;
@@ -557,52 +845,96 @@ function render() {
   // ---- Zoho People publish ----
   const zohoEligible = c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE";
   document.getElementById("zohoCard").classList.toggle("hidden", !zohoEligible);
-  if (zohoEligible) renderZoho(c);
+  document.getElementById("zohoCandCard").classList.toggle("hidden", !zohoEligible);
+  document.getElementById("zohoRefCard").classList.toggle("hidden", !zohoEligible);
+  if (zohoEligible) {
+    renderZoho(c, "confirmation");
+    renderZoho(c, "candidate");
+    renderZoho(c, "reference");
+  }
 
   // Edit-mode date cells are rebuilt on every render, so re-wire them here.
   attachDateInputs();
 }
 
-function renderZoho(c) {
-  const pushed = !!c.zoho_record_id;
+// The two Zoho forms HR can publish to — see backend zoho_push.TARGETS.
+// `prefix` is the field prefix of that target's sync state on the candidate.
+const ZOHO_TARGETS = {
+  confirmation: {
+    prefix: "zoho_", bodyId: "zohoBody", btnId: "zohoPushBtn",
+    path: "zoho/push", label: "Zoho Candidate Information Form",
+  },
+  candidate: {
+    prefix: "zoho_cand_", bodyId: "zohoCandBody", btnId: "zohoCandPushBtn",
+    path: "zoho/candidate-form/push", label: "Zoho Candidate Onboarding Form",
+  },
+  // Uploads the Referee Check PDF into Zoho's "Documents Collection - Trainee".
+  reference: {
+    prefix: "zoho_ref_", bodyId: "zohoRefBody", btnId: "zohoRefPushBtn",
+    path: "zoho/reference-check/push", label: "Zoho Referee Check Form",
+    confirmNew: "Upload the Referee Check PDF to this candidate's Zoho Documents Collection record?",
+    confirmAgain: "Replace the Referee Check PDF in Zoho with a freshly generated one?",
+  },
+};
+
+// Referees (1, 2) with no feedback yet; mirrors reference_pdf.pending_referees.
+function pendingReferees(c) {
+  const done = new Set((c.referee_feedback || []).map(r => r.ref_index));
+  return [1, 2].filter(n => !done.has(n));
+}
+
+function renderZoho(c, target) {
+  const t = ZOHO_TARGETS[target];
+  const recordId = c[t.prefix + "record_id"];
+  const status = c[t.prefix + "status"];
+  const syncedAt = c[t.prefix + "synced_at"];
+  const lastError = c[t.prefix + "last_error"];
+  const pushed = !!recordId;
   const statusLine = !pushed
-    ? "Not yet published to Zoho People."
-    : `Zoho record <code>${escapeHtml(c.zoho_record_id)}</code> — `
-      + (c.zoho_status === "DRAFT"
+    ? `Not yet published to ${t.label}.`
+    : `Zoho record <code>${escapeHtml(recordId)}</code> — `
+      + (status === "DRAFT"
           ? "created as a draft there; open it in Zoho to review before treating it as final."
           : "last synced")
-      + (c.zoho_synced_at ? ` (${new Date(c.zoho_synced_at).toLocaleString()}).` : ".");
-  const errorLine = c.zoho_last_error
-    ? `<div style="color:var(--danger);margin-top:6px;font-size:0.85rem;">Last attempt failed: ${escapeHtml(c.zoho_last_error)}</div>`
+      + (syncedAt ? ` (${new Date(syncedAt).toLocaleString()}).` : ".");
+  const errorLine = lastError
+    ? `<div style="color:var(--danger);margin-top:6px;font-size:0.85rem;">Last attempt failed: ${escapeHtml(lastError)}</div>`
     : "";
-  document.getElementById("zohoBody").innerHTML = `
+  // The Referee Check PDF only exists once both referees have submitted.
+  const pendingRefs = target === "reference" ? pendingReferees(c) : [];
+  const waitLine = pendingRefs.length
+    ? `<p style="color:#92400e;font-size:0.85rem;">Waiting for ${pendingRefs.map(n => `Referee ${n}`).join(" and ")} `
+      + "to submit feedback — the PDF is generated once both have.</p>"
+    : "";
+  document.getElementById(t.bodyId).innerHTML = `
     <p style="color:#6b7280;font-size:0.88rem;">${statusLine}</p>
-    ${errorLine}
-    <button class="btn btn-primary" id="zohoPushBtn" onclick="pushToZoho()">
-      ${pushed ? "Re-sync to Zoho People" : "Publish to Zoho People"}
+    ${errorLine}${waitLine}
+    <button class="btn btn-primary" id="${t.btnId}" onclick="pushToZoho('${target}')"${pendingRefs.length ? " disabled" : ""}>
+      ${pushed ? `Re-sync to ${t.label}` : `Publish to ${t.label}`}
     </button>`;
 }
 
-async function pushToZoho() {
-  const alreadyPushed = !!(currentData && currentData.zoho_record_id);
-  const msg = alreadyPushed
-    ? "Push this candidate's latest data to the existing Zoho People record?"
-    : "Create this candidate as a draft record in Zoho People? You'll be able to "
-      + "review it there before treating it as final.";
+async function pushToZoho(target = "confirmation") {
+  const t = ZOHO_TARGETS[target];
+  const alreadyPushed = !!(currentData && currentData[t.prefix + "record_id"]);
+  const msg = (alreadyPushed ? t.confirmAgain : t.confirmNew) || (alreadyPushed
+    ? `Push this candidate's latest data to the existing ${t.label} record?`
+    : `Create this candidate as a draft record in ${t.label}? You'll be able to `
+      + "review it there before treating it as final.");
   if (!await showConfirm(msg, {
-        title: "Publish to Zoho People",
+        title: `Publish to ${t.label}`,
         confirmText: alreadyPushed ? "Re-sync" : "Publish",
       })) return;
 
-  const btn = document.getElementById("zohoPushBtn");
+  const btn = document.getElementById(t.btnId);
   btn.disabled = true;
   btn.textContent = "Publishing…";
   try {
-    const result = await apiFetch(`/hr/candidates/${candidateId}/zoho/push`, {
+    const result = await apiFetch(`/hr/candidates/${candidateId}/${t.path}`, {
       method: "POST", body: JSON.stringify({}),
     });
     await load();
-    await showAlert(result.detail, { title: "Published to Zoho People" });
+    await showAlert(result.detail, { title: `Published to ${t.label}` });
   } catch (err) {
     await showAlert(err.message, { title: "Zoho push failed", danger: true });
     await load();
@@ -616,11 +948,49 @@ async function regenerateLink() {
   try {
     await apiFetch(`/hr/candidates/${candidateId}/regenerate-link`, { method: "POST" });
     await load();
-    await showAlert("Copy the new link and send it to the candidate — the old one no longer works.",
+    await showAlert("The welcome email draft now carries the new link — send it to the candidate. The old one no longer works.",
                      { title: "New link issued" });
   } catch (err) {
     showError(err.message);
   }
+}
+
+// The AI reading of the candidate's "Message to Hiring Team", which tailors
+// the two reference mails. Fetched once per message, not on every re-render.
+const refAi = { message: null, loading: false, result: null };
+
+async function loadReferenceAi(c, redraw) {
+  const message = ((c.ref_check_details || {}).message_to_hiring_team || "").trim();
+  if (!message || refAi.message === message) return;
+  refAi.message = message;
+  refAi.loading = true;
+  refAi.result = null;
+  redraw();
+  try {
+    refAi.result = await apiFetch(`/hr/candidates/${candidateId}/reference-email-ai`);
+  } catch (err) {
+    refAi.result = { error: err.message };
+  }
+  refAi.loading = false;
+  redraw();
+}
+
+// Email draft card can be collapsed; the choice is remembered per browser.
+const EMAIL_DRAFT_HIDDEN_KEY = "hr.emailDraftHidden";
+
+let emailDraftIsHidden = (() => {
+  try { return localStorage.getItem(EMAIL_DRAFT_HIDDEN_KEY) === "1"; } catch { return false; }
+})();
+
+function applyEmailDraftVisibility() {
+  document.getElementById("welcomeEmailCard").classList.toggle("collapsed", emailDraftIsHidden);
+  document.getElementById("emailDraftToggle").setAttribute("aria-expanded", String(!emailDraftIsHidden));
+}
+
+function toggleEmailDraft() {
+  emailDraftIsHidden = !emailDraftIsHidden;
+  try { localStorage.setItem(EMAIL_DRAFT_HIDDEN_KEY, emailDraftIsHidden ? "1" : "0"); } catch {}
+  applyEmailDraftVisibility();
 }
 
 // Copies the login link only — that's the one thing HR sends the candidate.
@@ -655,11 +1025,24 @@ function sendGate(form, c) {
   if (form === "DOCUMENT_COLLECTION" && (c.stage === "INVITED" || c.stage === "CIF_SUBMITTED")) {
     return { canSend: false, reason: "Available once you approve their CIF above." };
   }
-  if (form === "BGV") {
+  if (form === "REFERENCE_CHECK") {
     const docs = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
     if (!docs || docs.status !== "APPROVED") {
       return { canSend: false,
                reason: "Available once you approve their Document Collection form above." };
+    }
+  }
+  if (form === "BGV" && c.candidate_type !== "FRESHER") {
+    const docs = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
+    if (!docs || docs.status !== "APPROVED") {
+      return { canSend: false,
+               reason: "Available once you approve their Document Collection form above." };
+    }
+  } else if (form === "BGV") {
+    const refs = c.submissions.find(s => s.form_type === "REFERENCE_CHECK");
+    if (!refs || refs.status !== "APPROVED") {
+      return { canSend: false,
+               reason: "Available once you approve their Reference Check form above." };
     }
   }
   return { canSend: true, reason: "" };
@@ -1449,8 +1832,9 @@ async function sendForm(formType) {
 
 document.getElementById("approveBtn").addEventListener("click", async () => {
   if (!currentData) return;  // page never loaded — don't act on a stale id
-  if (!await showConfirm("The Document Collection form will be unlocked. Once you approve "
-      + "those documents you can send the BGV form, or finish the onboarding without it.",
+  if (!await showConfirm("Nothing is sent to the candidate yet — press Send on the Document "
+      + "Collection form when you are ready. Once you approve those documents you can send "
+      + "the BGV form, or finish the onboarding without it.",
       { title: "Mark this candidate as shortlisted?", confirmText: "Shortlisted" })) return;
   try {
     await apiFetch(`/hr/candidates/${candidateId}/approve`, { method: "POST", body: JSON.stringify({}) });
@@ -1482,6 +1866,13 @@ document.getElementById("rejectBtn").addEventListener("click", () => {
 document.getElementById("rejectConfirmInput").addEventListener("input", (e) => {
   document.getElementById("confirmRejectBtn").disabled =
     !currentData || e.target.value !== currentData.name;
+});
+
+// Enter confirms once the name matches; Escape cancels.
+document.getElementById("rejectConfirmInput").addEventListener("keydown", (e) => {
+  const btn = document.getElementById("confirmRejectBtn");
+  if (e.key === "Enter" && !btn.disabled) { e.preventDefault(); btn.click(); }
+  else if (e.key === "Escape") { e.preventDefault(); closeRejectModal(); }
 });
 
 document.getElementById("confirmRejectBtn").addEventListener("click", async () => {

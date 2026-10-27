@@ -39,6 +39,7 @@ class FormType(str, enum.Enum):
     CIF = "CIF"
     BGV = "BGV"                             # Background Verification Form
     DOCUMENT_COLLECTION = "DOCUMENT_COLLECTION"
+    REFERENCE_CHECK = "REFERENCE_CHECK"     # after Document Collection, before BGV
 
 
 class FormStatus(str, enum.Enum):
@@ -169,6 +170,18 @@ class Candidate(Base):
     zoho_status = Column(String(20), nullable=True)
     zoho_synced_at = Column(DateTime(timezone=True), nullable=True)
     zoho_last_error = Column(Text, nullable=True)
+    # Same four, for the separate push to Zoho's "Candidate" form (the
+    # "Publish to Zoho Candidate Form" button) — its own record, own state.
+    zoho_cand_record_id = Column(String(50), nullable=True)
+    zoho_cand_status = Column(String(20), nullable=True)
+    zoho_cand_synced_at = Column(DateTime(timezone=True), nullable=True)
+    zoho_cand_last_error = Column(Text, nullable=True)
+    # Same four, for the Reference Check PDF upload into Zoho's "Documents
+    # Collection - Trainee" form (the "Publish Referee Check" button).
+    zoho_ref_record_id = Column(String(50), nullable=True)
+    zoho_ref_status = Column(String(20), nullable=True)
+    zoho_ref_synced_at = Column(DateTime(timezone=True), nullable=True)
+    zoho_ref_last_error = Column(Text, nullable=True)
 
     profile = relationship("CandidateProfile", uselist=False, back_populates="candidate", cascade="all, delete-orphan")
     submissions = relationship("FormSubmission", back_populates="candidate", cascade="all, delete-orphan")
@@ -176,6 +189,8 @@ class Candidate(Base):
     cif_details = relationship("CIFDetails", uselist=False, cascade="all, delete-orphan")
     bgv_details = relationship("BGVDetails", uselist=False, cascade="all, delete-orphan")
     doc_details = relationship("DocCollectionDetails", uselist=False, cascade="all, delete-orphan")
+    ref_check_details = relationship("ReferenceCheckDetails", uselist=False, cascade="all, delete-orphan")
+    referee_feedback = relationship("RefereeFeedback", cascade="all, delete-orphan")
     education = relationship("EducationDetail", cascade="all, delete-orphan")
     employment = relationship("EmploymentDetail", cascade="all, delete-orphan")
     references = relationship("ReferenceDetail", cascade="all, delete-orphan")
@@ -184,6 +199,17 @@ class Candidate(Base):
     bgv_employment = relationship("BGVEmploymentCheck", cascade="all, delete-orphan")
     bgv_references = relationship("BGVReferenceCheck", cascade="all, delete-orphan")
     bgv_gaps = relationship("BGVGap", cascade="all, delete-orphan")
+
+    # The Reference Check is a Fresher / Trainee form only; experienced
+    # candidates go straight from Document Collection to BGV.
+    @property
+    def uses_reference_check(self) -> bool:
+        return self.candidate_type == CandidateType.FRESHER
+
+    @property
+    def visible_submissions(self) -> list:
+        return [s for s in self.submissions
+                if self.uses_reference_check or s.form_type != FormType.REFERENCE_CHECK]
 
 
 class CandidateProfile(Base):
@@ -384,6 +410,51 @@ class DocCollectionDetails(Base):
     # The form is uploads-only (DOC_FIELDS is empty); no text columns yet.
 
 
+class ReferenceCheckDetails(Base):
+    """Reference Check form answers: two references. One row per candidate."""
+    __tablename__ = "reference_check_details"
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id"), unique=True, nullable=False)
+
+    candidate_name = Column(String(150))
+    reference_check_date = Column(String(20))
+    position_applied_for = Column(String(150))
+    ref1_name = Column(String(150))
+    ref1_title = Column(String(150))
+    ref1_email = Column(String(255))
+    ref1_phone = Column(String(20))
+    ref2_name = Column(String(150))
+    ref2_title = Column(String(150))
+    ref2_email = Column(String(255))
+    ref2_phone = Column(String(20))
+    message_to_hiring_team = Column(Text)
+    declaration_accepted = Column(String(10))
+
+
+class RefereeFeedback(Base):
+    """Answers a reference gives on the public referee form. One row per
+    (candidate, reference 1 or 2); the link is signed, see app/referee_links.py."""
+    __tablename__ = "referee_feedback"
+    __table_args__ = (UniqueConstraint("candidate_id", "ref_index", name="uq_referee_feedback_ref"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id"), nullable=False, index=True)
+    ref_index = Column(Integer, nullable=False)   # 1 or 2
+
+    referee_name = Column(String(150))
+    referee_email = Column(String(255))
+    relationship_with_candidate = Column(Text)
+    candidate_strengths = Column(Text)
+    candidate_development_areas = Column(Text)
+    rating_reliability = Column(Integer)
+    rating_punctuality = Column(Integer)
+    rating_attendance = Column(Integer)
+    rating_professionalism = Column(Integer)
+    additional_comments = Column(Text)
+    submitted_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Document(Base):
     """Any uploaded file: Aadhaar/PAN scan, mark sheets, resume, photos, etc."""
     __tablename__ = "documents"
@@ -396,6 +467,16 @@ class Document(Base):
     stored_filename = Column(String(255), nullable=False)
     content_type = Column(String(100), nullable=True)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # What the document-validation agent made of the file (see
+    # app/agents/doc_validator.py). Null on rows from before the check existed
+    # and on fields the agent does not cover.
+    ai_status = Column(String(20), nullable=True)      # MATCH | MISMATCH | UNCERTAIN | UNVERIFIED
+    ai_doc_type = Column(String(40), nullable=True)    # e.g. "PAN", "MARKSHEET_10"
+    ai_confidence = Column(Integer, nullable=True)     # 0-100
+    ai_id_match = Column(Boolean, nullable=True)       # number on the card vs. the profile
+    ai_note = Column(Text, nullable=True)              # the one-line message shown to people
+    ai_checked_at = Column(DateTime(timezone=True), nullable=True)
 
     candidate = relationship("Candidate", back_populates="documents")
 
@@ -455,6 +536,15 @@ class FormDraftDocument(Base):
     stored_filename = Column(String(255), nullable=False)
     content_type = Column(String(100), nullable=True)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Same verdict columns as Document; carried across when the draft is
+    # promoted so the file is not sent to the model a second time.
+    ai_status = Column(String(20), nullable=True)
+    ai_doc_type = Column(String(40), nullable=True)
+    ai_confidence = Column(Integer, nullable=True)
+    ai_id_match = Column(Boolean, nullable=True)
+    ai_note = Column(Text, nullable=True)
+    ai_checked_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (UniqueConstraint("candidate_id", "form_type", "field_key",
                                         name="uq_draft_doc_candidate_form_field"),)

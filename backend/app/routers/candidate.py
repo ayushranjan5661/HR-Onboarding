@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 
@@ -25,6 +26,9 @@ from app.form_definitions import (
     EDUCATION_SECTIONS,
     EMPLOYMENT_COLUMNS,
     PROFILE_FIELDS,
+    REF_CHECK_FIELDS,
+    REF_CHECK_FILE_FIELDS,
+    REF_CHECK_OPTIONAL,
     REFERENCE_COLUMNS,
 )
 from app.models import (
@@ -50,8 +54,10 @@ from app.models import (
     FormStatus,
     FormSubmission,
     FormType,
+    ReferenceCheckDetails,
     ReferenceDetail,
 )
+from app.agents import doc_check_queue, doc_validator
 from app.agents import prefill as prefill_agent
 from app.schemas import MyStatusOut
 from app.utils.file_storage import (save_bytes, save_upload, snapshot_document,
@@ -77,7 +83,7 @@ def my_status(db: Session = Depends(get_db), current: Candidate = Depends(get_cu
         .first()
     )
     return MyStatusOut(stage=candidate.stage.value, candidate_type=candidate.candidate_type.value,
-                        forms=candidate.submissions, profile=candidate.profile)
+                        forms=candidate.visible_submissions, profile=candidate.profile)
 
 
 @router.get("/me/cif-summary")
@@ -97,7 +103,7 @@ def my_submission(form_type: str, db: Session = Depends(get_db),
                    current: Candidate = Depends(get_current_candidate)):
     """The candidate's own saved answers for one form, so they can edit and
     resubmit instead of filling everything in again."""
-    if form_type not in ("CIF", "BGV", "DOCUMENT_COLLECTION"):
+    if form_type not in ("CIF", "BGV", "DOCUMENT_COLLECTION", "REFERENCE_CHECK"):
         raise HTTPException(status_code=404, detail="Unknown form")
 
     out: dict = {"fields": {}, "tables": {}, "documents": []}
@@ -137,6 +143,11 @@ def my_submission(form_type: str, db: Session = Depends(get_db),
                 {c: getattr(r, c) for c in cols}
                 for r in db.query(model).filter(model.candidate_id == current.id).all()
             ]
+    elif form_type == "REFERENCE_CHECK":
+        details = db.query(ReferenceCheckDetails).filter(
+            ReferenceCheckDetails.candidate_id == current.id).first()
+        if details:
+            out["fields"] = {f: getattr(details, f) for f in REF_CHECK_FIELDS}
     else:
         details = db.query(DocCollectionDetails).filter(
             DocCollectionDetails.candidate_id == current.id).first()
@@ -163,7 +174,7 @@ def my_prefill(form_type: str, db: Session = Depends(get_db),
     """What this form can inherit from the candidate's earlier submissions —
     matched by the cross-form mapping agent, including uploads that can be
     carried over rather than re-uploaded."""
-    if form_type not in ("DOCUMENT_COLLECTION", "BGV"):
+    if form_type not in ("DOCUMENT_COLLECTION", "REFERENCE_CHECK", "BGV"):
         return {"fields": {}, "documents": [], "company_labels": {}}
     return prefill_agent.build_prefill(db, current.id, form_type)
 
@@ -177,6 +188,7 @@ _DRAFT_FILE_FIELDS = {
     "CIF": CIF_FILE_FIELDS,
     "BGV": BGV_FILE_FIELDS,
     "DOCUMENT_COLLECTION": DOC_FILE_FIELDS,
+    "REFERENCE_CHECK": REF_CHECK_FILE_FIELDS,
 }
 
 
@@ -226,7 +238,12 @@ async def save_draft(form_type: str, request: Request, db: Session = Depends(get
     and `tables` as JSON strings, plus any attached files."""
     ft = _draft_form_type(form_type)
     form = await request.form()
+    # The rest is blocking (database, OCR check of attached files) — off the
+    # event loop, so one upload doesn't stall every other request.
+    return await run_in_threadpool(_save_draft, ft, form, db, current)
 
+
+def _save_draft(ft: FormType, form, db: Session, current: Candidate):
     def _json_or_empty(key):
         try:
             value = json.loads(form.get(key) or "{}")
@@ -250,12 +267,13 @@ async def save_draft(form_type: str, request: Request, db: Session = Depends(get
     replaced_paths: list[str] = []
     written_paths: list[str] = []
     try:
-        for field_key in _DRAFT_FILE_FIELDS[form_type]:
+        for field_key in _DRAFT_FILE_FIELDS[ft.value]:
             upload = form.get(field_key)
             if upload is None or not hasattr(upload, "filename") or not upload.filename:
                 continue
-            original, stored = save_upload(upload, current.id, f"DRAFT_{form_type}", field_key)
+            original, stored = save_upload(upload, current.id, f"DRAFT_{ft.value}", field_key)
             written_paths.append(upload_path(stored))
+            verdict = _check_document(current, stored, upload, field_key)
             for old in db.query(FormDraftDocument).filter(
                     FormDraftDocument.candidate_id == current.id,
                     FormDraftDocument.form_type == ft,
@@ -263,15 +281,18 @@ async def save_draft(form_type: str, request: Request, db: Session = Depends(get
                 replaced_paths.append(upload_path(old.stored_filename))
                 db.delete(old)
             db.flush()   # release the (candidate, form, field) unique slot
-            db.add(FormDraftDocument(candidate_id=current.id, form_type=ft, field_key=field_key,
-                                      original_filename=original, stored_filename=stored,
-                                      content_type=upload.content_type))
+            row = FormDraftDocument(candidate_id=current.id, form_type=ft, field_key=field_key,
+                                    original_filename=original, stored_filename=stored,
+                                    content_type=upload.content_type)
+            _record_verdict(db, row, verdict)
+            db.add(row)
     except Exception:
         db.rollback()
         _remove_files(written_paths)
         raise
 
     db.commit()
+    doc_check_queue.flush_pending(db)
     _remove_files(replaced_paths)
 
     saved_docs = db.query(FormDraftDocument).filter(
@@ -332,9 +353,13 @@ def _promote_draft_documents(db, candidate_id: int, ft: FormType, provided: set[
         except OSError:
             continue   # drafted file vanished; nothing to promote
         stored = save_bytes(data, candidate_id, ft.value, draft_doc.field_key)
-        db.add(Document(candidate_id=candidate_id, form_type=ft, field_key=draft_doc.field_key,
-                         original_filename=draft_doc.original_filename,
-                         stored_filename=stored, content_type=draft_doc.content_type))
+        doc = Document(candidate_id=candidate_id, form_type=ft, field_key=draft_doc.field_key,
+                       original_filename=draft_doc.original_filename,
+                       stored_filename=stored, content_type=draft_doc.content_type)
+        doc_validator.copy_between(draft_doc, doc)   # same bytes: the draft's verdict stands
+        if draft_doc.ai_checked_at is None and doc_check_queue.deferred():
+            doc_check_queue.mark(db, doc)   # draft's check still queued; check the copy too
+        db.add(doc)
         promoted.append(draft_doc.field_key)
     return promoted
 
@@ -401,6 +426,36 @@ def _remove_files(paths: list[str]) -> None:
             pass
 
 
+def _check_document(current: Candidate, stored: str, upload,
+                    field_key: str) -> doc_validator.Verdict | None:
+    """Run the document-validation agent on a file that has just been written.
+
+    In "block" mode a confident mismatch is refused here, as a 400 the page
+    shows under the field. The caller's cleanup removes the written file — the
+    check runs before any row for it exists, so there is nothing else to undo.
+
+    Otherwise the verdict is only for HR, so the candidate is not made to wait
+    for OCR: this returns None and `_record_verdict` queues the row to be
+    checked after commit (app/agents/doc_check_queue.py).
+    """
+    if doc_check_queue.deferred():
+        return None
+    verdict = doc_validator.validate_path(
+        upload_path(stored), upload.content_type, upload.filename or "", field_key,
+        doc_validator.profile_dict(current.profile))
+    if verdict.blocked:
+        label = field_key.replace("_", " ")
+        raise HTTPException(status_code=400, detail=f"{label}: {verdict.note}")
+    return verdict
+
+
+def _record_verdict(db, row, verdict: doc_validator.Verdict | None) -> None:
+    if verdict is None:
+        doc_check_queue.mark(db, row)    # checked in the background after commit
+    else:
+        doc_validator.apply_to(row, verdict)
+
+
 def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> list[str]:
     """Only fields with a newly chosen file are touched — on an edit, anything
     the candidate leaves blank keeps the file already on record.
@@ -409,7 +464,10 @@ def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> li
     AFTER the transaction commits: deleting them here would destroy the old
     upload for good if a later field failed validation and rolled the request
     back. If anything raises mid-way, files already written for this request
-    are removed so the failed attempt leaves no orphans."""
+    are removed so the failed attempt leaves no orphans.
+
+    Each new file goes through the document check; its verdict is stored on
+    the row for HR. The candidate is never shown it."""
     replaced_paths: list[str] = []
     written_paths: list[str] = []
     try:
@@ -420,6 +478,7 @@ def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> li
             # Validate and store the new file before touching the old one.
             original, stored = save_upload(upload, current.id, form_type, field_key)
             written_paths.append(upload_path(stored))
+            verdict = _check_document(current, stored, upload, field_key)
             # Replacing a file: drop the previous rows so we don't accumulate
             # duplicates; the old files on disk go only after commit.
             for old in db.query(Document).filter(
@@ -428,9 +487,11 @@ def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> li
                     Document.field_key == field_key).all():
                 replaced_paths.append(upload_path(old.stored_filename))
                 db.delete(old)
-            db.add(Document(candidate_id=current.id, form_type=FormType(form_type), field_key=field_key,
-                             original_filename=original, stored_filename=stored,
-                             content_type=upload.content_type))
+            doc = Document(candidate_id=current.id, form_type=FormType(form_type), field_key=field_key,
+                           original_filename=original, stored_filename=stored,
+                           content_type=upload.content_type)
+            _record_verdict(db, doc, verdict)
+            db.add(doc)
     except Exception:
         _remove_files(written_paths)
         raise
@@ -440,6 +501,13 @@ def _save_files(db, form, current, form_type: str, file_fields: list[str]) -> li
 @router.post("/forms/cif")
 async def submit_cif(request: Request, db: Session = Depends(get_db),
                       current: Candidate = Depends(get_current_candidate)):
+    form = await request.form()
+    # Blocking from here on (database, OCR, prefill mapping) — run it off the
+    # event loop so one submit doesn't stall every other request.
+    return await run_in_threadpool(_submit_cif, form, db, current)
+
+
+def _submit_cif(form, db: Session, current: Candidate):
     # The CIF is a one-shot form: once submitted it is frozen, and the only
     # way a value changes afterwards is a field HR explicitly opens (see
     # /me/edit-access). That keeps the record HR reviewed from moving under
@@ -459,8 +527,6 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
     if current.stage not in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
         raise HTTPException(status_code=400,
                              detail="Your CIF has already been reviewed and can no longer be edited.")
-
-    form = await request.form()
 
     # Nothing is written until every date on the form reads as DD/MM/YYYY.
     employment_rows = _rows_from_json(form, "employment_details", EMPLOYMENT_COLUMNS)
@@ -518,6 +584,7 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
 
     current.stage = CandidateStage.CIF_SUBMITTED   # unchanged on a resubmit
     db.commit()
+    doc_check_queue.flush_pending(db)
     _remove_files(replaced)   # replaced uploads go only once the new state is safe
     return {"detail": "CIF submitted. HR will review your details shortly."}
 
@@ -525,9 +592,19 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
 @router.post("/forms/{form_type}/submit")
 async def submit_followup_form(form_type: str, request: Request, db: Session = Depends(get_db),
                                 current: Candidate = Depends(get_current_candidate)):
-    if form_type not in ("BGV", "DOCUMENT_COLLECTION"):
+    form = await request.form()
+    # Blocking from here on (database, OCR, prefill mapping) — off the event loop.
+    return await run_in_threadpool(_submit_followup_form, form_type, form, db, current)
+
+
+def _submit_followup_form(form_type: str, form, db: Session, current: Candidate):
+    if form_type not in ("BGV", "DOCUMENT_COLLECTION", "REFERENCE_CHECK"):
         raise HTTPException(status_code=404, detail="Unknown form")
-    if current.stage != CandidateStage.APPROVED_FOR_BGV:
+    if form_type == "REFERENCE_CHECK" and not current.uses_reference_check:
+        raise HTTPException(status_code=404, detail="Unknown form")
+    # HR may still send a follow-up form after marking onboarding complete
+    # (e.g. a Reference Check added later); the PENDING check below is the gate.
+    if current.stage not in (CandidateStage.APPROVED_FOR_BGV, CandidateStage.ONBOARDING_COMPLETE):
         raise HTTPException(status_code=400, detail="This form is not unlocked for you yet")
 
     # Like the CIF, a follow-up form is frozen once submitted: the record HR
@@ -543,8 +620,6 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
             status_code=400,
             detail="You have already submitted this form and it can no longer be edited. "
                     "If something needs correcting, ask HR to open that field for you.")
-
-    form = await request.form()
 
     if form_type == "BGV":
         _reject_invalid_dates(
@@ -567,6 +642,25 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
         provided_bgv = {k for k in BGV_FILE_FIELDS
                          if hasattr(form.get(k), "filename") and form.get(k).filename}
         _promote_draft_documents(db, current.id, FormType.BGV, provided_bgv)
+    elif form_type == "REFERENCE_CHECK":
+        _reject_invalid_dates({f: form.get(f) for f in REF_CHECK_FIELDS if f in form})
+        missing = [f for f in REF_CHECK_FIELDS
+                   if f not in REF_CHECK_OPTIONAL and not str(form.get(f) or "").strip()]
+        if missing:
+            raise HTTPException(status_code=400,
+                                 detail="Please fill in every field: " + ", ".join(missing))
+        details = db.query(ReferenceCheckDetails).filter(
+            ReferenceCheckDetails.candidate_id == current.id).first()
+        if not details:
+            details = ReferenceCheckDetails(candidate_id=current.id)
+            db.add(details)
+        if details.declaration_accepted != "Yes" and form.get("declaration_accepted") != "Yes":
+            raise HTTPException(status_code=400, detail="Please accept the declaration.")
+        provided_ref = {k for k in REF_CHECK_FILE_FIELDS
+                         if hasattr(form.get(k), "filename") and form.get(k).filename}
+        _apply_fields(details, form, REF_CHECK_FIELDS)
+        replaced = _save_files(db, form, current, "REFERENCE_CHECK", REF_CHECK_FILE_FIELDS)
+        _promote_draft_documents(db, current.id, FormType.REFERENCE_CHECK, provided_ref)
     else:
         details = db.query(DocCollectionDetails).filter(DocCollectionDetails.candidate_id == current.id).first()
         if not details:
@@ -602,7 +696,9 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
 
     # Anything the candidate already gave us on an earlier form and did not
     # re-upload here is copied across automatically.
-    provided = {k for k in (BGV_FILE_FIELDS if form_type == "BGV" else DOC_FILE_FIELDS)
+    file_fields = {"BGV": BGV_FILE_FIELDS, "REFERENCE_CHECK": REF_CHECK_FILE_FIELDS}.get(
+        form_type, DOC_FILE_FIELDS)
+    provided = {k for k in file_fields
                  if hasattr(form.get(k), "filename") and form.get(k).filename}
     carried = prefill_agent.carry_documents(db, current.id, form_type, provided)
 
@@ -610,6 +706,7 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
     submission.submitted_at = datetime.now(timezone.utc)
     replaced += _discard_draft(db, current.id, FormType(form_type))
     db.commit()
+    doc_check_queue.flush_pending(db)
     _remove_files(replaced)   # replaced uploads go only once the new state is safe
     detail = "Form submitted. HR will review it shortly."
     if carried:
@@ -665,6 +762,11 @@ async def apply_granted_edits(request: Request, db: Session = Depends(get_db),
     and nothing changes, so the candidate never ends up half-corrected.
     """
     form = await request.form()
+    # Blocking from here on (database, OCR of replacement files) — off the event loop.
+    return await run_in_threadpool(_apply_granted_edits, form, db, current)
+
+
+def _apply_granted_edits(form, db: Session, current: Candidate):
     try:
         changes = json.loads(form.get("changes") or "[]")
     except (TypeError, ValueError):
@@ -697,6 +799,7 @@ async def apply_granted_edits(request: Request, db: Session = Depends(get_db),
             perm.resolved_at = datetime.now(timezone.utc)
             applied += 1
         db.commit()
+        doc_check_queue.flush_pending(db)
     except Exception:
         db.rollback()
         _remove_files(written_paths)   # a failed attempt leaves no orphans
@@ -772,6 +875,11 @@ def _apply_granted_document(db: Session, current: Candidate, perm: FieldEditPerm
     # open what the document used to contain.
     original, stored = save_upload(upload, current.id, perm.form_type, perm.field_name)
     written = [upload_path(stored)]
+    try:
+        verdict = _check_document(current, stored, upload, perm.field_name)
+    except HTTPException:
+        _remove_files(written)   # refused before any row exists; nothing else to undo
+        raise
 
     replaced = db.query(Document).filter(Document.candidate_id == current.id,
                                           Document.form_type == ft,
@@ -785,6 +893,7 @@ def _apply_granted_document(db: Session, current: Candidate, perm: FieldEditPerm
     new_doc = Document(candidate_id=current.id, form_type=ft, field_key=perm.field_name,
                         original_filename=original, stored_filename=stored,
                         content_type=upload.content_type)
+    _record_verdict(db, new_doc, verdict)
     db.add(new_doc)
     db.flush()
     new_snapshot = snapshot_document(db, new_doc)

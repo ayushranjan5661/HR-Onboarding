@@ -1,0 +1,233 @@
+/* =====================================================================
+   Colour + motion theme for the staff list pages (Employee Accounts,
+   Candidates, Audit, HR dashboard). Opt-in via body.themed so pages
+   that don't load it are unaffected.
+   ===================================================================== */
+body.themed {
+  --grad-hero: linear-gradient(120deg, #4338ca 0%, #6d28d9 45%, #db2777 100%);
+  --grad-btn: linear-gradient(135deg, #4f46e5, #7c3aed);
+}
+
+/* ---- Backdrop ---- */
+body.themed .main-area {
+  background:
+    radial-gradient(900px 420px at 100% -10%, rgba(124, 58, 237, 0.10), transparent 60%),
+    radial-gradient(700px 380px at -10% 30%, rgba(14, 165, 233, 0.08), transparent 60%),
+    radial-gradient(800px 400px at 60% 110%, rgba(236, 72, 153, 0.07), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* ---- Hero header ---- */
+body.themed .page-header {
+  position: relative;
+  overflow: hidden;
+  padding: 24px 28px;
+  border-radius: var(--radius-lg);
+  background: var(--grad-hero);
+  background-size: 200% 200%;
+  color: #fff;
+  box-shadow: 0 14px 36px rgba(79, 70, 229, 0.30);
+  animation: pt-hero-shift 12s ease-in-out infinite, pt-fade-up 0.5s ease both;
+}
+body.themed .page-header::before,
+body.themed .page-header::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+}
+body.themed .page-header::before { width: 220px; height: 220px; right: 140px; top: -120px; animation: pt-float 9s ease-in-out infinite; }
+body.themed .page-header::after  { width: 140px; height: 140px; left: 38%; bottom: -95px; animation: pt-float 11s ease-in-out infinite reverse; }
+body.themed .page-header > * { position: relative; z-index: 1; }
+body.themed .page-header h2 { color: #fff; font-size: 1.45rem; letter-spacing: -0.01em; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
+body.themed .page-header .page-sub { color: rgba(255, 255, 255, 0.82); }
+body.themed .page-header .btn-primary {
+  background: #fff;
+  color: #4338ca;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.20);
+}
+body.themed .page-header .btn-primary:hover:not(:disabled) { background: #fff; color: #6d28d9; box-shadow: 0 12px 26px rgba(15, 23, 42, 0.28); }
+/* Secondary buttons on the gradient header (e.g. Refresh): light text, glassy fill */
+body.themed .page-header .btn-outline { background: rgba(255, 255, 255, 0.14); color: #fff; border-color: rgba(255, 255, 255, 0.7); }
+body.themed .page-header .btn-outline:hover:not(:disabled) { background: rgba(255, 255, 255, 0.24); color: #fff; }
+
+/* ---- Stat tiles ---- */
+body.themed .stat-card {
+  padding-right: 74px;
+  --accent: #64748b;
+  border-color: transparent;
+  background:
+    radial-gradient(160px 120px at 100% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%),
+    var(--card);
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
+  transition: transform 220ms ease, box-shadow 220ms ease;
+  animation: pt-fade-up 0.45s ease both;
+}
+body.themed .stat-card::before { width: 5px; background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 45%, #fff)); }
+body.themed .stat-card::after {
+  content: "";
+  position: absolute; right: 18px; top: 50%;
+  width: 44px; height: 44px; margin-top: -22px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle, #fff 0 5px, transparent 5.5px),
+    linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #fff));
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 35%, transparent);
+  opacity: 0.9;
+  transition: transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+body.themed .stat-card:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(15, 23, 42, 0.10); }
+body.themed .stat-card:hover::after { transform: rotate(-8deg) scale(1.08); }
+body.themed .stat-card .stat-value { color: var(--accent); }
+body.themed .stat-card:nth-child(1) { --accent: #6366f1; animation-delay: 0.05s; }
+body.themed .stat-card.accent-warn    { --accent: #f59e0b; animation-delay: 0.10s; }
+body.themed .stat-card.accent-brand   { --accent: #8b5cf6; animation-delay: 0.15s; }
+body.themed .stat-card.accent-success { --accent: #10b981; animation-delay: 0.20s; }
+body.themed .stat-card.accent-warn .stat-value { color: #d97706; }
+body.themed .stat-card.accent-success .stat-value { color: #059669; }
+
+/* ---- Filters: one tidy row ---- */
+body.themed .filters {
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.05);
+  animation: pt-fade-up 0.45s ease 0.2s both;
+}
+body.themed .filters .search-input { flex: 2 1 260px; max-width: none; margin: 0; }
+body.themed .filters select { flex: 1 1 170px; width: auto; margin: 0; transition: border-color 160ms ease, box-shadow 160ms ease; }
+body.themed .filters select:focus,
+body.themed .filters .search-input:focus { outline: none; border-color: #8b5cf6; box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15); }
+
+/* ---- Cards ---- */
+body.themed .container > .card,
+body.themed .section-card {
+  --accent: #6366f1;
+  --accent-soft: rgba(99, 102, 241, 0.08);
+  border-color: transparent;
+  box-shadow: inset 0 4px 0 var(--accent), 0 4px 18px rgba(15, 23, 42, 0.06);
+  animation: pt-fade-up 0.45s ease 0.25s both;
+}
+body.themed #adminsCard      { --accent: #db2777; --accent-soft: rgba(219, 39, 119, 0.07); animation-delay: 0.05s; }
+body.themed #plainAdminsCard { --accent: #6366f1; --accent-soft: rgba(99, 102, 241, 0.07); animation-delay: 0.10s; }
+body.themed #managersCard    { --accent: #0ea5e9; --accent-soft: rgba(14, 165, 233, 0.07); animation-delay: 0.15s; }
+body.themed .section-card:not([id]) { --accent: #10b981; --accent-soft: rgba(16, 185, 129, 0.07); animation-delay: 0.20s; }
+
+body.themed .section-title h3 { display: flex; align-items: center; gap: 10px; }
+body.themed .section-title h3::before {
+  content: "";
+  width: 26px; height: 26px; border-radius: 8px; flex: 0 0 auto;
+  background:
+    radial-gradient(circle, #fff 0 3.5px, transparent 4px),
+    linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #fff));
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+/* ---- Tables ---- */
+body.themed th { color: color-mix(in srgb, var(--accent, #6366f1) 55%, #475569); }
+body.themed tbody tr { animation: pt-row-in 0.35s ease both; }
+body.themed tbody tr:nth-child(2)  { animation-delay: 0.03s; }
+body.themed tbody tr:nth-child(3)  { animation-delay: 0.06s; }
+body.themed tbody tr:nth-child(4)  { animation-delay: 0.09s; }
+body.themed tbody tr:nth-child(5)  { animation-delay: 0.12s; }
+body.themed tbody tr:nth-child(6)  { animation-delay: 0.15s; }
+body.themed tbody tr:nth-child(7)  { animation-delay: 0.18s; }
+body.themed tbody tr:nth-child(n+8) { animation-delay: 0.21s; }
+body.themed tbody tr:hover td { background: var(--accent-soft, var(--brand-light)); }
+body.themed tbody tr td:first-child { box-shadow: inset 3px 0 0 transparent; transition: box-shadow 160ms ease; }
+body.themed tbody tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--accent, #6366f1); }
+
+/* Avatars: colour cycles per row */
+body.themed .row-avatar {
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  box-shadow: 0 3px 8px rgba(99, 102, 241, 0.28);
+  transition: transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+body.themed tbody tr:nth-child(5n+2) .row-avatar { background: linear-gradient(135deg, #0ea5e9, #22d3ee); box-shadow: 0 3px 8px rgba(14, 165, 233, 0.28); }
+body.themed tbody tr:nth-child(5n+3) .row-avatar { background: linear-gradient(135deg, #ec4899, #f472b6); box-shadow: 0 3px 8px rgba(236, 72, 153, 0.28); }
+body.themed tbody tr:nth-child(5n+4) .row-avatar { background: linear-gradient(135deg, #10b981, #34d399); box-shadow: 0 3px 8px rgba(16, 185, 129, 0.28); }
+body.themed tbody tr:nth-child(5n)   .row-avatar { background: linear-gradient(135deg, #f59e0b, #fbbf24); box-shadow: 0 3px 8px rgba(245, 158, 11, 0.28); }
+body.themed tbody tr:hover .row-avatar { transform: scale(1.12) rotate(-6deg); }
+
+/* Status badges: live dot */
+body.themed td .badge-active::before,
+body.themed td .badge-approved_for_bgv::before,
+body.themed td .badge-cif_submitted::before {
+  content: "";
+  display: inline-block; width: 6px; height: 6px; margin-right: 6px;
+  border-radius: 50%; background: currentColor; vertical-align: middle;
+  animation: pt-pulse 1.8s ease-out infinite;
+}
+body.themed td .badge-onboarding_complete { background: linear-gradient(135deg, #dbeafe, #ede9fe); color: #4338ca; }
+
+/* Inline selects */
+body.themed .inline-select { transition: border-color 160ms ease, box-shadow 160ms ease; }
+body.themed .inline-select:hover:not(:disabled) { border-color: #a78bfa; }
+body.themed .inline-select:focus { outline: none; border-color: #8b5cf6; box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15); }
+
+/* ---- Buttons ---- */
+body.themed .btn { transition: transform 140ms ease, box-shadow 200ms ease, background 200ms ease, color 200ms ease, border-color 200ms ease, opacity 200ms ease; }
+body.themed .btn:hover:not(:disabled) { transform: translateY(-1px); }
+body.themed .btn:active:not(:disabled) { transform: translateY(0) scale(0.97); }
+body.themed .btn-primary { position: relative; overflow: hidden; }
+body.themed .container > :not(.page-header) .btn-primary,
+body.themed .modal .btn-primary { background: var(--grad-btn); box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35); }
+body.themed .btn-primary::after {
+  content: "";
+  position: absolute; top: 0; left: -75%; width: 50%; height: 100%;
+  background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+  transform: skewX(-20deg);
+  transition: left 0.6s ease;
+}
+body.themed .btn-primary:hover::after { left: 130%; }
+body.themed .btn-danger { background: linear-gradient(135deg, #dc2626, #f43f5e); box-shadow: 0 4px 12px rgba(244, 63, 94, 0.25); }
+body.themed .btn-danger:hover:not(:disabled) { box-shadow: 0 8px 18px rgba(244, 63, 94, 0.35); }
+body.themed .btn-success { background: linear-gradient(135deg, #059669, #10b981); }
+body.themed .btn-outline:hover:not(:disabled) { border-color: #8b5cf6; color: #6d28d9; background: rgba(139, 92, 246, 0.08); }
+
+/* ---- Modals ---- */
+body.themed .modal-backdrop:not(.hidden) { animation: pt-fade 0.2s ease both; }
+body.themed .modal-backdrop:not(.hidden) .modal { animation: pt-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+/* ---- Sidebar ---- */
+body.themed .brand-mark { background: linear-gradient(135deg, #6366f1, #ec4899); }
+body.themed .sidebar .nav-item { transition: background 200ms ease, color 200ms ease, transform 200ms ease; }
+body.themed .sidebar .nav-item:not(.active):hover { transform: translateX(3px); }
+body.themed .sidebar .nav-item.active { box-shadow: inset 3px 0 0 #a78bfa, 0 6px 18px rgba(124, 58, 237, 0.25); }
+
+/* ---- Keyframes ---- */
+@keyframes pt-fade-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes pt-row-in  { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+@keyframes pt-fade    { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pt-pop     { from { opacity: 0; transform: scale(0.94) translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes pt-hero-shift { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+@keyframes pt-float   { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(-14px, 10px); } }
+@keyframes pt-pulse {
+  0%   { box-shadow: 0 0 0 0 currentColor; }
+  70%  { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* ---- Mobile ---- */
+@media (max-width: 720px) {
+  body.themed .sidebar .nav-item.active { box-shadow: none; }
+  body.themed .page-header { padding: 20px 18px; }
+  body.themed .page-header h2 { font-size: 1.2rem; }
+  body.themed .stat-card { padding-right: 54px; }
+  body.themed .stat-card::after { width: 34px; height: 34px; margin-top: -17px; right: 12px; }
+  body.themed .filters select,
+  body.themed .filters .search-input { flex: 1 1 100%; }
+  /* Stacked-table rows are cards on mobile; the slide-in still works but keep it subtle */
+  body.themed table.stack tbody tr:hover td:first-child { box-shadow: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.themed *, body.themed *::before, body.themed *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

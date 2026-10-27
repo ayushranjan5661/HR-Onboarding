@@ -10,6 +10,7 @@
 // and BGV reuse these names, so one set covers both forms and the HR portal.
 const DATE_FIELD_NAMES = new Set([
   "date_of_birth", "declaration_date", "passport_expiry", "from_date", "to_date",
+  "reference_check_date",
 ]);
 function isDateField(name) { return DATE_FIELD_NAMES.has(name); }
 

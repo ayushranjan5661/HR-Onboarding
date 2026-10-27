@@ -15,7 +15,7 @@ async function initTeamPage(mode) {
   const BASE = isAdmin ? "/admin/staff" : "/manager/team";
   const root = document.getElementById("pageContent");
   const loginLink = new URL("../index.html", location.href).href;
-  const passwordHeader = isMaster ? "Password" : "First password";
+  const passwordHeader = "First password";
   let staff = [];
   let myId = null;
 
@@ -27,27 +27,27 @@ async function initTeamPage(mode) {
     ${isMaster ? `
     <div class="card section-card" id="adminsCard">
       <div class="section-title"><h3>Super Admins</h3></div>
-      <table><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Owns</th><th>${passwordHeader}</th><th></th></tr></thead>
+      <table class="cards"><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Owns</th><th>${passwordHeader}</th><th></th></tr></thead>
       <tbody id="adminsBody"></tbody></table>
       <div class="empty-state hidden" id="adminsEmpty">No Super Admins yet.</div>
     </div>` : ""}
     ${managesAdmins ? `
     <div class="card section-card ${isMaster ? "section-gap" : ""}" id="plainAdminsCard">
       <div class="section-title"><h3>Admins</h3></div>
-      <table><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Owns</th><th>${passwordHeader}</th><th></th></tr></thead>
+      <table class="cards"><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Owns</th><th>${passwordHeader}</th><th></th></tr></thead>
       <tbody id="plainAdminsBody"></tbody></table>
       <div class="empty-state hidden" id="plainAdminsEmpty">No Admins yet.</div>
     </div>` : ""}
     ${isAdmin ? `
     <div class="card section-card ${managesAdmins ? "section-gap" : ""}" id="managersCard">
       <div class="section-title"><h3>Managers</h3></div>
-      <table><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Team</th><th>Owns</th><th>${passwordHeader}</th><th></th></tr></thead>
+      <table class="cards"><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Team</th><th>Owns</th><th>${passwordHeader}</th><th></th></tr></thead>
       <tbody id="managersBody"></tbody></table>
       <div class="empty-state hidden" id="managersEmpty">No Managers yet.</div>
     </div>` : ""}
     <div class="card section-card ${isAdmin ? "section-gap" : ""}">
       <div class="section-title"><h3>HR Executives</h3></div>
-      <table><thead><tr><th>Name</th><th>Email</th><th>Status</th>${isAdmin ? "<th>Manager</th>" : ""}<th>Owns</th><th>${passwordHeader}</th><th></th></tr></thead>
+      <table class="cards"><thead><tr><th>Name</th><th>Email</th><th>Status</th>${isAdmin ? "<th>Manager</th>" : ""}<th>Owns</th><th>${passwordHeader}</th><th></th></tr></thead>
       <tbody id="hrBody"></tbody></table>
       <div class="empty-state hidden" id="hrEmpty">No HR Executives yet.</div>
     </div>
@@ -102,17 +102,9 @@ async function initTeamPage(mode) {
   function managers() { return staff.filter(s => s.role === "MANAGER"); }
   function hrs() { return staff.filter(s => s.role === "HR"); }
 
+  // Only the generated one-time password is ever shown, and only until the
+  // user replaces it — a password someone chose is never displayed.
   function passwordCell(s) {
-    if (isMaster) {
-      // The Master Admin sees the password in force. Accounts whose password
-      // was last set before it was recorded show nothing until a reset.
-      if (s.current_password) {
-        return `<span class="temp-pass">${escapeHtml(s.current_password)}</span>
-                <button type="button" class="cred-copy" title="Copy" data-copy="${escapeHtml(s.current_password)}">${COPY_ICON}</button>
-                ${s.must_reset_password ? `<div class="pending-tag">Not yet changed</div>` : ""}`;
-      }
-      return `<span class="muted-text" title="Set before passwords were recorded. Reset it to see it.">Not recorded</span>`;
-    }
     if (!s.must_reset_password) return `<span class="muted-text">Set by user</span>`;
     if (!s.temp_password) return `<span class="pending-tag">Change pending</span>`;
     return `<span class="temp-pass">${escapeHtml(s.temp_password)}</span>
@@ -146,13 +138,13 @@ async function initTeamPage(mode) {
   function row(s) {
     const managerCell = isAdmin && s.role === "HR"
       ? `<td>${s.manager_name ? escapeHtml(s.manager_name) : `<span class="pending-tag">No team</span>`}</td>` : "";
-    const teamCell = s.role === "MANAGER" ? `<td>${s.team_size} HR</td>` : "";
+    const teamCell = s.role === "MANAGER" ? `<td class="nowrap">${s.team_size} HR</td>` : "";
     return `<tr class="${s.is_active ? "" : "inactive-row"}">
       <td><div class="name-cell"><span class="row-avatar">${escapeHtml(initials(s.name))}</span>${escapeHtml(s.name)}</div></td>
-      <td>${escapeHtml(s.email)}</td>
+      <td>${escapeHtml(s.email).replace("@", "<wbr>@")}</td>
       <td>${activeBadge(s.is_active)}</td>
       ${teamCell}${managerCell}
-      <td>${s.candidate_count} candidate${s.candidate_count === 1 ? "" : "s"}</td>
+      <td class="nowrap">${s.candidate_count} candidate${s.candidate_count === 1 ? "" : "s"}</td>
       <td>${passwordCell(s)}</td>
       <td>${actionButtons(s)}</td>
     </tr>`;

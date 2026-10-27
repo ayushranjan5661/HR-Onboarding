@@ -11,17 +11,14 @@ function ensureViewer() {
   wrap.className = "modal-backdrop hidden";
   wrap.innerHTML = `
     <div class="modal" style="width:90vw;max-width:900px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <h3 id="docViewerTitle" style="margin:0;overflow:hidden;text-overflow:ellipsis;
-            white-space:nowrap;font-size:1rem;">Document</h3>
-        <div style="display:flex;gap:8px;flex:0 0 auto;">
+      <div class="viewer-head">
+        <h3 id="docViewerTitle">Document</h3>
+        <div class="viewer-actions">
           <button type="button" class="btn btn-outline btn-small" id="docViewerNewTab">Open in new tab</button>
           <button type="button" class="btn btn-primary btn-small" id="docViewerClose">Close</button>
         </div>
       </div>
-      <div id="docViewerBody" style="margin-top:14px;background:#f9fafb;
-           border:1px solid var(--border);border-radius:8px;height:68vh;display:flex;
-           align-items:center;justify-content:center;overflow:auto;"></div>
+      <div id="docViewerBody" class="viewer-body"></div>
     </div>`;
   document.body.appendChild(wrap);
   document.getElementById("docViewerClose").addEventListener("click", closeViewer);

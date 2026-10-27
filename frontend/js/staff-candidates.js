@@ -33,14 +33,14 @@ async function initCandidatesPage(mode) {
         <option value="">All stages</option>
         <option value="INVITED">Invited</option>
         <option value="CIF_SUBMITTED">CIF submitted</option>
-        <option value="APPROVED_FOR_BGV">Approved for BGV</option>
+        <option value="DOCS_SUBMITTED">Docs submitted</option>
         <option value="ONBOARDING_COMPLETE">Onboarding complete</option>
         <option value="REJECTED">Rejected</option>
       </select>
     </div>
 
     <div class="card">
-      <table>
+      <table class="cards">
         <thead><tr><th>Name</th><th>Email</th><th>Stage</th><th>Owner</th>${isAdmin ? "<th>Manager</th>" : ""}<th>Invited On</th><th></th></tr></thead>
         <tbody id="candBody"></tbody>
       </table>
@@ -85,7 +85,7 @@ async function initCandidatesPage(mode) {
   }
 
   function ownerLabel(u) {
-    return u.id === myId ? `${u.name} (me)` : `${u.name} · ${roleLabel(u.role)}`;
+    return u.id === myId ? `${roleLabel(u.role)} (me)` : `${u.name} · ${roleLabel(u.role)}`;
   }
 
   function fillFilters() {
@@ -119,10 +119,14 @@ async function initCandidatesPage(mode) {
     const owner = document.getElementById("ownerFilter").value;
     const stage = document.getElementById("stageFilter").value;
     const mgr = isAdmin ? document.getElementById("managerFilter").value : "";
+    // Not a candidate stage: the Document Collection form is in, waiting on HR.
+    const matchesStage = c => stage === "DOCS_SUBMITTED"
+      ? c.stage === "APPROVED_FOR_BGV" && ["SUBMITTED", "UNDER_REVIEW"].includes(c.doc_status)
+      : c.stage === stage;
     return candidates.filter(c =>
       (!q || c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q)) &&
       (!owner || String(c.assigned_hr_id) === owner) &&
-      (!stage || c.stage === stage) &&
+      (!stage || matchesStage(c)) &&
       (!mgr || String(c.manager_id) === mgr));
   }
 
@@ -131,7 +135,12 @@ async function initCandidatesPage(mode) {
     const options = assignable.map(u => ({ value: u.id, label: ownerLabel(u) }));
     if (!known) {
       // Owner is deactivated, teamless, or outside what we may assign to.
-      options.unshift({ value: c.assigned_hr_id || "", label: c.assigned_hr_name ? `${c.assigned_hr_name} (unavailable)` : "Unassigned" });
+      // An owner above the viewer (Super / Master Admin) is named by role,
+      // e.g. "Super Admin"; the server still refuses reassigning back to them.
+      const label = !c.assigned_hr_name ? "Unassigned"
+        : c.assigned_hr_role ? roleLabel(c.assigned_hr_role)
+        : `${c.assigned_hr_name} (unavailable)`;
+      options.unshift({ value: c.assigned_hr_id || "", label });
     }
     return `<select class="inline-select" data-assign="${c.id}" title="Reassign">${selectOptions(options, c.assigned_hr_id ?? "")}</select>`;
   }
@@ -143,11 +152,11 @@ async function initCandidatesPage(mode) {
     body.innerHTML = rows.map(c => `
       <tr data-open="${c.id}">
         <td><div class="name-cell"><span class="row-avatar">${escapeHtml(initials(c.name))}</span>${escapeHtml(c.name)}</div></td>
-        <td>${escapeHtml(c.email)}</td>
+        <td>${escapeHtml(c.email).replace("@", "<wbr>@")}</td>
         <td>${stageBadge(c.stage)}</td>
         <td>${ownerSelect(c)}</td>
         ${isAdmin ? `<td>${c.manager_name ? escapeHtml(c.manager_name) : `<span class="pending-tag">No team</span>`}</td>` : ""}
-        <td>${fmtDate(c.created_at)}</td>
+        <td class="nowrap">${fmtDate(c.created_at)}</td>
         <td><div class="row-actions"><button class="btn btn-danger btn-small" data-del="${c.id}">Delete Invitation</button></div></td>
       </tr>`).join("");
 

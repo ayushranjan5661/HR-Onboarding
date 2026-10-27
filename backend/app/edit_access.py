@@ -36,6 +36,8 @@ from app.form_definitions import (
     EDUCATION_COLUMNS,
     EMPLOYMENT_COLUMNS,
     PROFILE_FIELDS,
+    REF_CHECK_FIELDS,
+    REF_CHECK_FILE_FIELDS,
     REFERENCE_COLUMNS,
 )
 from app.models import (
@@ -56,11 +58,12 @@ from app.models import (
     FormStatus,
     FormSubmission,
     FormType,
+    ReferenceCheckDetails,
     ReferenceDetail,
 )
 
-# The three forms a candidate fills in. Each locks on submission.
-FORMS = ("CIF", "DOCUMENT_COLLECTION", "BGV")
+# The forms a candidate fills in, in sequence. Each locks on submission.
+FORMS = ("CIF", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "BGV")
 
 # Filled in by HR for their own tracking, never by the candidate — opening
 # these to the candidate would make no sense.
@@ -73,6 +76,7 @@ GRANTABLE_FIELDS: dict[str, list[str]] = {
     "CIF": [f for f in CIF_FIELDS if f not in _HR_ONLY_CIF_FIELDS],
     "BGV": list(BGV_FIELDS),
     "DOCUMENT_COLLECTION": list(DOC_FIELDS),   # uploads only — no text columns
+    "REFERENCE_CHECK": list(REF_CHECK_FIELDS),
 }
 
 # Uploads that may be replaced under a grant.
@@ -80,6 +84,7 @@ GRANTABLE_DOCUMENTS: dict[str, list[str]] = {
     "CIF": list(CIF_FILE_FIELDS),
     "BGV": list(BGV_FILE_FIELDS),
     "DOCUMENT_COLLECTION": list(DOC_FILE_FIELDS),
+    "REFERENCE_CHECK": list(REF_CHECK_FILE_FIELDS),
 }
 
 # Repeating sections: table key -> (model, editable columns, owning form,
@@ -112,6 +117,7 @@ _DETAIL_MODELS = {
     "CIF": CIFDetails,
     "BGV": BGVDetails,
     "DOCUMENT_COLLECTION": DocCollectionDetails,
+    "REFERENCE_CHECK": ReferenceCheckDetails,
 }
 
 # A storage key belongs to exactly one form the candidate fills in. Profile
@@ -121,6 +127,7 @@ OWNING_FORM = {
     "CIF": "CIF",
     "BGV": "BGV",
     "DOCUMENT_COLLECTION": "DOCUMENT_COLLECTION",
+    "REFERENCE_CHECK": "REFERENCE_CHECK",
 }
 
 
@@ -128,6 +135,7 @@ OWNING_FORM = {
 FORM_TITLES = {
     "CIF": "Candidate Information Form",
     "DOCUMENT_COLLECTION": "Document Collection",
+    "REFERENCE_CHECK": "Reference Check",
     "BGV": "Background Verification",
 }
 

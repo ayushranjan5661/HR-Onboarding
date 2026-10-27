@@ -66,6 +66,11 @@ from export_zoho_payload import build_full_payload, collect_values  # noqa: E402
 
 from app.config import settings                                          # noqa: E402
 from app.database import SessionLocal                                    # noqa: E402
+from app.utils import dns_fallback                                       # noqa: E402
+
+# Run as a script, Python's own DNS is blocked on managed machines; see
+# backend/app/utils/dns_fallback.py. A no-op when the server imported us.
+dns_fallback.install()
 from app.models import Candidate                                         # noqa: E402
 
 # Zoho names the email field Email_ID on the stock Candidate form; a customised
@@ -197,7 +202,8 @@ def api(method, path, data=None, token=None, params=None, body=None, content_typ
 def _multipart(fields, files):
     """multipart/form-data body: text fields plus (name, filename,
     content_type, path) file parts. Only uploadFile() needs this - insert and
-    updateRecord take ordinary urlencoded form data (see upload_files)."""
+    updateRecord take ordinary urlencoded form data (see upload_files).
+    `path` may also be the file's bytes, for content generated in memory."""
     boundary = "----hr-onboarding-" + os.urandom(12).hex()
     out = bytearray()
     for name, value in fields.items():
@@ -205,8 +211,11 @@ def _multipart(fields, files):
                 % (boundary, name)).encode()
         out += str(value).encode("utf-8") + b"\r\n"
     for name, filename, ctype, path in files:
-        with open(path, "rb") as fh:
-            content = fh.read()
+        if isinstance(path, (bytes, bytearray)):
+            content, path = bytes(path), filename or "file"
+        else:
+            with open(path, "rb") as fh:
+                content = fh.read()
         safe = (filename or os.path.basename(path)).replace('"', "'")
         out += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\n"
                 "Content-Type: %s\r\n\r\n"
@@ -447,6 +456,43 @@ def update_record(token, form, record_id, payload, files=None, draft=False):
     return api("POST", path, data=data, token=token)
 
 
+def get_record(token, form, record_id):
+    """One record by id, as getRecordByID returns it (tabular rows under
+    "tabularSections", keyed by section display name). {} if not found."""
+    resp = api("GET", "forms/%s/getRecordByID" % urllib.parse.quote(form),
+               token=token, params={"recordId": record_id})
+    result = resp.get("response", {}).get("result") or []
+    if isinstance(result, list):
+        return result[0] if result else {}
+    return result if isinstance(result, dict) else {}
+
+
+def tabular_row_ids(record, section_display):
+    """tabular.ROWID of every saved row in one section of a get_record() result.
+    Rows without an id (Zoho returns a bare {} for an empty table) are skipped."""
+    rows = (record.get("tabularSections") or {}).get(section_display) or []
+    return [str(r["tabular.ROWID"]) for r in rows
+            if isinstance(r, dict) and r.get("tabular.ROWID")]
+
+
+def delete_tabular_rows(token, form, record_id, rows_by_section, draft=False):
+    """{section id: [row id, ...]} -> remove those rows. This is the one place
+    tabularData works: {"<sectionId>": {"delete": [rowIds]}} (verified on the
+    Candidate form 2026-10-05). Adding rows still goes through inputData."""
+    rows_by_section = {sec: ids for sec, ids in rows_by_section.items() if ids}
+    if not rows_by_section:
+        return None
+    data = {
+        "recordId": record_id,
+        "inputData": "{}",
+        "tabularData": _dumps({sec: {"delete": ids} for sec, ids in rows_by_section.items()}),
+    }
+    if draft:
+        data["isDraft"] = "true"
+    path = "forms/json/%s/updateRecord" % urllib.parse.quote(form)
+    return api("POST", path, data=data, token=token)
+
+
 def get_records(token, form, limit=5):
     return api("GET", "forms/%s/getRecords" % urllib.parse.quote(form),
                token=token, params={"sIndex": 1, "limit": limit})
@@ -478,8 +524,8 @@ def has_errors(response):
 # main
 # --------------------------------------------------------------------------
 
-def load_file_map():
-    with open(os.path.join(HERE, "field_map.json"), encoding="utf-8") as fh:
+def load_file_map(map_file="field_map.json"):
+    with open(os.path.join(HERE, map_file), encoding="utf-8") as fh:
         return json.load(fh).get("files", {}).get("map", {})
 
 

@@ -1,5 +1,5 @@
 {
-  "_readme": "local field key -> Zoho People field API name on the Confirmation_Process_Form (displayed in Zoho as \"Candidate Information\") — this is the org's actual candidate-intake form; the generic-sounding \"Candidate\" form named in ZOHO_CANDIDATE_FORM does not exist in this org. Every API name below was read live from GET forms/Confirmation_Process_Form/components on 2026-09-07 (see integrations/zoho/README.md step 2 to re-verify after any Zoho-side form change). Leave a value as \"\" to skip that field.",
+  "_readme": "local field key -> Zoho People field API name on the Confirmation_Process_Form (displayed in Zoho as \"Candidate Information\"). Zoho's separate \"Candidate\" form is written by the second HR button with field_map_candidate.json. Every API name below was read live from GET forms/Confirmation_Process_Form/components on 2026-09-07 (see integrations/zoho/README.md step 2 to re-verify after any Zoho-side form change). Leave a value as \"\" to skip that field.",
   "_form": "Confirmation_Process_Form",
   "map": {
     "full_name": "First_name",

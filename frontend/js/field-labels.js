@@ -63,6 +63,13 @@ const BGV_FIELDS = [
 
 const DOC_FIELDS = [];  // Document Collection is uploads only
 
+const REF_CHECK_FIELDS = [
+  "candidate_name", "reference_check_date", "position_applied_for",
+  "ref1_name", "ref1_title", "ref1_email", "ref1_phone",
+  "ref2_name", "ref2_title", "ref2_email", "ref2_phone",
+  "message_to_hiring_team", "declaration_accepted",
+];
+
 const FORM_FILE_FIELDS = {
   CIF: ["profile_picture", "signature"],
   BGV: ["signed_consent_form", "passport_copy_bgv", "form16_last_year", "form16_previous_year", "bank_statement_salary", "police_clearance_certificate", "bgv_signature"],
@@ -100,6 +107,7 @@ const FORM_FILE_FIELDS = {
     "passport_size_photo", "pan_card", "aadhar_card", "passport_copy",
     "address_proof", "id_proof",
   ],
+  REFERENCE_CHECK: [],
 };
 
 // Repeating-row tables: table name (API) -> column order for display
@@ -292,6 +300,14 @@ const FIELD_LABELS = {
   additional_certifications: "Additional Certifications",
   passport_size_photo: "Passport Size Photo", pan_card: "Pan Card", aadhar_card: "Aadhar Card",
   passport_copy: "Passport Copy", address_proof: "Address Proof", id_proof: "ID Proof",
+  // Reference Check
+  candidate_name: "Candidate Name", reference_check_date: "Date",
+  ref1_name: "Referee 1 — Name", ref1_title: "Referee 1 — Title",
+  ref1_email: "Referee 1 — Mail ID", ref1_phone: "Referee 1 — Phone No.",
+  ref2_name: "Referee 2 — Name", ref2_title: "Referee 2 — Title",
+  ref2_email: "Referee 2 — Mail ID", ref2_phone: "Referee 2 — Phone No.",
+  message_to_hiring_team: "Message to Hiring Team",
+  ref_signature: "Candidate Signature",
 };
 
 function labelFor(key) { return FIELD_LABELS[key] || key.replaceAll("_", " "); }

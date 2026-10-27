@@ -47,6 +47,7 @@ CURATED: dict[tuple[str, str], tuple[str, str]] = {
 # Which forms may feed which. A form can only draw from earlier stages.
 UPSTREAM = {
     "DOCUMENT_COLLECTION": ["CIF"],
+    "REFERENCE_CHECK": ["CIF"],
     "BGV": ["CIF", "DOCUMENT_COLLECTION"],
 }
 
@@ -200,7 +201,7 @@ def _llm_propose(target_form: str, kind: str) -> list[dict]:
         text = payload["choices"][0]["message"]["content"].strip()
     except (urllib.error.URLError, urllib.error.HTTPError, KeyError,
             json.JSONDecodeError, TimeoutError, OSError) as exc:
-        print(f"[field_mapper] LLM unavailable ({type(exc).__name__}); using heuristics")
+        print(f"[field_mapper] LLM unavailable ({type(exc).__name__}: {getattr(exc, 'reason', exc)}); using heuristics")
         return []
 
     text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.M).strip()

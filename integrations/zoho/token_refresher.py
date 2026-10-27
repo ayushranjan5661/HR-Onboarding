@@ -20,6 +20,12 @@ from datetime import datetime
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ENV_PATH = os.path.join(ROOT, ".env")
+
+# Run as a script, Python's own DNS is blocked on managed machines; see
+# backend/app/utils/dns_fallback.py.
+sys.path.insert(0, os.path.join(ROOT, "backend"))
+from app.utils import dns_fallback  # noqa: E402
+dns_fallback.install()
 INTERVAL = 50 * 60
 
 

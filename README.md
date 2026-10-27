@@ -70,7 +70,10 @@ HR-Onboarding/
 │  │  ├─ agents/
 │  │  │  ├─ field_mapper.py    LLM — which fields mean the same thing across forms
 │  │  │  ├─ prefill.py         turns those mappings into pre-filled values + carried documents
-│  │  │  └─ insights.py        LLM — CIF summary and anomaly flags for HR
+│  │  │  ├─ insights.py        LLM — CIF summary and anomaly flags for HR
+│  │  │  ├─ doc_validator.py   OCR + keyword scoring — is each upload the document its field asks for?
+│  │  │  └─ doc_lexicon.py     the words it looks for, in every Indian script + every state board
+│  ├─ tessdata/                Tesseract language packs: English + 13 Indian languages (~30 MB)
 │  │  └─ utils/
 │  │     └─ file_storage.py    upload validation, safe storage, document snapshots
 │  ├─ uploads/                 candidate files + retained versions (gitignored)
@@ -195,13 +198,14 @@ The link looks like `index.html?token=<43 random chars>&next=form`.
   explanation rather than a dead end.
 3. Back in the HR portal, open the candidate → review every submitted field,
    edit or delete anything, then **Approve** or **Reject**.
-4. On **Approve**, only the **Document Collection** form unlocks. Details
-   already on file (name/email/contact/PAN/etc.) are pulled from the CIF, so
-   the candidate fills only what is unique to that form.
+4. **Approve** makes the **Document Collection** form sendable, but it stays
+   withdrawn until HR presses **Send** on it — nothing reaches the candidate
+   automatically. Details already on file (name/email/contact/PAN/etc.) are
+   pulled from the CIF, so the candidate fills only what is unique to that form.
 5. Candidate submits their documents → HR reviews them. **Approving the
-   Document Collection is what unlocks the BGV form** — the stages are
-   sequential, so BGV cannot be started or submitted before then. Rejecting
-   the documents leaves BGV locked.
+   Document Collection is what allows the BGV form to be sent** (again with
+   **Send**) — the stages are sequential, so BGV cannot be started or
+   submitted before then. Rejecting the documents leaves BGV locked.
 6. Candidate submits BGV → HR approves it → HR marks onboarding complete.
 
 ### Form sequence
@@ -332,6 +336,47 @@ on curated + heuristic rules only.
 
 `backend/app/field_catalog.py` is generated — regenerate it with
 `scratchpad/gen_catalog.py` after changing any form definition.
+
+## Document check (OCR + keyword scoring)
+
+Candidates attach the wrong file to a slot more often than you would think —
+a PAN card under "Aadhaar", a signature under "PAN", a transfer certificate as
+the "10th marksheet". `backend/app/agents/doc_validator.py` reads every upload
+and records a score on the document row (`ai_status`, `ai_doc_type`,
+`ai_confidence` = score 0-100, `ai_note`, `ai_id_match`).
+
+**Nothing leaves the server.** Identity documents are sensitive, so the check
+is entirely local — no AI service is involved:
+
+| Step | What it does |
+|---|---|
+| Extract | A PDF's own text layer when it has one (e-Aadhaar, bank statements); otherwise Tesseract OCR on the image / rasterised pages in **one pass with English plus every major Indian script** (Devanagari, Bengali/Assamese, Odia, Gurmukhi, Gujarati, Tamil, Telugu, Kannada, Malayalam, Urdu; ~0.8 s a page). Candidates' Aadhaar cards and board certificates are bilingual, and the regional half is read too. `.docx` text is read directly. |
+| Score | Each document type in `RULES` is a list of weighted keyword/pattern rules drawn from `doc_lexicon.py` — "Aadhaar", "Government of India", "date of birth", "marks", "Class 10/12" in every script, plus every state board by name and by what it calls its exams (SSC, SSLC, HSLC, Matric, Madhyamik, Intermediate, PUC, Plus Two, HS …). Regional words match on stems because OCR reorders vowel signs. — "Income Tax Department", a PAN-shaped number, "Class X", a board name, "Net Pay"… A type's score is the share of its weight that matched (0-100); negative weights let a 12th marksheet lose points as a 10th one. Photos and signatures have no text, so they are scored from pixel statistics (ink coverage, brightness, colour). |
+| Decide | Score for the field's expected type ≥ `DOC_VALIDATION_MATCH_SCORE` (80) → `MATCH`; < `DOC_VALIDATION_MISMATCH_SCORE` (40) → `MISMATCH`, naming the type that scored best; in between → `UNCERTAIN` for HR. A PAN/Aadhaar number found in the text is checked for shape (regex / Verhoeff checksum) and compared with the profile. Anything unreadable (OCR missing, legacy .doc, blank scan) is `UNVERIFIED`/`UNCERTAIN` and always accepted. |
+
+The note stored with each verdict says *why* ("Looks like a PAN card (score
+92%: Income Tax Department, PAN-format number, Government of India)"), so HR
+can judge the check as well as the document.
+
+Where it runs: on Save Draft, on Submit, on an HR-granted re-upload, and on
+HR's own Attach/Replace. **Verdicts are for HR only** — the candidate portal
+never shows them and the candidate API never returns them (the one exception
+is `block` mode, where a refused upload has to say why). Drafts and
+carried-over documents keep their verdict rather than being re-read.
+
+Documents uploaded before the check existed have no score; the **Re-check
+documents** button on the HR candidate page scores everything that candidate
+has on record, and `python recheck_documents.py` (add `--all` after tuning
+the rules) does it for the whole database.
+
+Setup: `winget install UB-Mannheim.TesseractOCR` (or set `TESSERACT_CMD`);
+language packs ship in `backend/tessdata`. `DOC_VALIDATION_MODE` in `.env`:
+`off`, `warn` (default — record and show to the candidate and HR, never
+refuse) or `block` (refuse a `MISMATCH`). Start in `warn`, look at what HR
+sees on the candidate page for a few weeks, tune the rule weights, then
+switch to `block`.
+
+Tests for the scoring layer: `cd backend && ../myenv/Scripts/python.exe -m pytest tests -q`.
 
 ## Security notes
 - Passwords are bcrypt-hashed; HR and candidate sessions use separate JWTs

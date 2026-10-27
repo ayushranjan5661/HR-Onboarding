@@ -2,9 +2,10 @@ import os
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 from uuid import uuid4
+from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -12,12 +13,13 @@ from app.config import settings
 from app.database import get_db
 from app.deps import get_current_staff, get_current_staff_allow_reset
 from app import edit_access
-from app import scope, staff_service
+from app import referee_links, scope, staff_service
 from app import date_format
 from app.date_format import normalize_field
 from app.form_definitions import (BGV_FIELDS, BGV_FILE_FIELDS, BGV_TABLE_SECTIONS,
                                     CIF_FIELDS, CIF_FILE_FIELDS, DOC_FIELDS,
-                                    DOC_FILE_FIELDS, PROFILE_FIELDS)
+                                    DOC_FILE_FIELDS, PROFILE_FIELDS, REF_CHECK_FIELDS,
+                                    REF_CHECK_FILE_FIELDS)
 from app.models import (
     BGVAddressHistory,
     BGVDetails,
@@ -44,6 +46,7 @@ from app.models import (
     FormSubmission,
     FormType,
     HRUser,
+    ReferenceCheckDetails,
     ReferenceDetail,
 )
 from app.schemas import (
@@ -63,6 +66,7 @@ from app.schemas import (
 )
 from app.security import (decrypt_password, encrypt_password, generate_invite_token,
                             generate_temp_password, hash_password)
+from app.agents import doc_validator
 from app.services import zoho_push
 from app.utils.file_storage import save_upload, snapshot_document, upload_path
 
@@ -102,6 +106,7 @@ def _owner_columns(db: Session, candidates: list) -> dict[int, dict]:
         else:
             mgr = managers.get(owner.manager_id) if owner.manager_id else None
         out[oid] = {"assigned_hr_id": owner.id, "assigned_hr_name": owner.name,
+                    "assigned_hr_role": owner.role,
                     "manager_id": mgr.id if mgr else None,
                     "manager_name": mgr.name if mgr else None}
     return out
@@ -117,6 +122,20 @@ def _candidate_login_url(candidate: Candidate) -> str:
                 f"?token={candidate.invite_token}&next=form")
     return (f"{settings.PORTAL_BASE_URL}/index.html"
             f"?role=candidate&email={quote(candidate.email)}&next=form")
+
+
+def _login_page_url() -> str:
+    """Plain login page, for candidates who sign in with ID + password."""
+    return f"{settings.PORTAL_BASE_URL}/index.html?role=candidate"
+
+
+def _link_expiry(candidate: Candidate) -> Optional[datetime]:
+    """Expiry of the one-click link (None for legacy no-token candidates).
+    SQLite hands back naive datetimes; they were written as UTC."""
+    exp = candidate.invite_token_expires_at if candidate.invite_token else None
+    if exp is not None and exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    return exp
 
 
 def _issue_invite_token(candidate: Candidate) -> None:
@@ -136,6 +155,8 @@ def _document_out(doc: Document) -> DocumentOut:
         original_filename=doc.original_filename, content_type=doc.content_type,
         file_available=os.path.isfile(upload_path(doc.stored_filename)),
         uploaded_at=doc.uploaded_at,
+        ai_status=doc.ai_status, ai_doc_type=doc.ai_doc_type,
+        ai_confidence=doc.ai_confidence, ai_id_match=doc.ai_id_match, ai_note=doc.ai_note,
     )
 
 
@@ -220,7 +241,9 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
     # Wire up SMTP in .env and send here for a live flow.
     return InviteCandidateResponse(candidate_id=candidate.id, email=candidate.email,
                                     temp_password=temp_password,
-                                    login_url=_candidate_login_url(candidate))
+                                    login_url=_candidate_login_url(candidate),
+                                    login_page_url=_login_page_url(),
+                                    login_link_expires_at=_link_expiry(candidate))
 
 
 @router.get("/field-mappings")
@@ -252,6 +275,101 @@ def candidate_insights(candidate_id: int, db: Session = Depends(get_db),
     return insights_agent.generate(db, candidate_id)
 
 
+@router.get("/candidates/{candidate_id}/reference-email-ai")
+def reference_email_ai(candidate_id: int, db: Session = Depends(get_db),
+                        current: HRUser = Depends(get_current_staff)):
+    """LLM reading of the candidate's "Message to Hiring Team": a note to add
+    to each reference's mail and a private note for HR. Falls back to nothing
+    (the standard template) when the message is empty or AI is unavailable."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    if not candidate.ref_check_details:
+        raise HTTPException(status_code=400,
+                             detail="The candidate has not submitted the Reference Check form yet")
+    from app.agents import reference_email
+    return reference_email.generate(candidate.ref_check_details)
+
+
+@router.get("/candidates/{candidate_id}/cif/pdf")
+def cif_pdf(candidate_id: int, db: Session = Depends(get_db),
+            current: HRUser = Depends(get_current_staff)):
+    """Candidate Details (CIF) — profile, CIF answers and row tables — as a PDF."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    from app.services import cif_pdf as cif_pdf_service
+    reason = cif_pdf_service.not_ready_reason(candidate)
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+    pdf = cif_pdf_service.build(candidate)
+    safe = "".join(ch if ch.isalnum() else "_" for ch in (candidate.name or "candidate")).strip("_")
+    filename = f"CIF_{safe or candidate.id}.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.get("/candidates/{candidate_id}/document-collection/pdf")
+def document_collection_pdf(candidate_id: int, db: Session = Depends(get_db),
+                            current: HRUser = Depends(get_current_staff)):
+    """Document Collection checklist plus every uploaded file, as one PDF."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    from app.services import doc_pdf
+    reason = doc_pdf.not_ready_reason(candidate)
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+    pdf = doc_pdf.build(candidate)
+    safe = "".join(ch if ch.isalnum() else "_" for ch in (candidate.name or "candidate")).strip("_")
+    filename = f"Document_Collection_{safe or candidate.id}.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.get("/candidates/{candidate_id}/reference-check/pdf")
+def reference_check_pdf(candidate_id: int, db: Session = Depends(get_db),
+                        current: HRUser = Depends(get_current_staff)):
+    """Reference Check form plus each referee's feedback, as a styled PDF."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    from app.services import reference_pdf
+    reason = reference_pdf.not_ready_reason(candidate)
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+    pdf = reference_pdf.build(candidate)
+    safe = "".join(ch if ch.isalnum() else "_" for ch in (candidate.name or "candidate")).strip("_")
+    filename = f"Referee_Check_{safe or candidate.id}.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.post("/candidates/{candidate_id}/documents/recheck")
+def recheck_documents(candidate_id: int, only_unchecked: bool = False,
+                      db: Session = Depends(get_db),
+                      current: HRUser = Depends(get_current_staff)):
+    """Run the document check over everything this candidate has on record.
+
+    Uploads are checked as they arrive, so this exists for files that predate
+    the check, for after the scoring rules have been tuned, and for when HR
+    simply wants a fresh look. Verdicts are recorded; nothing is refused."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    if not doc_validator.enabled():
+        raise HTTPException(status_code=400, detail="The document check is switched off "
+                                                    "or OCR is not installed on the server.")
+    profile = doc_validator.profile_dict(candidate.profile)
+    docs = db.query(Document).filter(Document.candidate_id == candidate_id).all()
+    checked = skipped = 0
+    for doc in docs:
+        if only_unchecked and doc.ai_status:
+            skipped += 1
+            continue
+        path = upload_path(doc.stored_filename)
+        if not os.path.isfile(path):
+            skipped += 1
+            continue
+        verdict = doc_validator.validate_path(path, doc.content_type, doc.original_filename,
+                                              doc.field_key, profile)
+        doc_validator.apply_to(doc, verdict)
+        checked += 1
+    db.commit()
+    return {"detail": f"{checked} document(s) checked" + (f", {skipped} skipped" if skipped else ""),
+            "checked": checked, "skipped": skipped}
+
+
 @router.get("/candidates", response_model=list[CandidateListItem])
 def list_candidates(db: Session = Depends(get_db), current: HRUser = Depends(get_current_staff)):
     """Only what the caller may see: own candidates for an HR Executive, the
@@ -259,8 +377,15 @@ def list_candidates(db: Session = Depends(get_db), current: HRUser = Depends(get
     rows = (scope.filter_candidates(db.query(Candidate), db, current)
               .order_by(Candidate.created_at.desc()).all())
     owners = _owner_columns(db, rows)
+    # One query for every row's Document Collection status, so the list can
+    # filter "docs submitted – awaiting review" without loading submissions.
+    doc_status = dict(db.query(FormSubmission.candidate_id, FormSubmission.status).filter(
+        FormSubmission.candidate_id.in_([c.id for c in rows]),
+        FormSubmission.form_type == FormType.DOCUMENT_COLLECTION).all()) if rows else {}
     return [CandidateListItem(id=c.id, name=c.name, email=c.email, stage=c.stage.value,
-                              created_at=c.created_at, **owners.get(c.assigned_hr_id, {}))
+                              created_at=c.created_at,
+                              doc_status=doc_status[c.id].value if c.id in doc_status else None,
+                              **owners.get(c.assigned_hr_id, {}))
             for c in rows]
 
 
@@ -272,6 +397,7 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
             joinedload(Candidate.profile), joinedload(Candidate.submissions),
             joinedload(Candidate.documents), joinedload(Candidate.cif_details),
             joinedload(Candidate.bgv_details), joinedload(Candidate.doc_details),
+            joinedload(Candidate.ref_check_details), joinedload(Candidate.referee_feedback),
             joinedload(Candidate.education), joinedload(Candidate.employment),
             joinedload(Candidate.references),
             joinedload(Candidate.bgv_addresses), joinedload(Candidate.bgv_education),
@@ -297,12 +423,17 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         assigned_hr_name=owner.get("assigned_hr_name"),
         temp_password=decrypt_password(candidate.temp_password_enc),
         login_url=_candidate_login_url(candidate),
+        login_page_url=_login_page_url(),
+        login_link_expires_at=_link_expiry(candidate),
         profile=candidate.profile,
-        submissions=candidate.submissions,
+        submissions=candidate.visible_submissions,
         documents=[_document_out(d) for d in candidate.documents],
         cif_details=_row_dict(candidate.cif_details, CIF_FIELDS, include_id=False) if candidate.cif_details else None,
         bgv_details=_row_dict(candidate.bgv_details, BGV_FIELDS, include_id=False) if candidate.bgv_details else None,
         doc_details=_row_dict(candidate.doc_details, DOC_FIELDS, include_id=False) if candidate.doc_details else None,
+        ref_check_details=(_row_dict(candidate.ref_check_details, REF_CHECK_FIELDS, include_id=False)
+                           if candidate.ref_check_details else None),
+        referee_feedback=referee_links.feedback_for_hr(candidate),
         education={
             section: [_row_dict(e, EDUCATION_COLUMNS) for e in candidate.education if e.section == section]
             for section in ("UG_PG", "12TH", "10TH")
@@ -317,6 +448,14 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         zoho_status=candidate.zoho_status,
         zoho_synced_at=candidate.zoho_synced_at,
         zoho_last_error=candidate.zoho_last_error,
+        zoho_cand_record_id=candidate.zoho_cand_record_id,
+        zoho_cand_status=candidate.zoho_cand_status,
+        zoho_cand_synced_at=candidate.zoho_cand_synced_at,
+        zoho_cand_last_error=candidate.zoho_cand_last_error,
+        zoho_ref_record_id=candidate.zoho_ref_record_id,
+        zoho_ref_status=candidate.zoho_ref_status,
+        zoho_ref_synced_at=candidate.zoho_ref_synced_at,
+        zoho_ref_last_error=candidate.zoho_ref_last_error,
     )
 
 
@@ -332,7 +471,8 @@ def regenerate_invite_link(candidate_id: int, db: Session = Depends(get_db),
                          action="EDIT", edited_by_hr_id=current.id))
     db.commit()
     return {"detail": "New link issued. The previous link no longer works.",
-            "login_url": _candidate_login_url(candidate)}
+            "login_url": _candidate_login_url(candidate),
+            "login_link_expires_at": _link_expiry(candidate)}
 
 
 @router.post("/candidates/{candidate_id}/reset-password")
@@ -394,6 +534,7 @@ _DETAIL_TABLES = {
     "CIF": (CIFDetails, "cif_details", set(CIF_FIELDS)),
     "BGV": (BGVDetails, "bgv_details", set(BGV_FIELDS)),
     "DOCUMENT_COLLECTION": (DocCollectionDetails, "doc_details", set(DOC_FIELDS)),
+    "REFERENCE_CHECK": (ReferenceCheckDetails, "ref_check_details", set(REF_CHECK_FIELDS)),
 }
 
 
@@ -727,22 +868,26 @@ def approve_candidate(candidate_id: int, payload: DecisionRequest, db: Session =
         cif.reviewed_at = datetime.now(timezone.utc)
         cif.reviewed_by_hr_id = current.id
 
-    # Sequential flow: Document Collection opens now; BGV stays locked until
-    # HR approves those documents. Common fields are pulled live from
-    # CandidateProfile, so there is nothing to copy — just flip the status.
-    for form_type, status in ((FormType.DOCUMENT_COLLECTION, FormStatus.PENDING),
-                               (FormType.BGV, FormStatus.LOCKED)):
+    # Sequential flow, but nothing is sent automatically: approving the CIF
+    # makes Document Collection *sendable*, and it stays withdrawn (LOCKED)
+    # until HR presses Send (/candidates/{id}/forms/DOCUMENT_COLLECTION/send).
+    # Reference Check waits for the documents to be approved, and BGV for the
+    # Reference Check — each then needs its own Send.
+    # Reference Check is created for Fresher / Trainee candidates only.
+    follow_ups = ((FormType.DOCUMENT_COLLECTION, FormType.REFERENCE_CHECK, FormType.BGV)
+                  if candidate.uses_reference_check
+                  else (FormType.DOCUMENT_COLLECTION, FormType.BGV))
+    for form_type in follow_ups:
         existing = db.query(FormSubmission).filter(FormSubmission.candidate_id == candidate_id,
                                                      FormSubmission.form_type == form_type).first()
         if not existing:
-            db.add(FormSubmission(candidate_id=candidate_id, form_type=form_type, status=status))
-        elif form_type == FormType.DOCUMENT_COLLECTION and existing.status == FormStatus.LOCKED:
-            existing.status = FormStatus.PENDING
+            db.add(FormSubmission(candidate_id=candidate_id, form_type=form_type,
+                                  status=FormStatus.LOCKED))
 
     candidate.stage = CandidateStage.APPROVED_FOR_BGV
     db.commit()
-    return {"detail": "Candidate approved. The Document Collection form is now unlocked. "
-                       "BGV is sent separately, once you have approved those documents."}
+    return {"detail": "Candidate approved. Send the Document Collection form when you are ready — "
+                       "it is not sent automatically."}
 
 
 @router.post("/candidates/{candidate_id}/reject")
@@ -796,41 +941,90 @@ def mark_onboarding_complete(candidate_id: int, db: Session = Depends(get_db),
 _ZOHO_PUSH_STAGES = {CandidateStage.APPROVED_FOR_BGV, CandidateStage.ONBOARDING_COMPLETE}
 
 
-@router.post("/candidates/{candidate_id}/zoho/push")
-def push_candidate_to_zoho(candidate_id: int, db: Session = Depends(get_db),
-                            current: HRUser = Depends(get_current_staff)):
-    """Publish this candidate into Zoho People. The first call inserts a
-    Zoho draft record; every call after that updates the same record (never
-    a second insert). Nothing is sent unless ZOHO_CANDIDATE_WRITE_FORM is
-    configured in .env — see integrations/zoho/README.md."""
-    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+def _run_zoho_push(db: Session, candidate, target: str) -> dict:
+    """Shared body of both Zoho buttons. `target` picks the form and the
+    Candidate columns its record is tracked in (zoho_* / zoho_cand_*)."""
     if candidate.stage not in _ZOHO_PUSH_STAGES:
         raise HTTPException(
             status_code=400,
             detail="Only candidates approved for BGV, or fully onboarded, can be "
                     "published to Zoho People.")
 
+    prefix = zoho_push.TARGETS[target]["prefix"]
     try:
-        was_synced_before = bool(candidate.zoho_record_id)
-        result = zoho_push.push_candidate(db, candidate)
+        was_synced_before = bool(getattr(candidate, prefix + "record_id"))
+        result = zoho_push.push_candidate(db, candidate, target=target)
     except zoho_push.ZohoPushError as exc:
-        candidate.zoho_last_error = str(exc)[:2000]
+        setattr(candidate, prefix + "last_error", str(exc)[:2000])
         db.commit()
         raise HTTPException(status_code=502, detail=str(exc))
 
-    candidate.zoho_record_id = result["record_id"]
-    candidate.zoho_status = result["status"]
-    candidate.zoho_synced_at = datetime.now(timezone.utc)
-    candidate.zoho_last_error = None
+    setattr(candidate, prefix + "record_id", result["record_id"])
+    setattr(candidate, prefix + "status", result["status"])
+    setattr(candidate, prefix + "synced_at", datetime.now(timezone.utc))
+    setattr(candidate, prefix + "last_error", None)
     db.commit()
 
-    detail = (f"Zoho People draft updated (record {result['record_id']})."
+    form_label = "the Zoho Candidate form" if target == "candidate" else "Zoho People"
+    detail = (f"Draft updated in {form_label} (record {result['record_id']})."
               if was_synced_before else
-              f"Draft created in Zoho People (record {result['record_id']}).")
+              f"Draft created in {form_label} (record {result['record_id']}).")
     # tabular_rows still rides in the response for the caller/logs; it is left
     # out of the message because the API reports success for tabular writes it
     # did not actually make, so the count promised more than it could confirm.
     return {"detail": detail, **result}
+
+
+@router.post("/candidates/{candidate_id}/zoho/push")
+def push_candidate_to_zoho(candidate_id: int, db: Session = Depends(get_db),
+                            current: HRUser = Depends(get_current_staff)):
+    """Publish this candidate into Zoho People's Confirmation_Process_Form.
+    The first call inserts a Zoho draft record; every call after that updates
+    the same record (never a second insert). Nothing is sent unless
+    ZOHO_CANDIDATE_WRITE_FORM is configured in .env — see
+    integrations/zoho/README.md."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    return _run_zoho_push(db, candidate, "confirmation")
+
+
+@router.post("/candidates/{candidate_id}/zoho/candidate-form/push")
+def push_candidate_to_zoho_candidate_form(candidate_id: int, db: Session = Depends(get_db),
+                                           current: HRUser = Depends(get_current_staff)):
+    """Same as /zoho/push, but into Zoho's "Candidate" form using
+    integrations/zoho/field_map_candidate.json. Tracked in its own zoho_cand_*
+    columns, so it never touches the Confirmation_Process_Form record.
+    Nothing is sent unless ZOHO_CANDIDATE_PROFILE_WRITE_FORM is set in .env."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    return _run_zoho_push(db, candidate, "candidate")
+
+
+@router.post("/candidates/{candidate_id}/zoho/reference-check/push")
+def push_reference_check_to_zoho(candidate_id: int, db: Session = Depends(get_db),
+                                 current: HRUser = Depends(get_current_staff)):
+    """Upload the generated Reference Check PDF (same file as
+    /reference-check/pdf) into the Reference_check field of Zoho's
+    "Documents Collection - Trainee" form. Tracked in zoho_ref_* columns."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    if candidate.stage not in _ZOHO_PUSH_STAGES:
+        raise HTTPException(
+            status_code=400,
+            detail="Only candidates approved for BGV, or fully onboarded, can be "
+                    "published to Zoho People.")
+    try:
+        result = zoho_push.push_reference_check(candidate)
+    except zoho_push.ZohoPushError as exc:
+        candidate.zoho_ref_last_error = str(exc)[:2000]
+        db.commit()
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    candidate.zoho_ref_record_id = result["record_id"]
+    candidate.zoho_ref_status = result["status"]
+    candidate.zoho_ref_synced_at = datetime.now(timezone.utc)
+    candidate.zoho_ref_last_error = None
+    db.commit()
+    verb = "Created" if result["created"] else "Updated"
+    return {"detail": f"{verb} Zoho Documents Collection record {result['record_id']} "
+                      "with the Referee Check PDF.", **result}
 
 
 # ---------------------------------------------------------------------------
@@ -843,7 +1037,7 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
     submission = db.query(FormSubmission).filter(FormSubmission.id == submission_id).first()
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
-    scope.get_scoped_candidate(db, submission.candidate_id, current)
+    candidate = scope.get_scoped_candidate(db, submission.candidate_id, current)
 
     # A review is a decision, not an arbitrary status write: LOCKED/PENDING/
     # SUBMITTED must never be reachable through this endpoint.
@@ -874,15 +1068,18 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
     submission.reviewed_at = datetime.now(timezone.utc)
     submission.reviewed_by_hr_id = current.id
 
-    # Approving the documents used to open BGV automatically. It no longer
-    # does: BGV is not always wanted, so once the documents are approved HR
-    # chooses between sending BGV (/candidates/{id}/forms/BGV/send) and
-    # finishing the onboarding there and then.
+    # Approving a form never opens the next one automatically: once the
+    # documents are approved HR sends the Reference Check, and once that is
+    # approved, BGV — or finishes the onboarding there and then.
     db.commit()
-    if (submission.form_type == FormType.DOCUMENT_COLLECTION
-            and submission.status == FormStatus.APPROVED):
-        return {"detail": "Documents approved. Send the BGV form if you need it, "
-                           "or mark the onboarding complete."}
+    if submission.status == FormStatus.APPROVED:
+        if submission.form_type == FormType.DOCUMENT_COLLECTION:
+            next_form = "Reference Check" if candidate.uses_reference_check else "BGV"
+            return {"detail": f"Documents approved. Send the {next_form} form if you need it, "
+                               "or mark the onboarding complete."}
+        if submission.form_type == FormType.REFERENCE_CHECK:
+            return {"detail": "Reference Check approved. Send the BGV form if you need it, "
+                               "or mark the onboarding complete."}
     return {"detail": "Submission reviewed"}
 
 
@@ -891,27 +1088,41 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
 #
 # A form is open when its FormSubmission row is PENDING and withheld when it
 # is LOCKED, which is what FormStatus.LOCKED has always meant. Every form can
-# be sent and taken back by hand; the CIF still opens at invite and Document
-# Collection on approval, so the buttons are a correction, not the only route.
+# be sent and taken back by hand. Only the CIF opens by itself (at invite);
+# Document Collection and BGV stay LOCKED until HR presses Send.
 # ---------------------------------------------------------------------------
 
 
 def _send_blocker(form: FormType, candidate: Candidate, db: Session) -> str | None:
     """Why this form cannot be opened yet, or None when it can.
 
-    The onboarding runs CIF -> Document Collection -> BGV, and a form sent out
-    of turn would ask the candidate for details the step before it decides.
+    The onboarding runs CIF -> Document Collection -> Reference Check -> BGV,
+    and a form sent out of turn would ask the candidate for details the step
+    before it decides.
     """
+    def approved(prev: FormType) -> bool:
+        row = db.query(FormSubmission).filter(
+            FormSubmission.candidate_id == candidate.id,
+            FormSubmission.form_type == prev).first()
+        return row is not None and row.status == FormStatus.APPROVED
+
     if form is FormType.DOCUMENT_COLLECTION:
         if candidate.stage in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
             return ("Approve this candidate's CIF before opening the "
                     "Document Collection form.")
-    elif form is FormType.BGV:
-        docs = db.query(FormSubmission).filter(
-            FormSubmission.candidate_id == candidate.id,
-            FormSubmission.form_type == FormType.DOCUMENT_COLLECTION).first()
-        if docs is None or docs.status != FormStatus.APPROVED:
+    elif form is FormType.REFERENCE_CHECK:
+        if not candidate.uses_reference_check:
+            return "The Reference Check is only for Fresher / Trainee candidates."
+        if not approved(FormType.DOCUMENT_COLLECTION):
             return ("Approve this candidate's Document Collection form before "
+                    "sending the Reference Check.")
+    elif form is FormType.BGV:
+        if not candidate.uses_reference_check:
+            if not approved(FormType.DOCUMENT_COLLECTION):
+                return ("Approve this candidate's Document Collection form before "
+                        "sending Background Verification.")
+        elif not approved(FormType.REFERENCE_CHECK):
+            return ("Approve this candidate's Reference Check form before "
                     "sending Background Verification.")
     return None
 
@@ -1013,6 +1224,7 @@ _FORM_FILE_FIELDS = {
     FormType.CIF: set(CIF_FILE_FIELDS),
     FormType.BGV: set(BGV_FILE_FIELDS),
     FormType.DOCUMENT_COLLECTION: set(DOC_FILE_FIELDS),
+    FormType.REFERENCE_CHECK: set(REF_CHECK_FILE_FIELDS),
 }
 
 
@@ -1052,6 +1264,12 @@ def upload_document(candidate_id: int, form: str, field_key: str,
         new_doc = Document(candidate_id=candidate_id, form_type=form_type, field_key=field_key,
                             original_filename=original, stored_filename=stored,
                             content_type=file.content_type)
+        # HR is deliberately replacing this file, so the verdict is recorded
+        # for the checklist but never refuses the upload.
+        verdict = doc_validator.validate_path(
+            upload_path(stored), file.content_type, file.filename or "", field_key,
+            doc_validator.profile_dict(candidate.profile))
+        doc_validator.apply_to(new_doc, verdict)
         db.add(new_doc)
         db.flush()
         new_snapshot = snapshot_document(db, new_doc)
@@ -1069,7 +1287,7 @@ def upload_document(candidate_id: int, form: str, field_key: str,
         except OSError:
             pass
         raise
-    return {"detail": "Document uploaded"}
+    return {"detail": "Document uploaded", "check": verdict.as_dict()}
 
 
 @router.delete("/documents/{document_id}")
