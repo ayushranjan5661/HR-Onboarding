@@ -62,6 +62,7 @@ async function initCandidatesPage(mode) {
           <select id="inviteType">
             <option value="EXPERIENCED">Experienced</option>
             <option value="FRESHER">Fresher / Trainee</option>
+            <option value="ONDEMAND">On-Demand Consultant</option>
           </select>
           <label>Assign to</label>
           <select id="inviteOwner"></select>

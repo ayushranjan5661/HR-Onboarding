@@ -20,7 +20,8 @@ from app.form_definitions import (BGV_FIELDS, BGV_FILE_FIELDS, BGV_TABLE_SECTION
                                     CIF_FIELDS, CIF_FILE_FIELDS, DECLARATION_FIELDS,
                                     DECLARATION_FILE_FIELDS, DOC_FIELDS,
                                     DOC_FILE_FIELDS, EXP_DECLARATION_FIELDS,
-                                    EXP_DECLARATION_FILE_FIELDS, PROFILE_FIELDS, REF_CHECK_FIELDS,
+                                    EXP_DECLARATION_FILE_FIELDS, ONDEMAND_FIELDS,
+                                    ONDEMAND_FILE_FIELDS, PROFILE_FIELDS, REF_CHECK_FIELDS,
                                     REF_CHECK_FILE_FIELDS)
 from app.models import (
     BGVAddressHistory,
@@ -50,6 +51,7 @@ from app.models import (
     FormSubmission,
     FormType,
     HRUser,
+    OnDemandDetails,
     ReferenceCheckDetails,
     ReferenceDetail,
 )
@@ -218,7 +220,8 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
         temp_password_enc=encrypt_password(temp_password),
         must_reset_password=False,
         stage=CandidateStage.INVITED,
-        candidate_type=(CandidateType.FRESHER if payload.candidate_type == "FRESHER"
+        candidate_type=(CandidateType(payload.candidate_type)
+                         if payload.candidate_type in CandidateType.__members__
                          else CandidateType.EXPERIENCED),
         created_by_hr_id=current.id,
         assigned_hr_id=owner.id,
@@ -226,14 +229,18 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
     _issue_invite_token(candidate)
     db.add(candidate)
     db.flush()
-    kind = "Fresher / Trainee" if candidate.candidate_type == CandidateType.FRESHER else "Experienced"
+    kind = {CandidateType.FRESHER: "Fresher / Trainee",
+            CandidateType.ONDEMAND: "On-Demand Consultant"}.get(candidate.candidate_type, "Experienced")
     staff_service.audit(db, current, "CANDIDATE_INVITED", target_type="CANDIDATE", target=candidate,
                         detail=f"Invited {candidate.email} as {kind}"
                                + (f", assigned to {owner.name}" if owner.id != current.id else ""),
                         team_manager_id=staff_service.team_of(owner))
 
     db.add(CandidateProfile(candidate_id=candidate.id, full_name=payload.name, email=payload.email))
-    db.add(FormSubmission(candidate_id=candidate.id, form_type=FormType.CIF, status=FormStatus.PENDING))
+    # On-Demand Consultants fill one form of their own instead of the CIF.
+    first_form = (FormType.ONDEMAND if candidate.candidate_type == CandidateType.ONDEMAND
+                  else FormType.CIF)
+    db.add(FormSubmission(candidate_id=candidate.id, form_type=first_form, status=FormStatus.PENDING))
     try:
         db.commit()
     except IntegrityError:
@@ -379,6 +386,21 @@ def experience_declaration_pdf(candidate_id: int, db: Session = Depends(get_db),
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
+@router.get("/candidates/{candidate_id}/ondemand/pdf")
+def ondemand_pdf(candidate_id: int, db: Session = Depends(get_db),
+                 current: HRUser = Depends(get_current_staff)):
+    """On-Demand Candidate form plus its Aadhaar, PAN and photo, as one PDF."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    from app.services import ondemand_pdf as ondemand_service
+    reason = ondemand_service.not_ready_reason(candidate)
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+    pdf = ondemand_service.build(candidate)
+    filename = f"On-Demand Candidate Form - {_pdf_name(candidate)}.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @router.post("/candidates/{candidate_id}/documents/recheck")
 def recheck_documents(candidate_id: int, only_unchecked: bool = False,
                       db: Session = Depends(get_db),
@@ -442,6 +464,7 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
             joinedload(Candidate.ref_check_details), joinedload(Candidate.referee_feedback),
             joinedload(Candidate.declaration_details),
             joinedload(Candidate.exp_declaration_details),
+            joinedload(Candidate.ondemand_details),
             joinedload(Candidate.education), joinedload(Candidate.employment),
             joinedload(Candidate.references),
             joinedload(Candidate.bgv_addresses), joinedload(Candidate.bgv_education),
@@ -487,6 +510,8 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         exp_declaration_details=(_row_dict(candidate.exp_declaration_details,
                                            EXP_DECLARATION_FIELDS, include_id=False)
                                  if candidate.exp_declaration_details else None),
+        ondemand_details=(_row_dict(candidate.ondemand_details, ONDEMAND_FIELDS, include_id=False)
+                          if candidate.ondemand_details else None),
         referee_feedback=referee_links.feedback_for_hr(candidate),
         education={
             section: [_row_dict(e, EDUCATION_COLUMNS) for e in candidate.education if e.section == section]
@@ -631,6 +656,7 @@ _DETAIL_TABLES = {
     "DECLARATION": (DeclarationDetails, "declaration_details", set(DECLARATION_FIELDS)),
     "EXPERIENCE_DECLARATION": (ExperienceDeclarationDetails, "exp_declaration_details",
                                set(EXP_DECLARATION_FIELDS)),
+    "ONDEMAND": (OnDemandDetails, "ondemand_details", set(ONDEMAND_FIELDS)),
 }
 
 
@@ -956,6 +982,19 @@ def approve_candidate(candidate_id: int, payload: DecisionRequest, db: Session =
     if candidate.stage != CandidateStage.CIF_SUBMITTED:
         raise HTTPException(status_code=400, detail="Candidate is not awaiting a decision")
 
+    # On-Demand Consultants have no follow-up forms: approving their one form
+    # completes onboarding.
+    if candidate.candidate_type == CandidateType.ONDEMAND:
+        sub = db.query(FormSubmission).filter(FormSubmission.candidate_id == candidate_id,
+                                               FormSubmission.form_type == FormType.ONDEMAND).first()
+        if sub:
+            sub.status = FormStatus.APPROVED
+            sub.reviewed_at = datetime.now(timezone.utc)
+            sub.reviewed_by_hr_id = current.id
+        candidate.stage = CandidateStage.ONBOARDING_COMPLETE
+        db.commit()
+        return {"detail": "On-Demand Candidate form approved. Onboarding is complete."}
+
     # Mark the CIF submission reviewed + approved.
     cif = db.query(FormSubmission).filter(FormSubmission.candidate_id == candidate_id,
                                            FormSubmission.form_type == FormType.CIF).first()
@@ -1152,9 +1191,10 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
     # The CIF gate lives at /candidates/{id}/approve|reject, which also moves
     # the candidate's stage; approving a CIF here would leave the stage behind
     # and let the candidate overwrite an approved form.
-    if submission.form_type == FormType.CIF:
+    if submission.form_type in (FormType.CIF, FormType.ONDEMAND):
+        name = "CIF" if submission.form_type == FormType.CIF else "The On-Demand Candidate form"
         raise HTTPException(status_code=400,
-                             detail="CIF is reviewed via the candidate Approve/Reject decision, "
+                             detail=f"{name} is reviewed via the candidate Approve/Reject decision, "
                                     "not per-submission review")
 
     # Nothing to review until the candidate has actually submitted.
@@ -1206,6 +1246,13 @@ def _send_blocker(form: FormType, candidate: Candidate, db: Session) -> str | No
             FormSubmission.candidate_id == candidate.id,
             FormSubmission.form_type == prev).first()
         return row is not None and row.status == FormStatus.APPROVED
+
+    # An On-Demand Consultant fills only the On-Demand Candidate form, which
+    # is open from the invite; nobody else ever gets it.
+    if (form is FormType.ONDEMAND) != (candidate.candidate_type == CandidateType.ONDEMAND):
+        return ("On-Demand Consultants fill only the On-Demand Candidate form."
+                if candidate.candidate_type == CandidateType.ONDEMAND
+                else "The On-Demand Candidate form is only for On-Demand Consultants.")
 
     if form is FormType.DOCUMENT_COLLECTION:
         if candidate.stage in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
@@ -1334,6 +1381,7 @@ _FORM_FILE_FIELDS = {
     FormType.REFERENCE_CHECK: set(REF_CHECK_FILE_FIELDS),
     FormType.DECLARATION: set(DECLARATION_FILE_FIELDS),
     FormType.EXPERIENCE_DECLARATION: set(EXP_DECLARATION_FILE_FIELDS),
+    FormType.ONDEMAND: set(ONDEMAND_FILE_FIELDS),
 }
 
 

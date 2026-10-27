@@ -61,6 +61,11 @@ def main():
             conn.execute(text("ALTER TYPE formtype ADD VALUE IF NOT EXISTS 'REFERENCE_CHECK'"))
             conn.execute(text("ALTER TYPE formtype ADD VALUE IF NOT EXISTS 'DECLARATION'"))
             conn.execute(text("ALTER TYPE formtype ADD VALUE IF NOT EXISTS 'EXPERIENCE_DECLARATION'"))
+            conn.execute(text("ALTER TYPE formtype ADD VALUE IF NOT EXISTS 'ONDEMAND'"))
+        # On-Demand Consultants. The type itself is created further down on
+        # databases that predate candidate types.
+        if conn.execute(text("SELECT 1 FROM pg_type WHERE typname = 'candidatetype'")).first():
+            conn.execute(text("ALTER TYPE candidatetype ADD VALUE IF NOT EXISTS 'ONDEMAND'"))
 
     Base.metadata.create_all(bind=engine)
 

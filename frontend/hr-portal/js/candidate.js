@@ -11,7 +11,7 @@ let editAccess = { submitted: {}, grantable: {}, permissions: [] };
 // Whole-form edit mode, tracked per card and limited to one card at a time.
 // PROFILE fields are shown inside the CIF card, so they follow CIF's mode.
 const editModes = { CIF: false, DOCUMENT_COLLECTION: false, REFERENCE_CHECK: false, DECLARATION: false,
-                    EXPERIENCE_DECLARATION: false, BGV: false };
+                    EXPERIENCE_DECLARATION: false, BGV: false, ONDEMAND: false };
 
 const FORM_TITLES = {
   CIF: "Candidate Details (CIF)",
@@ -20,16 +20,20 @@ const FORM_TITLES = {
   DECLARATION: "Declaration Form Education Documents",
   EXPERIENCE_DECLARATION: "Declaration Form Relieving Letter and Experience Letter",
   BGV: "Background Verification Form",
+  ONDEMAND: "On-Demand Candidate Form",
 };
 // The CIF card is static markup; the follow-up cards are built by render().
 const FORM_CARD_ID = { CIF: "cifCard", DOCUMENT_COLLECTION: "card-DOCUMENT_COLLECTION",
                        REFERENCE_CHECK: "card-REFERENCE_CHECK",
                        DECLARATION: "card-DECLARATION",
-                       EXPERIENCE_DECLARATION: "card-EXPERIENCE_DECLARATION", BGV: "card-BGV" };
+                       EXPERIENCE_DECLARATION: "card-EXPERIENCE_DECLARATION", BGV: "card-BGV",
+                       ONDEMAND: "card-ONDEMAND" };
 const FORM_DOCS_ID = { CIF: "cifDocs", DOCUMENT_COLLECTION: "docs-DOCUMENT_COLLECTION",
                        REFERENCE_CHECK: "docs-REFERENCE_CHECK",
                        DECLARATION: "docs-DECLARATION",
-                       EXPERIENCE_DECLARATION: "docs-EXPERIENCE_DECLARATION", BGV: "docs-BGV" };
+                       EXPERIENCE_DECLARATION: "docs-EXPERIENCE_DECLARATION", BGV: "docs-BGV",
+                       ONDEMAND: "docs-ONDEMAND" };
+const TYPE_LABELS = { FRESHER: "Fresher / Trainee", ONDEMAND: "On-Demand Consultant" };
 
 // Values long enough that a single-line input is unusable.
 const LONG_TEXT_FIELDS = new Set([
@@ -232,6 +236,10 @@ async function downloadExperienceDeclarationPdf(btn) {
 
 async function downloadDocCollectionPdf(btn) {
   return downloadPdf(btn, "document-collection", "Document_Collection.pdf");
+}
+
+async function downloadOnDemandPdf(btn) {
+  return downloadPdf(btn, "ondemand", "On-Demand Candidate Form.pdf");
 }
 
 async function downloadCifPdf(btn) {
@@ -651,7 +659,10 @@ function render() {
     document.getElementById(id).classList.remove("hidden");
   }
   document.getElementById("candName").textContent = `${c.name} — ${c.email}`;
-  const typeLabel = c.candidate_type === "FRESHER" ? "Fresher / Trainee" : "Experienced";
+  const typeLabel = TYPE_LABELS[c.candidate_type] || "Experienced";
+  // On-Demand Consultants have no CIF: their one form is a card below.
+  const onDemand = c.candidate_type === "ONDEMAND";
+  document.getElementById("cifCard").classList.toggle("hidden", onDemand);
   document.getElementById("candStage").innerHTML =
     `<span class="badge badge-pending" style="margin-right:6px;">${typeLabel}</span>` + badge(c.stage);
 
@@ -686,7 +697,7 @@ function render() {
   // Reference Check is a Fresher / Trainee form only.
   const refsOpen = c.candidate_type === "FRESHER" && docsOpen && docSub?.status === "APPROVED";
   applyEmailDraftVisibility();
-  const emailOpts = {
+  const emailOpts = onDemand ? { templates: ["ONDEMAND"], template: "ONDEMAND" } : {
     templates: ["CIF", ...(docsOpen ? ["DOCUMENT_COLLECTION", "DECLARATION", "EXPERIENCE_DECLARATION"] : []),
                 ...(refsOpen ? ["REFERENCE_CHECK"] : []),
                 // Reopened values on a submitted Declaration go out by its link.
@@ -712,7 +723,9 @@ function render() {
   loadReferenceAi(c, drawEmail);
 
   // Decision card only when awaiting the final-interview decision
-  document.getElementById("decisionCard").classList.toggle("hidden", c.stage !== "CIF_SUBMITTED");
+  // On-Demand decides from Approve / Reject on its own form card instead.
+  document.getElementById("decisionCard").classList.toggle("hidden",
+    onDemand || c.stage !== "CIF_SUBMITTED");
 
   const notice = document.getElementById("rejectedNotice");
   if (c.stage === "REJECTED") {
@@ -773,6 +786,7 @@ function render() {
     EXPERIENCE_DECLARATION: { title: FORM_TITLES.EXPERIENCE_DECLARATION, fields: EXP_DECLARATION_FIELDS,
                               data: c.exp_declaration_details },
     BGV: { title: FORM_TITLES.BGV, fields: BGV_FIELDS, data: c.bgv_details },
+    ONDEMAND: { title: FORM_TITLES.ONDEMAND, fields: ONDEMAND_FIELDS, data: c.ondemand_details },
   };
   Object.entries(followupConfig).forEach(([type, cfg]) => {
     const sub = c.submissions.find(s => s.form_type === type);
@@ -801,13 +815,21 @@ function render() {
     const editing = editModes[type];
     const wrap = document.createElement("div");
     wrap.id = FORM_CARD_ID[type];
-    wrap.className = "card section-card collapsed";
+    // An On-Demand form awaiting the decision opens, so HR reviews before deciding.
+    wrap.className = "card section-card"
+      + (type === "ONDEMAND" && canReview && c.stage === "CIF_SUBMITTED" ? "" : " collapsed");
     // Approve/Reject live in the title bar, beside Edit: these cards render
     // collapsed, and a decision button inside the body could only be reached
     // by opening the card first.
-    const reviewControls = canReview && !editing ? `
+    // On-Demand's Approve / Reject are the candidate decision (complete the
+    // onboarding, or close the application), so they reuse the decision buttons.
+    const reviewControls = !canReview || editing ? ""
+      : type === "ONDEMAND" ? (c.stage === "CIF_SUBMITTED" ? `
+      <button class="btn btn-success btn-small" onclick="document.getElementById('approveBtn').click()">Approve</button>
+      <button class="btn btn-danger btn-small" onclick="document.getElementById('rejectBtn').click()">Reject</button>` : "")
+      : `
       <button class="btn btn-success btn-small" onclick="reviewSubmission(${sub.id}, 'APPROVED')">Approve</button>
-      <button class="btn btn-danger btn-small" onclick="reviewSubmission(${sub.id}, 'REJECTED')">Reject</button>` : "";
+      <button class="btn btn-danger btn-small" onclick="reviewSubmission(${sub.id}, 'REJECTED')">Reject</button>`;
     // The PDF is only generated once both referees have submitted feedback.
     const pendingRefs = pendingReferees(c);
     const pdfControl = type === "REFERENCE_CHECK" && submitted && !editing && cfg.data
@@ -821,6 +843,8 @@ function render() {
         ? `<button class="btn btn-outline btn-small" onclick="downloadDeclarationPdf(this)">Download PDF</button>`
       : type === "EXPERIENCE_DECLARATION" && submitted && !editing && cfg.data
         ? `<button class="btn btn-outline btn-small" onclick="downloadExperienceDeclarationPdf(this)">Download PDF</button>`
+      : type === "ONDEMAND" && submitted && !editing && cfg.data
+        ? `<button class="btn btn-outline btn-small" onclick="downloadOnDemandPdf(this)">Download PDF</button>`
         : "";
     wrap.innerHTML = `
       <div class="section-title collapsible" onclick="toggleCollapse(this)">
@@ -873,7 +897,9 @@ function render() {
   }
 
   // ---- Zoho People publish ----
-  const zohoEligible = c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE";
+  // The Zoho maps are built from the CIF, which On-Demand Consultants never fill.
+  const zohoEligible = !onDemand
+    && (c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE");
   document.getElementById("zohoCard").classList.toggle("hidden", !zohoEligible);
   document.getElementById("zohoCandCard").classList.toggle("hidden", !zohoEligible);
   // The Reference Check is a Fresher / Trainee form only, so is its push.
@@ -1964,7 +1990,11 @@ async function sendForm(formType) {
 
 document.getElementById("approveBtn").addEventListener("click", async () => {
   if (!currentData) return;  // page never loaded — don't act on a stale id
-  if (!await showConfirm("Nothing is sent to the candidate yet — press Send on the Document "
+  if (currentData.candidate_type === "ONDEMAND") {
+    if (!await showConfirm("This approves the On-Demand Candidate form and marks the "
+        + "onboarding complete.",
+        { title: "Approve this consultant?", confirmText: "Approve" })) return;
+  } else if (!await showConfirm("Nothing is sent to the candidate yet — press Send on the Document "
       + "Collection form when you are ready. Once you approve those documents you can send "
       + "the BGV form, or finish the onboarding without it.",
       { title: "Mark this candidate as shortlisted?", confirmText: "Shortlisted" })) return;

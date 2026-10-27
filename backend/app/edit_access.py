@@ -41,6 +41,8 @@ from app.form_definitions import (
     EXP_DECLARATION_FIELDS,
     EXP_DECLARATION_FILE_FIELDS,
     EMPLOYMENT_COLUMNS,
+    ONDEMAND_FIELDS,
+    ONDEMAND_FILE_FIELDS,
     PROFILE_FIELDS,
     REF_CHECK_FIELDS,
     REF_CHECK_FILE_FIELDS,
@@ -66,13 +68,14 @@ from app.models import (
     FormStatus,
     FormSubmission,
     FormType,
+    OnDemandDetails,
     ReferenceCheckDetails,
     ReferenceDetail,
 )
 
 # The forms a candidate fills in, in sequence. Each locks on submission.
 FORMS = ("CIF", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION",
-         "EXPERIENCE_DECLARATION", "BGV")
+         "EXPERIENCE_DECLARATION", "BGV", "ONDEMAND")
 
 # Filled in by HR for their own tracking, never by the candidate — opening
 # these to the candidate would make no sense.
@@ -96,6 +99,7 @@ GRANTABLE_FIELDS: dict[str, list[str]] = {
     "REFERENCE_CHECK": list(REF_CHECK_FIELDS),
     "DECLARATION": list(DECLARATION_FIELDS),
     "EXPERIENCE_DECLARATION": list(EXP_DECLARATION_FIELDS),
+    "ONDEMAND": list(ONDEMAND_FIELDS),
 }
 
 # Uploads that may be replaced under a grant.
@@ -106,6 +110,7 @@ GRANTABLE_DOCUMENTS: dict[str, list[str]] = {
     "REFERENCE_CHECK": list(REF_CHECK_FILE_FIELDS),
     "DECLARATION": list(DECLARATION_FILE_FIELDS),
     "EXPERIENCE_DECLARATION": list(EXP_DECLARATION_FILE_FIELDS),
+    "ONDEMAND": list(ONDEMAND_FILE_FIELDS),
 }
 
 # Repeating sections: table key -> (model, editable columns, owning form,
@@ -160,6 +165,7 @@ _DETAIL_MODELS = {
     "REFERENCE_CHECK": ReferenceCheckDetails,
     "DECLARATION": DeclarationDetails,
     "EXPERIENCE_DECLARATION": ExperienceDeclarationDetails,
+    "ONDEMAND": OnDemandDetails,
 }
 
 # A storage key belongs to exactly one form the candidate fills in. Profile
@@ -172,6 +178,7 @@ OWNING_FORM = {
     "REFERENCE_CHECK": "REFERENCE_CHECK",
     "DECLARATION": "DECLARATION",
     "EXPERIENCE_DECLARATION": "EXPERIENCE_DECLARATION",
+    "ONDEMAND": "ONDEMAND",
 }
 
 
@@ -183,6 +190,7 @@ FORM_TITLES = {
     "DECLARATION": "Declaration",
     "EXPERIENCE_DECLARATION": "Declaration (Relieving / Experience Letter)",
     "BGV": "Background Verification",
+    "ONDEMAND": "On-Demand Candidate Form",
 }
 
 

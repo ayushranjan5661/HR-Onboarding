@@ -25,6 +25,7 @@ class CandidateType(str, enum.Enum):
     """Which Document Collection variant applies to this candidate."""
     EXPERIENCED = "EXPERIENCED"
     FRESHER = "FRESHER"
+    ONDEMAND = "ONDEMAND"    # On-Demand Consultant: one form, no BGV / documents flow
 
 
 class CandidateStage(str, enum.Enum):
@@ -42,6 +43,7 @@ class FormType(str, enum.Enum):
     REFERENCE_CHECK = "REFERENCE_CHECK"     # after Document Collection, before BGV
     DECLARATION = "DECLARATION"             # pending educational documents undertaking
     EXPERIENCE_DECLARATION = "EXPERIENCE_DECLARATION"   # relieving / experience letters owed
+    ONDEMAND = "ONDEMAND"                 # On-Demand Candidate form (On-Demand Consultants only)
 
 
 class FormStatus(str, enum.Enum):
@@ -203,6 +205,7 @@ class Candidate(Base):
     declaration_details = relationship("DeclarationDetails", uselist=False, cascade="all, delete-orphan")
     exp_declaration_details = relationship("ExperienceDeclarationDetails", uselist=False,
                                            cascade="all, delete-orphan")
+    ondemand_details = relationship("OnDemandDetails", uselist=False, cascade="all, delete-orphan")
     referee_feedback = relationship("RefereeFeedback", cascade="all, delete-orphan")
     education = relationship("EducationDetail", cascade="all, delete-orphan")
     employment = relationship("EmploymentDetail", cascade="all, delete-orphan")
@@ -480,6 +483,28 @@ class ExperienceDeclarationDetails(Base):
     relieving_experience_pending = Column(String(10))   # "Yes" when still owed
     declaration_accepted = Column(String(10))
     declaration_date = Column(String(20))
+
+
+class OnDemandDetails(Base):
+    """On-Demand Candidate form: contact, LinkedIn and bank details of an
+    On-Demand Consultant. Aadhaar, PAN and photo are Document rows."""
+    __tablename__ = "ondemand_details"
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id"), unique=True, nullable=False)
+
+    full_name = Column(String(150))
+    email = Column(String(255))
+    alternate_email = Column(String(255))
+    contact_number = Column(String(20))
+    alternate_number = Column(String(20))
+    linkedin_link = Column(String(500))
+    date_of_birth = Column(String(20))
+    bank_account_name = Column(String(150))
+    bank_account_number = Column(String(30))
+    bank_ifsc_code = Column(String(20))
+    bank_account_type = Column(String(20))   # Savings | Current
+    bank_branch = Column(String(150))
 
 
 class RefereeFeedback(Base):

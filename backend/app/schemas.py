@@ -96,7 +96,7 @@ class StaffAuditOut(BaseModel):
 class InviteCandidateRequest(BaseModel):
     name: str
     email: EmailStr
-    candidate_type: str = "EXPERIENCED"   # EXPERIENCED | FRESHER
+    candidate_type: str = "EXPERIENCED"   # EXPERIENCED | FRESHER | ONDEMAND
     # Who owns the candidate. Defaults to the caller; a Manager may pick one
     # of their HR Executives, the Super Admin anyone.
     assigned_hr_id: Optional[int] = None
@@ -316,6 +316,7 @@ class CandidateDetailOut(BaseModel):
     ref_check_details: Optional[dict[str, Any]] = None
     declaration_details: Optional[dict[str, Any]] = None
     exp_declaration_details: Optional[dict[str, Any]] = None
+    ondemand_details: Optional[dict[str, Any]] = None
     # One entry per named reference: its form link and, once given, the answers.
     referee_feedback: list[dict[str, Any]] = []
     education: dict[str, list[dict[str, Any]]] = {}

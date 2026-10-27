@@ -9,6 +9,7 @@ Declares which submitted field goes to which table/column.
                       -> row tables (one row per entry the candidate adds)
 - DECLARATION_FIELDS  -> declaration_details
 - EXP_DECLARATION_FIELDS -> experience_declaration_details
+- ONDEMAND_FIELDS     -> ondemand_details (On-Demand Consultants)
 - <FORM>_FILE_FIELDS  -> documents table + file on disk
 """
 
@@ -216,6 +217,19 @@ EXP_DECLARATION_FIELDS = [
 ]
 EXP_DECLARATION_OPTIONAL = {"submission_within_days"} | {key for key, _ in EXP_DECLARATION_DOCS}
 EXP_DECLARATION_FILE_FIELDS = ["exp_declaration_signature"]
+
+# --- On-Demand Candidate form (On-Demand Consultants only) ------------------
+# The only form an On-Demand Consultant fills. Uploads reuse the Document
+# Collection keys so the same document checks apply.
+ONDEMAND_FIELDS = [
+    "full_name", "email", "alternate_email", "contact_number", "alternate_number",
+    "linkedin_link", "date_of_birth",
+    "bank_account_name", "bank_account_number", "bank_ifsc_code",
+    "bank_account_type", "bank_branch",
+]
+ONDEMAND_OPTIONAL = {"alternate_email", "alternate_number", "linkedin_link"}
+ONDEMAND_ACCOUNT_TYPES = ("Savings", "Current")
+ONDEMAND_FILE_FIELDS = ["aadhar_card", "pan_card", "passport_size_photo"]
 
 # --- Document Collection: the real LevelShift form (40 uploads) -------------
 # Two variants share the same fields; only which ones are mandatory differs.
