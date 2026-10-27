@@ -82,6 +82,13 @@ const EXP_DECLARATION_FIELDS = [
   "declaration_accepted", "declaration_date",
 ];
 
+const ONDEMAND_FIELDS = [
+  "full_name", "email", "alternate_email", "contact_number", "alternate_number",
+  "linkedin_link", "date_of_birth",
+  "bank_account_name", "bank_account_number", "bank_ifsc_code",
+  "bank_account_type", "bank_branch",
+];
+
 const FORM_FILE_FIELDS = {
   CIF: ["profile_picture", "signature"],
   BGV: ["signed_consent_form", "passport_copy_bgv", "form16_last_year", "form16_previous_year", "bank_statement_salary", "police_clearance_certificate", "bgv_signature"],
@@ -122,6 +129,7 @@ const FORM_FILE_FIELDS = {
   REFERENCE_CHECK: [],
   DECLARATION: ["declaration_signature"],
   EXPERIENCE_DECLARATION: ["exp_declaration_signature"],
+  ONDEMAND: ["aadhar_card", "pan_card", "passport_size_photo"],
 };
 
 // Repeating-row tables: table name (API) -> column order for display
@@ -176,6 +184,9 @@ const FIELD_LABELS = {
   graduation_year: "Graduation Year", bank_account_number: "Bank Account Number",
   bank_ifsc_code: "Bank IFSC Code", emergency_contact_name: "Emergency Contact Name",
   emergency_contact_number: "Emergency Contact Number",
+  // On-Demand Candidate form
+  bank_account_name: "Name as per Bank", bank_account_type: "Savings / Current Account",
+  bank_branch: "Branch",
   marital_status: "Marital Status", blood_group: "Blood Group",
   position_applied_for: "Position Applied For", skills_technologies: "Skill/Technologies Worked",
   alternate_email: "Alternate E-Mail ID", linkedin_link: "LinkedIn Page Link",

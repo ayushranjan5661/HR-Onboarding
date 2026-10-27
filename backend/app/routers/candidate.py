@@ -34,6 +34,10 @@ from app.form_definitions import (
     EDUCATION_COLUMNS,
     EDUCATION_SECTIONS,
     EMPLOYMENT_COLUMNS,
+    ONDEMAND_ACCOUNT_TYPES,
+    ONDEMAND_FIELDS,
+    ONDEMAND_FILE_FIELDS,
+    ONDEMAND_OPTIONAL,
     PROFILE_FIELDS,
     REF_CHECK_FIELDS,
     REF_CHECK_FILE_FIELDS,
@@ -50,6 +54,7 @@ from app.models import (
     Candidate,
     CandidateProfile,
     CandidateStage,
+    CandidateType,
     CIFDetails,
     DeclarationDetails,
     DocCollectionDetails,
@@ -65,6 +70,7 @@ from app.models import (
     FormStatus,
     FormSubmission,
     FormType,
+    OnDemandDetails,
     ReferenceCheckDetails,
     ReferenceDetail,
 )
@@ -115,7 +121,7 @@ def my_submission(form_type: str, db: Session = Depends(get_db),
     """The candidate's own saved answers for one form, so they can edit and
     resubmit instead of filling everything in again."""
     if form_type not in ("CIF", "BGV", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION",
-                         "EXPERIENCE_DECLARATION"):
+                         "EXPERIENCE_DECLARATION", "ONDEMAND"):
         raise HTTPException(status_code=404, detail="Unknown form")
 
     out: dict = {"fields": {}, "tables": {}, "documents": []}
@@ -170,6 +176,11 @@ def my_submission(form_type: str, db: Session = Depends(get_db),
             ExperienceDeclarationDetails.candidate_id == current.id).first()
         if details:
             out["fields"] = {f: getattr(details, f) for f in EXP_DECLARATION_FIELDS}
+    elif form_type == "ONDEMAND":
+        details = db.query(OnDemandDetails).filter(
+            OnDemandDetails.candidate_id == current.id).first()
+        if details:
+            out["fields"] = {f: getattr(details, f) for f in ONDEMAND_FIELDS}
     else:
         details = db.query(DocCollectionDetails).filter(
             DocCollectionDetails.candidate_id == current.id).first()
@@ -214,6 +225,7 @@ _DRAFT_FILE_FIELDS = {
     "REFERENCE_CHECK": REF_CHECK_FILE_FIELDS,
     "DECLARATION": DECLARATION_FILE_FIELDS,
     "EXPERIENCE_DECLARATION": EXP_DECLARATION_FILE_FIELDS,
+    "ONDEMAND": ONDEMAND_FILE_FIELDS,
 }
 
 
@@ -533,6 +545,8 @@ async def submit_cif(request: Request, db: Session = Depends(get_db),
 
 
 def _submit_cif(form, db: Session, current: Candidate):
+    if current.candidate_type == CandidateType.ONDEMAND:
+        raise HTTPException(status_code=404, detail="Unknown form")
     # The CIF is a one-shot form: once submitted it is frozen, and the only
     # way a value changes afterwards is a field HR explicitly opens (see
     # /me/edit-access). That keeps the record HR reviewed from moving under
@@ -623,7 +637,79 @@ async def submit_followup_form(form_type: str, request: Request, db: Session = D
                             detail="Fill the Declaration form using the link HR sent you.")
     form = await request.form()
     # Blocking from here on (database, OCR, prefill mapping) — off the event loop.
+    if form_type == "ONDEMAND":
+        return await run_in_threadpool(_submit_ondemand, form, db, current)
     return await run_in_threadpool(_submit_followup_form, form_type, form, db, current)
+
+
+# Profile columns the On-Demand form also fills, so documents checks, Zoho and
+# the HR header read the same name / contact / bank details as for anyone else.
+_ONDEMAND_PROFILE_FIELDS = ["full_name", "email", "contact_number", "alternate_number",
+                            "date_of_birth", "bank_account_number", "bank_ifsc_code"]
+
+
+def _submit_ondemand(form, db: Session, current: Candidate):
+    """The On-Demand Candidate form: the first and only form an On-Demand
+    Consultant fills. Like the CIF it is frozen once submitted, and HR decides
+    on it with Approve / Reject."""
+    if current.candidate_type != CandidateType.ONDEMAND:
+        raise HTTPException(status_code=404, detail="Unknown form")
+    submission = db.query(FormSubmission).filter(FormSubmission.candidate_id == current.id,
+                                                   FormSubmission.form_type == FormType.ONDEMAND).first()
+    if not submission or submission.status == FormStatus.LOCKED:
+        raise HTTPException(status_code=400, detail="This form is not open for you right now.")
+    if submission.status != FormStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail="Your form has already been submitted and can no longer be edited. "
+                    "If something needs correcting, ask HR to open that field for you.")
+    if current.stage not in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
+        raise HTTPException(status_code=400,
+                             detail="Your form has already been reviewed and can no longer be edited.")
+
+    values = {f: form.get(f) for f in ONDEMAND_FIELDS if f in form}
+    _reject_invalid_dates(values)
+    missing = [f for f in ONDEMAND_FIELDS
+               if f not in ONDEMAND_OPTIONAL and not str(form.get(f) or "").strip()]
+    if missing:
+        raise HTTPException(status_code=400,
+                             detail="Please fill in every field: " + ", ".join(missing))
+    if form.get("bank_account_type") not in ONDEMAND_ACCOUNT_TYPES:
+        raise HTTPException(status_code=400, detail="Choose Savings or Current account.")
+
+    already = {d.field_key for d in db.query(Document).filter(
+        Document.candidate_id == current.id, Document.form_type == FormType.ONDEMAND).all()}
+    already |= _draft_document_fields(db, current.id, FormType.ONDEMAND)
+    provided = {k for k in ONDEMAND_FILE_FIELDS
+                if hasattr(form.get(k), "filename") and form.get(k).filename}
+    missing_docs = [k for k in ONDEMAND_FILE_FIELDS if k not in already and k not in provided]
+    if missing_docs:
+        raise HTTPException(status_code=400,
+                             detail="Missing required documents: " + ", ".join(missing_docs))
+
+    details = db.query(OnDemandDetails).filter(OnDemandDetails.candidate_id == current.id).first()
+    if not details:
+        details = OnDemandDetails(candidate_id=current.id)
+        db.add(details)
+    _apply_fields(details, form, ONDEMAND_FIELDS)
+
+    profile = db.query(CandidateProfile).filter(CandidateProfile.candidate_id == current.id).first()
+    if not profile:
+        profile = CandidateProfile(candidate_id=current.id)
+        db.add(profile)
+    _apply_fields(profile, form, _ONDEMAND_PROFILE_FIELDS)
+
+    replaced = _save_files(db, form, current, "ONDEMAND", ONDEMAND_FILE_FIELDS)
+    _promote_draft_documents(db, current.id, FormType.ONDEMAND, provided)
+    replaced += _discard_draft(db, current.id, FormType.ONDEMAND)
+
+    submission.status = FormStatus.SUBMITTED
+    submission.submitted_at = datetime.now(timezone.utc)
+    current.stage = CandidateStage.CIF_SUBMITTED   # awaiting HR's Approve / Reject
+    db.commit()
+    doc_check_queue.flush_pending(db)
+    _remove_files(replaced)
+    return {"detail": "Form submitted. HR will review your details shortly."}
 
 
 def _submit_followup_form(form_type: str, form, db: Session, current: Candidate):

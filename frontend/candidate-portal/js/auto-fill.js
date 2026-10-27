@@ -9,6 +9,7 @@ const SOURCE_NAMES = {
   DECLARATION: "your Declaration form",
   EXPERIENCE_DECLARATION: "your Declaration form",
   BGV: "your BGV form",
+  ONDEMAND: "your On-Demand Candidate form",
 };
 
 async function loadAutoFill(formType) {

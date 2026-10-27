@@ -58,15 +58,22 @@
       INVITED: "Invited", CIF_SUBMITTED: "CIF Submitted",
       APPROVED_FOR_BGV: "Cleared Final Round", ONBOARDING_COMPLETE: "Onboarding Complete",
     };
+    // On-Demand Consultants fill one form and go straight to complete.
+    const ONDEMAND_STEPS = ["INVITED", "CIF_SUBMITTED", "ONBOARDING_COMPLETE"];
+    const ONDEMAND_STEP_LABELS = { ...STEP_LABELS, CIF_SUBMITTED: "Form Submitted" };
 
     const FORM_META = {
       CIF: { title: "Candidate Information Form (CIF)", desc: "Your personal, education and identity details.", page: "cif-form.html" },
       BGV: { title: "Background Verification Form", desc: "Employment history and reference details for verification.", page: "bgv-form.html" },
       DOCUMENT_COLLECTION: { title: "Document Collection Form", desc: "Upload your ID proof, resume and other documents.", page: "document-form.html" },
       REFERENCE_CHECK: { title: "Reference Check Form", desc: "Two professional references we can contact.", page: "reference-form.html" },
+      ONDEMAND: { title: "On-Demand Candidate Form", desc: "Your contact, ID documents and bank details.", page: "ondemand-form.html" },
     };
 
-    function renderTrack(stage) {
+    function renderTrack(stage, candidateType) {
+      const onDemand = candidateType === "ONDEMAND";
+      const steps = onDemand ? ONDEMAND_STEPS : STEPS;
+      const labels = onDemand ? ONDEMAND_STEP_LABELS : STEP_LABELS;
       const track = document.getElementById("statusTrack");
       track.innerHTML = "";
       if (stage === "REJECTED") {
@@ -75,12 +82,12 @@
         track.innerHTML = `<li class="status-step blocked" data-n="!">Application Closed</li>`;
         return;
       }
-      const currentIdx = STEPS.indexOf(stage);
-      STEPS.forEach((s, i) => {
+      const currentIdx = steps.indexOf(stage);
+      steps.forEach((s, i) => {
         const li = document.createElement("li");
         li.className = "status-step " + (i < currentIdx ? "done" : i === currentIdx ? "active" : "");
         li.dataset.n = i + 1;
-        li.textContent = STEP_LABELS[s];
+        li.textContent = labels[s];
         if (i === currentIdx) li.setAttribute("aria-current", "step");
         track.appendChild(li);
       });
@@ -91,7 +98,7 @@
     }
 
     // Show the forms in the order they must be completed, not DB order.
-    const FORM_ORDER = ["CIF", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "BGV"];
+    const FORM_ORDER = ["ONDEMAND", "CIF", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "BGV"];
 
     function renderTiles(forms) {
       const container = document.getElementById("formTiles");
@@ -157,7 +164,7 @@
 
     async function load() {
       const data = await apiFetch("/candidate/me/status");
-      renderTrack(data.stage);
+      renderTrack(data.stage, data.candidate_type);
       if (data.stage !== "REJECTED") renderTiles(data.forms);
       // A failure here must not take the status page down with it.
       try {
