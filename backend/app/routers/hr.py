@@ -19,8 +19,7 @@ from app.date_format import normalize_field
 from app.form_definitions import (BGV_FIELDS, BGV_FILE_FIELDS, BGV_TABLE_SECTIONS,
                                     CIF_FIELDS, CIF_FILE_FIELDS, DECLARATION_FIELDS,
                                     DECLARATION_FILE_FIELDS, DOC_FIELDS,
-                                    DOC_FILE_FIELDS, EXP_DECLARATION_FIELDS,
-                                    EXP_DECLARATION_FILE_FIELDS, ONDEMAND_FIELDS,
+                                    DOC_FILE_FIELDS, ONDEMAND_FIELDS,
                                     ONDEMAND_FILE_FIELDS, PROFILE_FIELDS, REF_CHECK_FIELDS,
                                     REF_CHECK_FILE_FIELDS)
 from app.models import (
@@ -42,7 +41,6 @@ from app.models import (
     EditPermissionStatus,
     EducationDetail,
     EmploymentDetail,
-    ExperienceDeclarationDetails,
     FieldEditLog,
     FieldEditPermission,
     FormDraft,
@@ -230,7 +228,7 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
     db.add(candidate)
     db.flush()
     kind = {CandidateType.FRESHER: "Fresher / Trainee",
-            CandidateType.ONDEMAND: "On-Demand Consultant"}.get(candidate.candidate_type, "Experienced")
+            CandidateType.ONDEMAND: "On-Demand Consultant"}.get(candidate.candidate_type, "Permanent / Fulltime Consultant")
     staff_service.audit(db, current, "CANDIDATE_INVITED", target_type="CANDIDATE", target=candidate,
                         detail=f"Invited {candidate.email} as {kind}"
                                + (f", assigned to {owner.name}" if owner.id != current.id else ""),
@@ -366,22 +364,7 @@ def declaration_pdf(candidate_id: int, db: Session = Depends(get_db),
     if reason:
         raise HTTPException(status_code=400, detail=reason)
     pdf = declaration_service.build(candidate)
-    filename = f"Declaration Form Education Documents - {_pdf_name(candidate)}.pdf"
-    return Response(content=pdf, media_type="application/pdf",
-                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
-
-
-@router.get("/candidates/{candidate_id}/experience-declaration/pdf")
-def experience_declaration_pdf(candidate_id: int, db: Session = Depends(get_db),
-                               current: HRUser = Depends(get_current_staff)):
-    """The relieving / experience letter Declaration, as the LevelShift template."""
-    candidate = scope.get_scoped_candidate(db, candidate_id, current)
-    from app.services import declaration_pdf as declaration_service
-    reason = declaration_service.experience_not_ready_reason(candidate)
-    if reason:
-        raise HTTPException(status_code=400, detail=reason)
-    pdf = declaration_service.build_experience(candidate)
-    filename = f"Declaration Form Relieving Letter and Experience Letter - {_pdf_name(candidate)}.pdf"
+    filename = f"Declaration Form for Pending Documents - {_pdf_name(candidate)}.pdf"
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
@@ -463,7 +446,6 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
             joinedload(Candidate.bgv_details), joinedload(Candidate.doc_details),
             joinedload(Candidate.ref_check_details), joinedload(Candidate.referee_feedback),
             joinedload(Candidate.declaration_details),
-            joinedload(Candidate.exp_declaration_details),
             joinedload(Candidate.ondemand_details),
             joinedload(Candidate.education), joinedload(Candidate.employment),
             joinedload(Candidate.references),
@@ -492,8 +474,6 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         login_url=_candidate_login_url(candidate),
         declaration_url=declaration_links.form_url(candidate),
         declaration_link_expires_at=declaration_links.expires_at(candidate),
-        exp_declaration_url=declaration_links.EXPERIENCE.form_url(candidate),
-        exp_declaration_link_expires_at=declaration_links.EXPERIENCE.expires_at(candidate),
         login_page_url=_login_page_url(),
         login_link_expires_at=_link_expiry(candidate),
         profile=candidate.profile,
@@ -507,9 +487,6 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         declaration_details=(_row_dict(candidate.declaration_details, DECLARATION_FIELDS,
                                        include_id=False)
                              if candidate.declaration_details else None),
-        exp_declaration_details=(_row_dict(candidate.exp_declaration_details,
-                                           EXP_DECLARATION_FIELDS, include_id=False)
-                                 if candidate.exp_declaration_details else None),
         ondemand_details=(_row_dict(candidate.ondemand_details, ONDEMAND_FIELDS, include_id=False)
                           if candidate.ondemand_details else None),
         referee_feedback=referee_links.feedback_for_hr(candidate),
@@ -569,22 +546,6 @@ def regenerate_declaration_link(candidate_id: int, db: Session = Depends(get_db)
     return {"detail": "New Declaration link issued. The previous one no longer works.",
             "declaration_url": declaration_links.form_url(candidate),
             "declaration_link_expires_at": declaration_links.expires_at(candidate)}
-
-
-@router.post("/candidates/{candidate_id}/regenerate-experience-declaration-link")
-def regenerate_experience_declaration_link(candidate_id: int, db: Session = Depends(get_db),
-                                            current: HRUser = Depends(get_current_staff)):
-    """Issue a fresh relieving / experience letter Declaration link only."""
-    candidate = scope.get_scoped_candidate(db, candidate_id, current)
-    declaration_links.EXPERIENCE.issue(candidate)
-    db.add(FieldEditLog(candidate_id=candidate_id, form_type="ACCOUNT",
-                         field_name="exp_declaration_link_secret",
-                         old_value="(previous link revoked)", new_value="(new link issued)",
-                         action="EDIT", edited_by_hr_id=current.id))
-    db.commit()
-    return {"detail": "New Declaration link issued. The previous one no longer works.",
-            "exp_declaration_url": declaration_links.EXPERIENCE.form_url(candidate),
-            "exp_declaration_link_expires_at": declaration_links.EXPERIENCE.expires_at(candidate)}
 
 
 @router.post("/candidates/{candidate_id}/reset-password")
@@ -654,8 +615,6 @@ _DETAIL_TABLES = {
     "DOCUMENT_COLLECTION": (DocCollectionDetails, "doc_details", set(DOC_FIELDS)),
     "REFERENCE_CHECK": (ReferenceCheckDetails, "ref_check_details", set(REF_CHECK_FIELDS)),
     "DECLARATION": (DeclarationDetails, "declaration_details", set(DECLARATION_FIELDS)),
-    "EXPERIENCE_DECLARATION": (ExperienceDeclarationDetails, "exp_declaration_details",
-                               set(EXP_DECLARATION_FIELDS)),
     "ONDEMAND": (OnDemandDetails, "ondemand_details", set(ONDEMAND_FIELDS)),
 }
 
@@ -983,7 +942,7 @@ def approve_candidate(candidate_id: int, payload: DecisionRequest, db: Session =
         raise HTTPException(status_code=400, detail="Candidate is not awaiting a decision")
 
     # On-Demand Consultants have no follow-up forms: approving their one form
-    # completes onboarding.
+    # leaves only Mark Onboarding Complete (see mark_onboarding_complete).
     if candidate.candidate_type == CandidateType.ONDEMAND:
         sub = db.query(FormSubmission).filter(FormSubmission.candidate_id == candidate_id,
                                                FormSubmission.form_type == FormType.ONDEMAND).first()
@@ -991,9 +950,9 @@ def approve_candidate(candidate_id: int, payload: DecisionRequest, db: Session =
             sub.status = FormStatus.APPROVED
             sub.reviewed_at = datetime.now(timezone.utc)
             sub.reviewed_by_hr_id = current.id
-        candidate.stage = CandidateStage.ONBOARDING_COMPLETE
+        candidate.stage = CandidateStage.APPROVED_FOR_BGV
         db.commit()
-        return {"detail": "On-Demand Candidate form approved. Onboarding is complete."}
+        return {"detail": "On-Demand Candidate form approved. Mark the onboarding complete when ready."}
 
     # Mark the CIF submission reviewed + approved.
     cif = db.query(FormSubmission).filter(FormSubmission.candidate_id == candidate_id,
@@ -1008,13 +967,12 @@ def approve_candidate(candidate_id: int, payload: DecisionRequest, db: Session =
     # until HR presses Send (/candidates/{id}/forms/DOCUMENT_COLLECTION/send).
     # Reference Check waits for the documents to be approved, and BGV for the
     # Reference Check — each then needs its own Send.
-    # Reference Check is created for Fresher / Trainee candidates only; both
-    # Declarations for everyone (each sendable once the CIF is approved).
+    # Reference Check is created for Fresher / Trainee candidates only; the
+    # Declaration for everyone (sendable once the CIF is approved).
     follow_ups = ((FormType.DOCUMENT_COLLECTION, FormType.REFERENCE_CHECK,
-                   FormType.DECLARATION, FormType.EXPERIENCE_DECLARATION, FormType.BGV)
+                   FormType.DECLARATION, FormType.BGV)
                   if candidate.uses_reference_check
-                  else (FormType.DOCUMENT_COLLECTION, FormType.DECLARATION,
-                        FormType.EXPERIENCE_DECLARATION, FormType.BGV))
+                  else (FormType.DOCUMENT_COLLECTION, FormType.DECLARATION, FormType.BGV))
     for form_type in follow_ups:
         existing = db.query(FormSubmission).filter(FormSubmission.candidate_id == candidate_id,
                                                      FormSubmission.form_type == form_type).first()
@@ -1060,7 +1018,13 @@ def mark_onboarding_complete(candidate_id: int, db: Session = Depends(get_db),
     approved = {s.form_type for s in db.query(FormSubmission).filter(
         FormSubmission.candidate_id == candidate_id,
         FormSubmission.status == FormStatus.APPROVED).all()}
-    if FormType.DOCUMENT_COLLECTION not in approved:
+    # On-Demand Consultants have no documents stage: their one form is the review.
+    if candidate.candidate_type == CandidateType.ONDEMAND:
+        if FormType.ONDEMAND not in approved:
+            raise HTTPException(status_code=400,
+                                 detail="Cannot mark complete: the On-Demand Candidate form has "
+                                        "not been approved yet.")
+    elif FormType.DOCUMENT_COLLECTION not in approved:
         raise HTTPException(status_code=400,
                              detail="Cannot mark complete: the Document Collection form has "
                                     "not been approved yet.")
@@ -1219,7 +1183,7 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
         if submission.form_type == FormType.REFERENCE_CHECK:
             return {"detail": "Reference Check approved. Send the BGV form if you need it, "
                                "or mark the onboarding complete."}
-        if submission.form_type in (FormType.DECLARATION, FormType.EXPERIENCE_DECLARATION):
+        if submission.form_type == FormType.DECLARATION:
             return {"detail": "Declaration approved."}
     return {"detail": "Submission reviewed"}
 
@@ -1262,8 +1226,7 @@ def _send_blocker(form: FormType, candidate: Candidate, db: Session) -> str | No
         if candidate.stage in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
             return "Approve this candidate's CIF before sending the Declaration form."
     elif form is FormType.EXPERIENCE_DECLARATION:
-        if candidate.stage in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
-            return "Approve this candidate's CIF before sending the Declaration form."
+        return "The Relieving / Experience Letter Declaration is no longer used."
     elif form is FormType.REFERENCE_CHECK:
         if not candidate.uses_reference_check:
             return "The Reference Check is only for Fresher / Trainee candidates."
@@ -1380,7 +1343,6 @@ _FORM_FILE_FIELDS = {
     FormType.DOCUMENT_COLLECTION: set(DOC_FILE_FIELDS),
     FormType.REFERENCE_CHECK: set(REF_CHECK_FILE_FIELDS),
     FormType.DECLARATION: set(DECLARATION_FILE_FIELDS),
-    FormType.EXPERIENCE_DECLARATION: set(EXP_DECLARATION_FILE_FIELDS),
     FormType.ONDEMAND: set(ONDEMAND_FILE_FIELDS),
 }
 

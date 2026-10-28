@@ -38,8 +38,6 @@ from app.form_definitions import (
     DOC_FIELDS,
     DOC_FILE_FIELDS,
     EDUCATION_COLUMNS,
-    EXP_DECLARATION_FIELDS,
-    EXP_DECLARATION_FILE_FIELDS,
     EMPLOYMENT_COLUMNS,
     ONDEMAND_FIELDS,
     ONDEMAND_FILE_FIELDS,
@@ -74,8 +72,7 @@ from app.models import (
 )
 
 # The forms a candidate fills in, in sequence. Each locks on submission.
-FORMS = ("CIF", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION",
-         "EXPERIENCE_DECLARATION", "BGV", "ONDEMAND")
+FORMS = ("CIF", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION", "BGV", "ONDEMAND")
 
 # Filled in by HR for their own tracking, never by the candidate — opening
 # these to the candidate would make no sense.
@@ -98,7 +95,6 @@ GRANTABLE_FIELDS: dict[str, list[str]] = {
     "DOCUMENT_COLLECTION": list(DOC_FIELDS),   # uploads only — no text columns
     "REFERENCE_CHECK": list(REF_CHECK_FIELDS),
     "DECLARATION": list(DECLARATION_FIELDS),
-    "EXPERIENCE_DECLARATION": list(EXP_DECLARATION_FIELDS),
     "ONDEMAND": list(ONDEMAND_FIELDS),
 }
 
@@ -109,7 +105,6 @@ GRANTABLE_DOCUMENTS: dict[str, list[str]] = {
     "DOCUMENT_COLLECTION": list(DOC_FILE_FIELDS),
     "REFERENCE_CHECK": list(REF_CHECK_FILE_FIELDS),
     "DECLARATION": list(DECLARATION_FILE_FIELDS),
-    "EXPERIENCE_DECLARATION": list(EXP_DECLARATION_FILE_FIELDS),
     "ONDEMAND": list(ONDEMAND_FILE_FIELDS),
 }
 
@@ -164,6 +159,7 @@ _DETAIL_MODELS = {
     "DOCUMENT_COLLECTION": DocCollectionDetails,
     "REFERENCE_CHECK": ReferenceCheckDetails,
     "DECLARATION": DeclarationDetails,
+    # Retired form: kept so grants made before its removal still resolve.
     "EXPERIENCE_DECLARATION": ExperienceDeclarationDetails,
     "ONDEMAND": OnDemandDetails,
 }

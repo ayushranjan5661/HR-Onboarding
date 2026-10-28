@@ -11,6 +11,9 @@
 const DATE_FIELD_NAMES = new Set([
   "date_of_birth", "declaration_date", "passport_expiry", "from_date", "to_date",
   "reference_check_date",
+  "semester_marksheets_expected_date", "consolidated_provisional_expected_date",
+  "degree_certificate_expected_date", "pan_card_expected_date",
+  "relieving_experience_expected_date",
 ]);
 function isDateField(name) { return DATE_FIELD_NAMES.has(name); }
 

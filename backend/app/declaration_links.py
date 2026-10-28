@@ -84,10 +84,7 @@ class FormLink:
 
 EDUCATION = FormLink("declaration", "declaration_link_secret", "declaration_link_expires_at",
                      "declaration-form-portal/declaration-form.html")
-EXPERIENCE = FormLink("experience-declaration", "exp_declaration_link_secret",
-                      "exp_declaration_link_expires_at",
-                      "declaration-form-portal/experience-declaration-form.html")
-ALL = (EDUCATION, EXPERIENCE)
+ALL = (EDUCATION,)
 
 # The education Declaration predates the second form; callers use these.
 make_token = EDUCATION.make_token

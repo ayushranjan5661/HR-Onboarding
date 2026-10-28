@@ -71,15 +71,13 @@ const REF_CHECK_FIELDS = [
 ];
 
 const DECLARATION_FIELDS = [
-  "candidate_name", "submission_within_days",
+  "candidate_name",
   "semester_marksheets_pending", "consolidated_provisional_pending",
-  "degree_certificate_pending", "pan_card_pending", "pending_semesters",
-  "declaration_accepted", "declaration_date",
-];
-
-const EXP_DECLARATION_FIELDS = [
-  "candidate_name", "submission_within_days", "relieving_experience_pending",
-  "declaration_accepted", "declaration_date",
+  "degree_certificate_pending", "pan_card_pending", "relieving_experience_pending",
+  "semester_marksheets_expected_date", "consolidated_provisional_expected_date",
+  "degree_certificate_expected_date", "pan_card_expected_date",
+  "relieving_experience_expected_date",
+  "pending_semesters", "declaration_accepted", "declaration_date",
 ];
 
 const ONDEMAND_FIELDS = [
@@ -128,7 +126,6 @@ const FORM_FILE_FIELDS = {
   ],
   REFERENCE_CHECK: [],
   DECLARATION: ["declaration_signature"],
-  EXPERIENCE_DECLARATION: ["exp_declaration_signature"],
   ONDEMAND: ["aadhar_card", "pan_card", "passport_size_photo"],
 };
 
@@ -344,8 +341,12 @@ const FIELD_LABELS = {
   pan_card_pending: "PAN Card",
   pending_semesters: "Pending Semesters",
   relieving_experience_pending: "Relieving Letter and Experience Letter",
+  semester_marksheets_expected_date: "Expected Date — Semester Mark Statements",
+  consolidated_provisional_expected_date: "Expected Date — Consolidated / Provisional",
+  degree_certificate_expected_date: "Expected Date — Degree Certificate",
+  pan_card_expected_date: "Expected Date — PAN Card",
+  relieving_experience_expected_date: "Expected Date — Relieving / Experience Letter",
   declaration_signature: "Signature of the Employee",
-  exp_declaration_signature: "Signature of the Employee",
 };
 
 function labelFor(key) { return FIELD_LABELS[key] || key.replaceAll("_", " "); }

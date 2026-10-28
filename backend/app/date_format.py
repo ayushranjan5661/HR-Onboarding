@@ -22,6 +22,12 @@ DATE_FIELDS = frozenset({
     "from_date",
     "to_date",
     "reference_check_date",
+    # Declaration: expected submission date per pending document.
+    "semester_marksheets_expected_date",
+    "consolidated_provisional_expected_date",
+    "degree_certificate_expected_date",
+    "pan_card_expected_date",
+    "relieving_experience_expected_date",
 })
 
 _DAYS_IN_MONTH = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
@@ -74,6 +80,11 @@ DATE_FIELD_LABELS = {
     "from_date": "From",
     "to_date": "To",
     "reference_check_date": "Date",
+    "semester_marksheets_expected_date": "Expected Date (Semester Mark Statements)",
+    "consolidated_provisional_expected_date": "Expected Date (Consolidated / Provisional)",
+    "degree_certificate_expected_date": "Expected Date (Degree Certificate)",
+    "pan_card_expected_date": "Expected Date (PAN Card)",
+    "relieving_experience_expected_date": "Expected Date (Relieving / Experience Letter)",
 }
 
 

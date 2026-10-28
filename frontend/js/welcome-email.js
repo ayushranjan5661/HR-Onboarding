@@ -167,8 +167,8 @@ const EMAIL_TEMPLATES = {
     },
   },
   DECLARATION: {
-    label: "Declaration Form Education Documents",
-    subject: "LevelShift - Complete Your Declaration Form Education Documents",
+    label: "Declaration Form for Pending Documents",
+    subject: "LevelShift - Complete Your Declaration Form for Pending Documents",
     body: (data, name) => {
       const expiry = _fmtExpiry(data.declaration_link_expires_at);
       return [
@@ -181,32 +181,7 @@ const EMAIL_TEMPLATES = {
         `${data.declaration_url || data.login_url || "-"}`,
         ``,
         ...(expiry ? [`This link expires on ${expiry}.`, ``] : []),
-        `In the form, tick the documents pertaining to your highest qualification that you will submit later, and the number of days from the declaration of your final semester results within which you will submit them.`,
-        ``,
-        `If you face any issues, please reply to this email and our team will assist you.`,
-        ``,
-        `Regards,`,
-        `HR Team`,
-        `LevelShift`,
-      ];
-    },
-  },
-  EXPERIENCE_DECLARATION: {
-    label: "Declaration Form Relieving Letter and Experience Letter",
-    subject: "LevelShift - Complete Your Declaration Form Relieving Letter and Experience Letter",
-    body: (data, name) => {
-      const expiry = _fmtExpiry(data.exp_declaration_link_expires_at);
-      return [
-        `Dear ${name},`,
-        ``,
-        `Greetings from LevelShift!`,
-        ``,
-        `Please complete the Declaration Form for the submission of your pending documents (Relieving Letter and Experience Letter) using the link below:`,
-        ``,
-        `${data.exp_declaration_url || "-"}`,
-        ``,
-        ...(expiry ? [`This link expires on ${expiry}.`, ``] : []),
-        `By signing it, you confirm that you will produce your Relieving Letter and Experience Letter within 45 days from your date of joining.`,
+        `In the form, tick the documents that you will submit later, and give the expected date by which you will submit each of them.`,
         ``,
         `If you face any issues, please reply to this email and our team will assist you.`,
         ``,
@@ -217,10 +192,7 @@ const EMAIL_TEMPLATES = {
     },
   },
   DECLARATION_CORRECTION: _declarationCorrectionTemplate(
-    "Declaration Form Education Documents", "declaration_url", "declaration_link_expires_at"),
-  EXPERIENCE_DECLARATION_CORRECTION: _declarationCorrectionTemplate(
-    "Declaration Form Relieving Letter and Experience Letter", "exp_declaration_url",
-    "exp_declaration_link_expires_at"),
+    "Declaration Form for Pending Documents", "declaration_url", "declaration_link_expires_at"),
   REFERENCE_1: _referenceTemplate(1),
   REFERENCE_2: _referenceTemplate(2),
 };
