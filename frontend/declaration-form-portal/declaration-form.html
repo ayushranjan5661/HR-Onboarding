@@ -4,18 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#3730a3">
-<title>Declaration Form Education Documents</title>
+<title>Declaration Form for Pending Documents</title>
 <link rel="stylesheet" href="../candidate-portal/css/style.css?v=20261008a">
 <style>
   .form-card { max-width: 1000px; }
   .decl-letter { line-height: 1.6; }
-  .decl-letter .inline-days { display: inline-flex; gap: 6px; align-items: center; vertical-align: middle; }
-  .decl-letter .inline-days select, .decl-letter .inline-days input { width: auto; margin: 0; padding: 4px 8px; }
   .decl-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
   .decl-table th, .decl-table td { border: 1px solid #d1d5db; padding: 10px 12px; text-align: left; vertical-align: middle; }
   .decl-table th { background: #eef2ff; font-size: 0.85rem; }
   .decl-table td.tick { width: 130px; text-align: center; }
   .decl-table td.tick input { width: 18px; height: 18px; }
+  .decl-table td.due { width: 190px; }
+  .decl-table td.due input { margin: 0; }
   .decl-table input[name="pending_semesters"] { margin-top: 8px; }
   .done-msg { display: none; text-align: center; padding: 30px 10px; }
 </style>
@@ -27,9 +27,9 @@
 
   <div class="container">
     <div class="card form-card" style="margin-top:14px;">
-      <h2>Declaration Form for the submission of educational Documents</h2>
+      <h2>Declaration Form for the submission of Pending Documents</h2>
       <p style="color:#6b7280;font-size:0.85rem;">
-        Tell us which documents for your highest qualification you will submit later, and within how many days.
+        Tick the documents you will submit later, and give the expected date for each.
       </p>
 
       <form id="declForm" enctype="multipart/form-data">
@@ -42,27 +42,16 @@
 
         <div class="form-section decl-letter">
           <p>
-            I hereby give you assurance that I will produce all my below documents pertaining to the highest
-            qualification within
-            <span class="inline-days">
-              <select id="daysChoice" required>
-                <option value="">Select</option>
-                <option value="90">90</option>
-                <option value="180">180</option>
-                <option value="other">Other</option>
-              </select>
-              <input type="number" id="daysOther" min="1" max="730" placeholder="Days" class="hidden">
-            </span>
-            days from the declaration date of final semester results. Also, I acknowledge that failing to provide
-            the documents within the given timeframe leads to obeying the norms as per company policy.
+            I hereby give you assurance that I will produce all the documents ticked below on or before the
+            expected date stated against each. I also acknowledge that failing to provide the documents within
+            the given timeframe will lead to action as per company policy.
           </p>
-          <input type="hidden" name="submission_within_days">
         </div>
 
         <div class="form-section">
           <h3>Tick the checkbox if applicable</h3>
           <table class="decl-table">
-            <thead><tr><th>Document Name</th><th>Need to Submit</th></tr></thead>
+            <thead><tr><th>Document Name</th><th>Need to Submit</th><th>Expected Date to Submit</th></tr></thead>
             <tbody>
               <tr>
                 <td>
@@ -71,18 +60,27 @@
                     placeholder="Which semesters are pending? e.g. Semester 7, 8">
                 </td>
                 <td class="tick"><input type="checkbox" name="semester_marksheets_pending" value="Yes"></td>
+                <td class="due"><input data-date name="semester_marksheets_expected_date" disabled></td>
               </tr>
               <tr>
                 <td>Consolidated mark statement and Provisional certificate</td>
                 <td class="tick"><input type="checkbox" name="consolidated_provisional_pending" value="Yes"></td>
+                <td class="due"><input data-date name="consolidated_provisional_expected_date" disabled></td>
               </tr>
               <tr>
                 <td>Degree Certificate</td>
                 <td class="tick"><input type="checkbox" name="degree_certificate_pending" value="Yes"></td>
+                <td class="due"><input data-date name="degree_certificate_expected_date" disabled></td>
               </tr>
               <tr>
                 <td>PAN Card</td>
                 <td class="tick"><input type="checkbox" name="pan_card_pending" value="Yes"></td>
+                <td class="due"><input data-date name="pan_card_expected_date" disabled></td>
+              </tr>
+              <tr>
+                <td>Relieving Letter and Experience Letter</td>
+                <td class="tick"><input type="checkbox" name="relieving_experience_pending" value="Yes"></td>
+                <td class="due"><input data-date name="relieving_experience_expected_date" disabled></td>
               </tr>
             </tbody>
           </table>
@@ -98,8 +96,8 @@
           </div>
           <div class="checkbox-row">
             <input type="checkbox" id="decl" name="declaration_accepted" value="Yes" required>
-            <label for="decl">I confirm the above declaration and will submit the ticked documents within the
-              stated timeframe. *</label>
+            <label for="decl">I confirm the above declaration and will submit the ticked documents by the
+              stated dates. *</label>
           </div>
         </div>
 
@@ -117,34 +115,31 @@
   </div>
 
   <script src="../js/config.js?v=20261007b"></script>
-  <script src="../js/date-format.js?v=20261025a"></script>
+  <script src="../js/date-format.js?v=20261028a"></script>
   <script>
     const formEl = document.getElementById("declForm");
     const errorMsg = document.getElementById("errorMsg");
     const btn = document.getElementById("submitBtn");
-    const daysChoice = document.getElementById("daysChoice");
-    const daysOther = document.getElementById("daysOther");
-    const daysField = formEl.querySelector('[name="submission_within_days"]');
     const semBox = formEl.querySelector('[name="semester_marksheets_pending"]');
     const semInput = formEl.querySelector('[name="pending_semesters"]');
 
     // The candidate's own link: …/declaration-form.html?token=…
     const token = new URLSearchParams(location.search).get("token") || "";
 
-    // The days dropdown and "Other" box feed one hidden field, so the server
-    // only ever sees a number.
-    function syncDays() {
-      const other = daysChoice.value === "other";
-      daysOther.classList.toggle("hidden", !other);
-      daysOther.required = other;
-      daysField.value = other ? daysOther.value.trim() : daysChoice.value;
-    }
     function syncSemesters() {
       semInput.classList.toggle("hidden", !semBox.checked);
       semInput.required = semBox.checked;
     }
-    daysChoice.addEventListener("change", syncDays);
-    daysOther.addEventListener("input", syncDays);
+    // A ticked document needs its own expected date; an unticked one has none.
+    formEl.querySelectorAll(".decl-table tbody tr").forEach(row => {
+      const box = row.querySelector("input[type=checkbox]");
+      const due = row.querySelector("td.due input");
+      box.addEventListener("change", () => {
+        due.disabled = !box.checked;
+        due.required = box.checked;
+        if (!box.checked) due.value = "";
+      });
+    });
     semBox.addEventListener("change", syncSemesters);
 
     // Same buttons as the candidate portal's Document Collection form.
@@ -228,7 +223,6 @@
     formEl.addEventListener("submit", async (e) => {
       e.preventDefault();
       errorMsg.textContent = "";
-      syncDays();
       if (!formEl.querySelector(".decl-table input[type=checkbox]:checked")) {
         errorMsg.textContent = "Tick at least one document you still need to submit.";
         return;

@@ -58,9 +58,10 @@
       INVITED: "Invited", CIF_SUBMITTED: "CIF Submitted",
       APPROVED_FOR_BGV: "Cleared Final Round", ONBOARDING_COMPLETE: "Onboarding Complete",
     };
-    // On-Demand Consultants fill one form and go straight to complete.
-    const ONDEMAND_STEPS = ["INVITED", "CIF_SUBMITTED", "ONBOARDING_COMPLETE"];
-    const ONDEMAND_STEP_LABELS = { ...STEP_LABELS, CIF_SUBMITTED: "Form Submitted" };
+    // On-Demand Consultants fill one form; HR approves it, then marks complete.
+    const ONDEMAND_STEPS = ["INVITED", "CIF_SUBMITTED", "APPROVED_FOR_BGV", "ONBOARDING_COMPLETE"];
+    const ONDEMAND_STEP_LABELS = { ...STEP_LABELS, CIF_SUBMITTED: "Form Submitted",
+                                   APPROVED_FOR_BGV: "Form Approved" };
 
     const FORM_META = {
       CIF: { title: "Candidate Information Form (CIF)", desc: "Your personal, education and identity details.", page: "cif-form.html" },

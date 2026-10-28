@@ -11,27 +11,24 @@ let editAccess = { submitted: {}, grantable: {}, permissions: [] };
 // Whole-form edit mode, tracked per card and limited to one card at a time.
 // PROFILE fields are shown inside the CIF card, so they follow CIF's mode.
 const editModes = { CIF: false, DOCUMENT_COLLECTION: false, REFERENCE_CHECK: false, DECLARATION: false,
-                    EXPERIENCE_DECLARATION: false, BGV: false, ONDEMAND: false };
+                    BGV: false, ONDEMAND: false };
 
 const FORM_TITLES = {
   CIF: "Candidate Details (CIF)",
   DOCUMENT_COLLECTION: "Document Collection Form",
   REFERENCE_CHECK: "Referee Check Form",
-  DECLARATION: "Declaration Form Education Documents",
-  EXPERIENCE_DECLARATION: "Declaration Form Relieving Letter and Experience Letter",
+  DECLARATION: "Declaration Form for Pending Documents",
   BGV: "Background Verification Form",
   ONDEMAND: "On-Demand Candidate Form",
 };
 // The CIF card is static markup; the follow-up cards are built by render().
 const FORM_CARD_ID = { CIF: "cifCard", DOCUMENT_COLLECTION: "card-DOCUMENT_COLLECTION",
                        REFERENCE_CHECK: "card-REFERENCE_CHECK",
-                       DECLARATION: "card-DECLARATION",
-                       EXPERIENCE_DECLARATION: "card-EXPERIENCE_DECLARATION", BGV: "card-BGV",
+                       DECLARATION: "card-DECLARATION", BGV: "card-BGV",
                        ONDEMAND: "card-ONDEMAND" };
 const FORM_DOCS_ID = { CIF: "cifDocs", DOCUMENT_COLLECTION: "docs-DOCUMENT_COLLECTION",
                        REFERENCE_CHECK: "docs-REFERENCE_CHECK",
-                       DECLARATION: "docs-DECLARATION",
-                       EXPERIENCE_DECLARATION: "docs-EXPERIENCE_DECLARATION", BGV: "docs-BGV",
+                       DECLARATION: "docs-DECLARATION", BGV: "docs-BGV",
                        ONDEMAND: "docs-ONDEMAND" };
 const TYPE_LABELS = { FRESHER: "Fresher / Trainee", ONDEMAND: "On-Demand Consultant" };
 
@@ -227,11 +224,7 @@ async function downloadReferencePdf(btn) {
 }
 
 async function downloadDeclarationPdf(btn) {
-  return downloadPdf(btn, "declaration", "Declaration Form Education Documents.pdf");
-}
-
-async function downloadExperienceDeclarationPdf(btn) {
-  return downloadPdf(btn, "experience-declaration", "Declaration Form Relieving Letter and Experience Letter.pdf");
+  return downloadPdf(btn, "declaration", "Declaration Form for Pending Documents.pdf");
 }
 
 async function downloadDocCollectionPdf(btn) {
@@ -659,7 +652,7 @@ function render() {
     document.getElementById(id).classList.remove("hidden");
   }
   document.getElementById("candName").textContent = `${c.name} — ${c.email}`;
-  const typeLabel = TYPE_LABELS[c.candidate_type] || "Experienced";
+  const typeLabel = TYPE_LABELS[c.candidate_type] || "Permanent / Fulltime Consultant";
   // On-Demand Consultants have no CIF: their one form is a card below.
   const onDemand = c.candidate_type === "ONDEMAND";
   document.getElementById("cifCard").classList.toggle("hidden", onDemand);
@@ -698,11 +691,10 @@ function render() {
   const refsOpen = c.candidate_type === "FRESHER" && docsOpen && docSub?.status === "APPROVED";
   applyEmailDraftVisibility();
   const emailOpts = onDemand ? { templates: ["ONDEMAND"], template: "ONDEMAND" } : {
-    templates: ["CIF", ...(docsOpen ? ["DOCUMENT_COLLECTION", "DECLARATION", "EXPERIENCE_DECLARATION"] : []),
+    templates: ["CIF", ...(docsOpen ? ["DOCUMENT_COLLECTION", "DECLARATION"] : []),
                 ...(refsOpen ? ["REFERENCE_CHECK"] : []),
                 // Reopened values on a submitted Declaration go out by its link.
-                ...["DECLARATION", "EXPERIENCE_DECLARATION"]
-                  .filter(t => openEditsFor(t).length).map(t => `${t}_CORRECTION`),
+                ...(openEditsFor("DECLARATION").length ? ["DECLARATION_CORRECTION"] : []),
                 // Once the candidate has named their references, HR can mail each one.
                 ...[1, 2].filter(n => c.candidate_type === "FRESHER"
                                        && (c.ref_check_details || {})[`ref${n}_email`])
@@ -783,8 +775,6 @@ function render() {
     DOCUMENT_COLLECTION: { title: FORM_TITLES.DOCUMENT_COLLECTION, fields: DOC_FIELDS, data: c.doc_details },
     REFERENCE_CHECK: { title: FORM_TITLES.REFERENCE_CHECK, fields: REF_CHECK_FIELDS, data: c.ref_check_details },
     DECLARATION: { title: FORM_TITLES.DECLARATION, fields: DECLARATION_FIELDS, data: c.declaration_details },
-    EXPERIENCE_DECLARATION: { title: FORM_TITLES.EXPERIENCE_DECLARATION, fields: EXP_DECLARATION_FIELDS,
-                              data: c.exp_declaration_details },
     BGV: { title: FORM_TITLES.BGV, fields: BGV_FIELDS, data: c.bgv_details },
     ONDEMAND: { title: FORM_TITLES.ONDEMAND, fields: ONDEMAND_FIELDS, data: c.ondemand_details },
   };
@@ -841,8 +831,6 @@ function render() {
         ? `<button class="btn btn-outline btn-small" onclick="downloadDocCollectionPdf(this)">Download PDF</button>`
       : type === "DECLARATION" && submitted && !editing && cfg.data
         ? `<button class="btn btn-outline btn-small" onclick="downloadDeclarationPdf(this)">Download PDF</button>`
-      : type === "EXPERIENCE_DECLARATION" && submitted && !editing && cfg.data
-        ? `<button class="btn btn-outline btn-small" onclick="downloadExperienceDeclarationPdf(this)">Download PDF</button>`
       : type === "ONDEMAND" && submitted && !editing && cfg.data
         ? `<button class="btn btn-outline btn-small" onclick="downloadOnDemandPdf(this)">Download PDF</button>`
         : "";
@@ -876,7 +864,15 @@ function render() {
   // ---- Mark onboarding complete: documents approved is the only requirement ----
   // BGV is optional, so the card appears as soon as the documents pass and
   // says where BGV stands rather than waiting for it.
-  if (c.stage === "APPROVED_FOR_BGV") {
+  // On-Demand has no documents stage: an approved On-Demand form is enough.
+  if (c.stage === "APPROVED_FOR_BGV" && onDemand) {
+    const wrap = document.createElement("div");
+    wrap.className = "card section-card";
+    wrap.innerHTML = `<div class="section-title"><h3>Onboarding</h3></div>
+      <p style="color:#6b7280;">The On-Demand Candidate form is approved.</p>
+      <button class="btn btn-success" onclick="markComplete()">Mark Onboarding Complete</button>`;
+    document.getElementById("followupForms").appendChild(wrap);
+  } else if (c.stage === "APPROVED_FOR_BGV") {
     const doc = c.submissions.find(s => s.form_type === "DOCUMENT_COLLECTION");
     if (doc && doc.status === "APPROVED") {
       const bgv = c.submissions.find(s => s.form_type === "BGV");
@@ -1102,8 +1098,6 @@ function linkExpiryNote(expiresAt, lead = "") {
 const DECLARATION_LINKS = {
   DECLARATION: { url: "declaration_url", expires: "declaration_link_expires_at",
                  regenerate: "regenerate-declaration-link" },
-  EXPERIENCE_DECLARATION: { url: "exp_declaration_url", expires: "exp_declaration_link_expires_at",
-                            regenerate: "regenerate-experience-declaration-link" },
 };
 
 // Values HR has reopened on one form and the candidate has not used yet.
@@ -1143,7 +1137,7 @@ function sendGate(form, c) {
   if (c.stage === "REJECTED") {
     return { canSend: false, reason: "This application is rejected — no form can be sent." };
   }
-  if ((form === "DOCUMENT_COLLECTION" || form === "DECLARATION" || form === "EXPERIENCE_DECLARATION")
+  if ((form === "DOCUMENT_COLLECTION" || form === "DECLARATION")
       && (c.stage === "INVITED" || c.stage === "CIF_SUBMITTED")) {
     return { canSend: false, reason: "Available once you approve their CIF above." };
   }
@@ -1991,8 +1985,8 @@ async function sendForm(formType) {
 document.getElementById("approveBtn").addEventListener("click", async () => {
   if (!currentData) return;  // page never loaded — don't act on a stale id
   if (currentData.candidate_type === "ONDEMAND") {
-    if (!await showConfirm("This approves the On-Demand Candidate form and marks the "
-        + "onboarding complete.",
+    if (!await showConfirm("This approves the On-Demand Candidate form. You can then "
+        + "mark the onboarding complete.",
         { title: "Approve this consultant?", confirmText: "Approve" })) return;
   } else if (!await showConfirm("Nothing is sent to the candidate yet — press Send on the Document "
       + "Collection form when you are ready. Once you approve those documents you can send "

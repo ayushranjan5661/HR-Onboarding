@@ -107,6 +107,3 @@ def _make_router(prefix: str, links: declaration_links.FormLink, form_type: Form
 
 router = _make_router("/declaration", declaration_links.EDUCATION, FormType.DECLARATION,
                       "declaration_signature")
-# Relieving and experience letters still owed (Experienced candidates).
-experience_router = _make_router("/experience-declaration", declaration_links.EXPERIENCE,
-                                 FormType.EXPERIENCE_DECLARATION, "exp_declaration_signature")

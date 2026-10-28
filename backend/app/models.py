@@ -42,7 +42,9 @@ class FormType(str, enum.Enum):
     DOCUMENT_COLLECTION = "DOCUMENT_COLLECTION"
     REFERENCE_CHECK = "REFERENCE_CHECK"     # after Document Collection, before BGV
     DECLARATION = "DECLARATION"             # pending educational documents undertaking
-    EXPERIENCE_DECLARATION = "EXPERIENCE_DECLARATION"   # relieving / experience letters owed
+    # Retired: no longer created or shown. Kept because existing rows and the
+    # Postgres enum still carry it.
+    EXPERIENCE_DECLARATION = "EXPERIENCE_DECLARATION"
     ONDEMAND = "ONDEMAND"                 # On-Demand Candidate form (On-Demand Consultants only)
 
 
@@ -225,7 +227,8 @@ class Candidate(Base):
     @property
     def visible_submissions(self) -> list:
         return [s for s in self.submissions
-                if self.uses_reference_check or s.form_type != FormType.REFERENCE_CHECK]
+                if s.form_type != FormType.EXPERIENCE_DECLARATION
+                and (self.uses_reference_check or s.form_type != FormType.REFERENCE_CHECK)]
 
 
 class CandidateProfile(Base):
@@ -450,21 +453,27 @@ class ReferenceCheckDetails(Base):
 
 class DeclarationDetails(Base):
     """Declaration Form for the submission of educational documents: which
-    documents the candidate still owes, and within how many days of their
-    final results. One row per candidate; Experienced and Fresher alike."""
+    documents the candidate still owes, and the expected date for each. One row per candidate; Experienced and Fresher alike."""
     __tablename__ = "declaration_details"
 
     id = Column(Integer, primary_key=True, index=True)
     candidate_id = Column(Integer, ForeignKey("candidates.id"), unique=True, nullable=False)
 
     candidate_name = Column(String(150))
-    submission_within_days = Column(String(10))
+    submission_within_days = Column(String(10))   # retired: replaced by per-document dates
     # "Yes" when the document is still to be submitted, blank otherwise.
     semester_marksheets_pending = Column(String(10))
     pending_semesters = Column(String(255))
     consolidated_provisional_pending = Column(String(10))
     degree_certificate_pending = Column(String(10))
     pan_card_pending = Column(String(10))
+    relieving_experience_pending = Column(String(10))
+    # Expected submission date (DD/MM/YYYY) for each ticked document.
+    semester_marksheets_expected_date = Column(String(20))
+    consolidated_provisional_expected_date = Column(String(20))
+    degree_certificate_expected_date = Column(String(20))
+    pan_card_expected_date = Column(String(20))
+    relieving_experience_expected_date = Column(String(20))
     declaration_accepted = Column(String(10))
     declaration_date = Column(String(20))
 

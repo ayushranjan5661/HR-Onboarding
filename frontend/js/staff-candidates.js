@@ -60,7 +60,7 @@ async function initCandidatesPage(mode) {
           <input type="email" id="inviteEmail" required>
           <label>Candidate Type</label>
           <select id="inviteType">
-            <option value="EXPERIENCED">Experienced</option>
+            <option value="EXPERIENCED">Permanent / Fulltime Consultant</option>
             <option value="FRESHER">Fresher / Trainee</option>
             <option value="ONDEMAND">On-Demand Consultant</option>
           </select>

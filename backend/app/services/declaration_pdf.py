@@ -1,8 +1,7 @@
-"""Declarations for the submission of pending documents, as PDFs: the
-educational documents one, and the relieving / experience letter one.
+"""The Declaration for the submission of pending documents, as a PDF.
 
 Follows the LevelShift template letter: From / To block, the undertaking
-paragraph with the agreed number of days, the "Need to Submit" checklist and
+paragraph, the "Need to Submit" checklist with expected dates and
 the employee's signature. Drawn directly with PyMuPDF, reusing the Reference
 Check report's primitives.
 """
@@ -11,14 +10,13 @@ from typing import Optional
 
 import pymupdf
 
-from app.form_definitions import DECLARATION_DOCS, EXP_DECLARATION_DOCS
+from app.form_definitions import DECLARATION_DOCS, DECLARATION_EXPECTED_DATES
 from app.models import Candidate, FormType
 from app.services.cif_pdf import _image_stream
 from app.services.reference_pdf import (_BOLD, _INK, _LEFT, _LINE, _MUTED, _PAGE, _REG,
                                         _RIGHT, _rgb, _wrap)
 
-_TITLE = "Declaration Form for the submission of educational Documents"
-_EXP_TITLE = "Declaration Form for the submission of Pending Documents"
+_TITLE = "Declaration Form for the submission of Pending Documents"
 _ACCENT = "#312e81"
 _SIZE, _LH = 11.0, 1.5
 _LOGO_H, _LOGO_W = 44.0, 182   # certification strip: height in pt, width in layout units
@@ -45,12 +43,6 @@ _WM_GLYPHS = {
 def not_ready_reason(candidate: Candidate) -> Optional[str]:
     """Why the PDF can't be generated yet, or None when it can."""
     if not candidate.declaration_details:
-        return "The candidate has not submitted the Declaration form yet"
-    return None
-
-
-def experience_not_ready_reason(candidate: Candidate) -> Optional[str]:
-    if not candidate.exp_declaration_details:
         return "The candidate has not submitted the Declaration form yet"
     return None
 
@@ -150,38 +142,23 @@ def _draw_logos(page) -> None:
 def build(candidate: Candidate) -> bytes:
     """The declaration as PDF bytes. Caller ensures declaration_details exists."""
     d = candidate.declaration_details
-    days = d.submission_within_days or ""
-    para = ("I hereby give you assurance that I will produce all my below documents "
-            f"pertaining to the highest qualification within {days} days from the "
-            "declaration date of final semester results. Also, I acknowledge that failing "
-            "to provide the documents within the given timeframe leads to obeying the norms "
+    para = ("I hereby give you assurance that I will produce all the documents ticked below "
+            "on or before the expected date stated against each. I also acknowledge that "
+            "failing to provide the documents within the given timeframe will lead to action "
             "as per company policy.")
     docs = []
     for key, label in DECLARATION_DOCS:
-        if key == "semester_marksheets_pending" and getattr(d, key) == "Yes" and d.pending_semesters:
+        ticked = getattr(d, key) == "Yes"
+        if key == "semester_marksheets_pending" and ticked and d.pending_semesters:
             label = f"{label} - Pending: {d.pending_semesters}"
-        docs.append((label, getattr(d, key) == "Yes"))
+        expected = getattr(d, DECLARATION_EXPECTED_DATES[key]) if ticked else None
+        docs.append((label, ticked, expected or ""))
     return _render(candidate, d, _TITLE, para, docs,
                    _signature(candidate, FormType.DECLARATION, "declaration_signature"))
 
 
-def build_experience(candidate: Candidate) -> bytes:
-    """The relieving / experience letter declaration as PDF bytes. Caller
-    ensures exp_declaration_details exists."""
-    d = candidate.exp_declaration_details
-    days = d.submission_within_days or "45"
-    para = ("I hereby give you assurance that I will produce Experience letter and "
-            f"relieving letter within {days} days from the Date of joining. Also, I "
-            "acknowledge that failing to provide the documents within the given timeframe "
-            "leads to obey the norms as per company policy.")
-    docs = [(label, getattr(d, key) == "Yes") for key, label in EXP_DECLARATION_DOCS]
-    return _render(candidate, d, _EXP_TITLE, para, docs,
-                   _signature(candidate, FormType.EXPERIENCE_DECLARATION,
-                              "exp_declaration_signature"))
-
-
 def _render(candidate: Candidate, d, title: str, para: str,
-            docs: list[tuple[str, bool]], sig: Optional[bytes]) -> bytes:
+            docs: list[tuple[str, bool, str]], sig: Optional[bytes]) -> bytes:
     """The shared letter: header, title, From / To, undertaking, checklist,
     signature. d carries candidate_name and declaration_date."""
     name = d.candidate_name or candidate.name or ""
@@ -217,23 +194,29 @@ def _render(candidate: Candidate, d, title: str, para: str,
     y += 18
     text(_LEFT, y, "Tick the checkbox if applicable", _BOLD, 10, _MUTED)
     y += 10
-    col = _RIGHT - 120
+    col = _RIGHT - 200          # "Need to Submit" column
+    date_col = _RIGHT - 100     # "Expected Date" column
     head = pymupdf.Rect(_LEFT, y, _RIGHT, y + 24)
     page.draw_rect(head, color=_rgb(_INK), fill=_rgb("#eef2ff"), width=0.7)
-    page.draw_line((col, head.y0), (col, head.y1), color=_rgb(_INK), width=0.7)
+    for x in (col, date_col):
+        page.draw_line((x, head.y0), (x, head.y1), color=_rgb(_INK), width=0.7)
     text(_LEFT + 8, head.y0 + 16, "Document Name", _BOLD, 10.5)
     text(col + 8, head.y0 + 16, "Need to Submit", _BOLD, 10.5)
+    text(date_col + 8, head.y0 + 16, "Expected Date", _BOLD, 10.5)
     y = head.y1
-    for label, ticked in docs:
+    for label, ticked, expected in docs:
         lines = _wrap(label, _REG, 10.5, col - _LEFT - 16)
         h = max(26, len(lines) * 10.5 * 1.35 + 12)
         r = pymupdf.Rect(_LEFT, y, _RIGHT, y + h)
         page.draw_rect(r, color=_rgb(_INK), width=0.7)
-        page.draw_line((col, r.y0), (col, r.y1), color=_rgb(_INK), width=0.7)
+        for x in (col, date_col):
+            page.draw_line((x, r.y0), (x, r.y1), color=_rgb(_INK), width=0.7)
         for i, ln in enumerate(lines):
             text(_LEFT + 8, r.y0 + 6 + (i + 1) * 10.5 * 1.35 - 3, ln, size=10.5)
+        if expected:
+            text(date_col + 8, r.y0 + h / 2 + 3.5, expected, size=10.5)
         # Checkbox, ticked with two strokes (the base-14 fonts have no check glyph).
-        cx, cy = (col + _RIGHT) / 2, r.y0 + h / 2
+        cx, cy = (col + date_col) / 2, r.y0 + h / 2
         box = pymupdf.Rect(cx - 6, cy - 6, cx + 6, cy + 6)
         page.draw_rect(box, color=_rgb(_INK), width=0.8)
         if ticked:

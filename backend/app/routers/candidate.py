@@ -20,17 +20,13 @@ from app.form_definitions import (
     CIF_FIELDS,
     CIF_FILE_FIELDS,
     DECLARATION_DOCS,
+    DECLARATION_EXPECTED_DATES,
     DECLARATION_FIELDS,
     DECLARATION_FILE_FIELDS,
     DECLARATION_OPTIONAL,
     DOC_FIELDS,
     DOC_FILE_FIELDS,
     DOC_REQUIRED_BY_TYPE,
-    EXP_DECLARATION_DAYS,
-    EXP_DECLARATION_DOCS,
-    EXP_DECLARATION_FIELDS,
-    EXP_DECLARATION_FILE_FIELDS,
-    EXP_DECLARATION_OPTIONAL,
     EDUCATION_COLUMNS,
     EDUCATION_SECTIONS,
     EMPLOYMENT_COLUMNS,
@@ -62,7 +58,6 @@ from app.models import (
     EditPermissionStatus,
     EducationDetail,
     EmploymentDetail,
-    ExperienceDeclarationDetails,
     FieldEditLog,
     FieldEditPermission,
     FormDraft,
@@ -121,7 +116,7 @@ def my_submission(form_type: str, db: Session = Depends(get_db),
     """The candidate's own saved answers for one form, so they can edit and
     resubmit instead of filling everything in again."""
     if form_type not in ("CIF", "BGV", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION",
-                         "EXPERIENCE_DECLARATION", "ONDEMAND"):
+                         "ONDEMAND"):
         raise HTTPException(status_code=404, detail="Unknown form")
 
     out: dict = {"fields": {}, "tables": {}, "documents": []}
@@ -171,11 +166,6 @@ def my_submission(form_type: str, db: Session = Depends(get_db),
             DeclarationDetails.candidate_id == current.id).first()
         if details:
             out["fields"] = {f: getattr(details, f) for f in DECLARATION_FIELDS}
-    elif form_type == "EXPERIENCE_DECLARATION":
-        details = db.query(ExperienceDeclarationDetails).filter(
-            ExperienceDeclarationDetails.candidate_id == current.id).first()
-        if details:
-            out["fields"] = {f: getattr(details, f) for f in EXP_DECLARATION_FIELDS}
     elif form_type == "ONDEMAND":
         details = db.query(OnDemandDetails).filter(
             OnDemandDetails.candidate_id == current.id).first()
@@ -207,8 +197,7 @@ def my_prefill(form_type: str, db: Session = Depends(get_db),
     """What this form can inherit from the candidate's earlier submissions —
     matched by the cross-form mapping agent, including uploads that can be
     carried over rather than re-uploaded."""
-    if form_type not in ("DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION",
-                         "EXPERIENCE_DECLARATION", "BGV"):
+    if form_type not in ("DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION", "BGV"):
         return {"fields": {}, "documents": [], "company_labels": {}}
     return prefill_agent.build_prefill(db, current.id, form_type)
 
@@ -224,7 +213,6 @@ _DRAFT_FILE_FIELDS = {
     "DOCUMENT_COLLECTION": DOC_FILE_FIELDS,
     "REFERENCE_CHECK": REF_CHECK_FILE_FIELDS,
     "DECLARATION": DECLARATION_FILE_FIELDS,
-    "EXPERIENCE_DECLARATION": EXP_DECLARATION_FILE_FIELDS,
     "ONDEMAND": ONDEMAND_FILE_FIELDS,
 }
 
@@ -631,7 +619,7 @@ def _submit_cif(form, db: Session, current: Candidate):
 @router.post("/forms/{form_type}/submit")
 async def submit_followup_form(form_type: str, request: Request, db: Session = Depends(get_db),
                                 current: Candidate = Depends(get_current_candidate)):
-    if form_type in ("DECLARATION", "EXPERIENCE_DECLARATION"):
+    if form_type == "DECLARATION":
         # Filled only through its own link (routers/declaration.py).
         raise HTTPException(status_code=403,
                             detail="Fill the Declaration form using the link HR sent you.")
@@ -713,8 +701,7 @@ def _submit_ondemand(form, db: Session, current: Candidate):
 
 
 def _submit_followup_form(form_type: str, form, db: Session, current: Candidate):
-    if form_type not in ("BGV", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION",
-                         "EXPERIENCE_DECLARATION"):
+    if form_type not in ("BGV", "DOCUMENT_COLLECTION", "REFERENCE_CHECK", "DECLARATION"):
         raise HTTPException(status_code=404, detail="Unknown form")
     if form_type == "REFERENCE_CHECK" and not current.uses_reference_check:
         raise HTTPException(status_code=404, detail="Unknown form")
@@ -784,10 +771,6 @@ def _submit_followup_form(form_type: str, form, db: Session, current: Candidate)
         if missing:
             raise HTTPException(status_code=400,
                                  detail="Please fill in every field: " + ", ".join(missing))
-        days = str(form.get("submission_within_days") or "").strip()
-        if not days.isdigit() or not 1 <= int(days) <= 730:
-            raise HTTPException(status_code=400,
-                                 detail="Number of days must be a whole number between 1 and 730.")
         if not any(form.get(key) == "Yes" for key, _ in DECLARATION_DOCS):
             raise HTTPException(status_code=400,
                                  detail="Tick at least one document you still need to submit.")
@@ -795,6 +778,12 @@ def _submit_followup_form(form_type: str, form, db: Session, current: Candidate)
                 and not str(form.get("pending_semesters") or "").strip()):
             raise HTTPException(status_code=400,
                                  detail="Say which semesters' mark statements are pending.")
+        no_date = [label for key, label in DECLARATION_DOCS
+                   if form.get(key) == "Yes"
+                   and not str(form.get(DECLARATION_EXPECTED_DATES[key]) or "").strip()]
+        if no_date:
+            raise HTTPException(status_code=400,
+                                 detail="Enter the expected date to submit: " + ", ".join(no_date))
         if form.get("declaration_accepted") != "Yes":
             raise HTTPException(status_code=400, detail="Please accept the declaration.")
         details = db.query(DeclarationDetails).filter(
@@ -810,6 +799,9 @@ def _submit_followup_form(form_type: str, form, db: Session, current: Candidate)
                                       if f not in dict(DECLARATION_DOCS)])
         if details.semester_marksheets_pending != "Yes":
             details.pending_semesters = None
+        for key, date_key in DECLARATION_EXPECTED_DATES.items():
+            if getattr(details, key) != "Yes":
+                setattr(details, date_key, None)
         provided_decl = {k for k in DECLARATION_FILE_FIELDS
                           if hasattr(form.get(k), "filename") and form.get(k).filename}
         # The signature is required, but the CIF signature carries over when
@@ -826,45 +818,6 @@ def _submit_followup_form(form_type: str, form, db: Session, current: Candidate)
             raise HTTPException(status_code=400, detail="Please upload your signature.")
         replaced = _save_files(db, form, current, "DECLARATION", DECLARATION_FILE_FIELDS)
         _promote_draft_documents(db, current.id, FormType.DECLARATION, provided_decl)
-    elif form_type == "EXPERIENCE_DECLARATION":
-        _reject_invalid_dates({f: form.get(f) for f in EXP_DECLARATION_FIELDS if f in form})
-        missing = [f for f in EXP_DECLARATION_FIELDS
-                   if f not in EXP_DECLARATION_OPTIONAL and not str(form.get(f) or "").strip()]
-        if missing:
-            raise HTTPException(status_code=400,
-                                 detail="Please fill in every field: " + ", ".join(missing))
-        if not any(form.get(key) == "Yes" for key, _ in EXP_DECLARATION_DOCS):
-            raise HTTPException(status_code=400,
-                                 detail="Tick the documents you still need to submit.")
-        if form.get("declaration_accepted") != "Yes":
-            raise HTTPException(status_code=400, detail="Please accept the declaration.")
-        details = db.query(ExperienceDeclarationDetails).filter(
-            ExperienceDeclarationDetails.candidate_id == current.id).first()
-        if not details:
-            details = ExperienceDeclarationDetails(candidate_id=current.id)
-            db.add(details)
-        for key, _ in EXP_DECLARATION_DOCS:
-            setattr(details, key, "Yes" if form.get(key) == "Yes" else None)
-        _apply_fields(details, form, ["candidate_name", "declaration_accepted", "declaration_date"])
-        details.submission_within_days = EXP_DECLARATION_DAYS   # fixed by policy, not the candidate
-        provided_exp = {k for k in EXP_DECLARATION_FILE_FIELDS
-                         if hasattr(form.get(k), "filename") and form.get(k).filename}
-        # Signature: as on the education Declaration, the CIF one carries over.
-        has_signature = (
-            provided_exp
-            or db.query(Document).filter(Document.candidate_id == current.id,
-                                         Document.form_type == FormType.EXPERIENCE_DECLARATION,
-                                         Document.field_key == "exp_declaration_signature").first()
-            or "exp_declaration_signature" in _draft_document_fields(
-                db, current.id, FormType.EXPERIENCE_DECLARATION)
-            or any(d["target_field"] == "exp_declaration_signature" and d.get("available", True)
-                   for d in prefill_agent.build_prefill(db, current.id,
-                                                        "EXPERIENCE_DECLARATION")["documents"]))
-        if not has_signature:
-            raise HTTPException(status_code=400, detail="Please upload your signature.")
-        replaced = _save_files(db, form, current, "EXPERIENCE_DECLARATION",
-                               EXP_DECLARATION_FILE_FIELDS)
-        _promote_draft_documents(db, current.id, FormType.EXPERIENCE_DECLARATION, provided_exp)
     else:
         details = db.query(DocCollectionDetails).filter(DocCollectionDetails.candidate_id == current.id).first()
         if not details:
@@ -901,8 +854,7 @@ def _submit_followup_form(form_type: str, form, db: Session, current: Candidate)
     # Anything the candidate already gave us on an earlier form and did not
     # re-upload here is copied across automatically.
     file_fields = {"BGV": BGV_FILE_FIELDS, "REFERENCE_CHECK": REF_CHECK_FILE_FIELDS,
-                   "DECLARATION": DECLARATION_FILE_FIELDS,
-                   "EXPERIENCE_DECLARATION": EXP_DECLARATION_FILE_FIELDS}.get(form_type, DOC_FILE_FIELDS)
+                   "DECLARATION": DECLARATION_FILE_FIELDS}.get(form_type, DOC_FILE_FIELDS)
     provided = {k for k in file_fields
                  if hasattr(form.get(k), "filename") and form.get(k).filename}
     carried = prefill_agent.carry_documents(db, current.id, form_type, provided)

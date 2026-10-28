@@ -302,8 +302,6 @@ class CandidateDetailOut(BaseModel):
     login_url: Optional[str] = None
     declaration_url: Optional[str] = None   # opens the Declaration form directly
     declaration_link_expires_at: Optional[datetime] = None
-    exp_declaration_url: Optional[str] = None   # relieving / experience letter Declaration
-    exp_declaration_link_expires_at: Optional[datetime] = None
     login_page_url: Optional[str] = None
     login_link_expires_at: Optional[datetime] = None
     profile: Optional[CandidateProfileOut] = None
@@ -315,7 +313,6 @@ class CandidateDetailOut(BaseModel):
     doc_details: Optional[dict[str, Any]] = None
     ref_check_details: Optional[dict[str, Any]] = None
     declaration_details: Optional[dict[str, Any]] = None
-    exp_declaration_details: Optional[dict[str, Any]] = None
     ondemand_details: Optional[dict[str, Any]] = None
     # One entry per named reference: its form link and, once given, the answers.
     referee_feedback: list[dict[str, Any]] = []

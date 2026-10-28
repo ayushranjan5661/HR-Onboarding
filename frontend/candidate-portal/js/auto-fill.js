@@ -7,7 +7,6 @@ const SOURCE_NAMES = {
   DOCUMENT_COLLECTION: "your Document Collection form",
   REFERENCE_CHECK: "your Reference Check form",
   DECLARATION: "your Declaration form",
-  EXPERIENCE_DECLARATION: "your Declaration form",
   BGV: "your BGV form",
   ONDEMAND: "your On-Demand Candidate form",
 };

@@ -30,7 +30,6 @@ app.include_router(admin.router)
 app.include_router(candidate.router)
 app.include_router(referee.router)
 app.include_router(declaration.router)
-app.include_router(declaration.experience_router)
 
 
 @app.get("/")
