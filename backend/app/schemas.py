@@ -116,6 +116,7 @@ class CandidateListItem(BaseModel):
     name: str
     email: str
     stage: str
+    candidate_type: str = "EXPERIENCED"   # EXPERIENCED | FRESHER | ONDEMAND
     created_at: datetime
     assigned_hr_id: Optional[int] = None
     assigned_hr_name: Optional[str] = None
@@ -333,6 +334,14 @@ class CandidateDetailOut(BaseModel):
     zoho_ref_status: Optional[str] = None
     zoho_ref_synced_at: Optional[datetime] = None
     zoho_ref_last_error: Optional[str] = None
+    zoho_decl_record_id: Optional[str] = None
+    zoho_decl_status: Optional[str] = None
+    zoho_decl_synced_at: Optional[datetime] = None
+    zoho_decl_last_error: Optional[str] = None
+    zoho_od_record_id: Optional[str] = None
+    zoho_od_status: Optional[str] = None
+    zoho_od_synced_at: Optional[datetime] = None
+    zoho_od_last_error: Optional[str] = None
 
     class Config:
         from_attributes = True

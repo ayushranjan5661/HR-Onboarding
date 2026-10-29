@@ -129,6 +129,10 @@ class Settings(BaseSettings):
     # PDF into this form's Reference_check file field ("Documents Collection -
     # Trainee"). Blank keeps that button refusing.
     ZOHO_REFERENCE_CHECK_WRITE_FORM: str = "documents_collection_trainee"
+    # The "Publish Declaration" button writes the Declaration form's pending
+    # documents into this form ("New Joiner Documents Track"). Blank keeps it refusing.
+    ZOHO_DECLARATION_WRITE_FORM: str = "Referral_Bonus"
+    ZOHO_ONDEMAND_WRITE_FORM: str = "consultant_tracker"
     ZOHO_TIMEOUT: int = 30
 
     # --- File uploads ---

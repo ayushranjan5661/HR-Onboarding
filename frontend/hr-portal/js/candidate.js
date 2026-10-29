@@ -901,11 +901,16 @@ function render() {
   // The Reference Check is a Fresher / Trainee form only, so is its push.
   const refPushEligible = zohoEligible && c.candidate_type === "FRESHER";
   document.getElementById("zohoRefCard").classList.toggle("hidden", !refPushEligible);
+  document.getElementById("zohoDeclCard").classList.toggle("hidden", !zohoEligible);
   if (zohoEligible) {
     renderZoho(c, "confirmation");
     renderZoho(c, "candidate");
     if (refPushEligible) renderZoho(c, "reference");
+    renderZoho(c, "declaration");
   }
+  // On-Demand Consultants go to Zoho's Consultant Tracker instead.
+  document.getElementById("zohoOdCard").classList.toggle("hidden", !onDemand);
+  if (onDemand) renderZoho(c, "ondemand");
 
   // Edit-mode date cells are rebuilt on every render, so re-wire them here.
   attachDateInputs();
@@ -928,6 +933,23 @@ const ZOHO_TARGETS = {
     path: "zoho/reference-check/push", label: "Zoho Referee Check Form",
     confirmNew: "Upload the Referee Check PDF to this candidate's Zoho Documents Collection record?",
     confirmAgain: "Replace the Referee Check PDF in Zoho with a freshly generated one?",
+  },
+  // Declaration's pending documents into Zoho's "New Joiner Documents Track".
+  declaration: {
+    prefix: "zoho_decl_", bodyId: "zohoDeclBody", btnId: "zohoDeclPushBtn",
+    path: "zoho/declaration/push", label: "Zoho New Joiner Documents Track",
+    confirmNew: "Create this candidate's Zoho New Joiner Documents Track record from their "
+      + "Declaration form? Pending documents go in as Required, with their expected dates "
+      + "and the Declaration PDF.",
+    confirmAgain: "Update the Zoho New Joiner Documents Track record with the latest Declaration?",
+  },
+  // On-Demand Candidate form into Zoho's Consultant Tracker, as a draft.
+  ondemand: {
+    prefix: "zoho_od_", bodyId: "zohoOdBody", btnId: "zohoOdPushBtn",
+    path: "zoho/ondemand/push", label: "Zoho Consultant Tracker",
+    confirmNew: "Create a Zoho Consultant Tracker draft from this On-Demand Candidate form, "
+      + "with the Aadhar, PAN and photo uploads?",
+    confirmAgain: "Update the Zoho Consultant Tracker record with the latest On-Demand form?",
   },
 };
 
@@ -956,14 +978,19 @@ function renderZoho(c, target) {
     : "";
   // The Referee Check PDF only exists once both referees have submitted.
   const pendingRefs = target === "reference" ? pendingReferees(c) : [];
+  // The Declaration push needs the candidate's submitted Declaration.
+  const noDecl = (target === "declaration" && !c.declaration_details)
+    || (target === "ondemand" && !c.ondemand_details);
   const waitLine = pendingRefs.length
     ? `<p style="color:#92400e;font-size:0.85rem;">Waiting for ${pendingRefs.map(n => `Referee ${n}`).join(" and ")} `
       + "to submit feedback — the PDF is generated once both have.</p>"
-    : "";
+    : noDecl
+      ? `<p style="color:#92400e;font-size:0.85rem;">Waiting for the candidate to submit the ${target === "ondemand" ? "On-Demand Candidate" : "Declaration"} form.</p>`
+      : "";
   document.getElementById(t.bodyId).innerHTML = `
     <p style="color:#6b7280;font-size:0.88rem;">${statusLine}</p>
     ${errorLine}${waitLine}
-    <button class="btn btn-primary" id="${t.btnId}" onclick="pushToZoho('${target}')"${pendingRefs.length ? " disabled" : ""}>
+    <button class="btn btn-primary" id="${t.btnId}" onclick="pushToZoho('${target}')"${pendingRefs.length || noDecl ? " disabled" : ""}>
       ${pushed ? `Re-sync to ${t.label}` : `Publish to ${t.label}`}
     </button>`;
 }

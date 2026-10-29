@@ -36,6 +36,9 @@ async function initCandidatesPage(mode) {
         <option value="DOCS_SUBMITTED">Docs submitted</option>
         <option value="ONBOARDING_COMPLETE">Onboarding complete</option>
         <option value="REJECTED">Rejected</option>
+        <option value="TYPE:FRESHER">Fresher / Trainee</option>
+        <option value="TYPE:EXPERIENCED">Permanent / Fulltime</option>
+        <option value="TYPE:ONDEMAND">On-Demand</option>
       </select>
     </div>
 
@@ -121,7 +124,10 @@ async function initCandidatesPage(mode) {
     const stage = document.getElementById("stageFilter").value;
     const mgr = isAdmin ? document.getElementById("managerFilter").value : "";
     // Not a candidate stage: the Document Collection form is in, waiting on HR.
-    const matchesStage = c => stage === "DOCS_SUBMITTED"
+    // "TYPE:..." entries filter by candidate type rather than stage.
+    const matchesStage = c => stage.startsWith("TYPE:")
+      ? c.candidate_type === stage.slice(5)
+      : stage === "DOCS_SUBMITTED"
       ? c.stage === "APPROVED_FOR_BGV" && ["SUBMITTED", "UNDER_REVIEW"].includes(c.doc_status)
       : c.stage === stage;
     return candidates.filter(c =>
@@ -177,7 +183,6 @@ async function initCandidatesPage(mode) {
     document.getElementById(id).addEventListener("input", render);
     document.getElementById(id).addEventListener("change", render);
   });
-
   // --- actions ----------------------------------------------------------------
   async function reassign(candidateId, newOwnerId, sel) {
     const c = candidates.find(x => x.id === candidateId);
