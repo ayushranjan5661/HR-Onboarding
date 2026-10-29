@@ -430,7 +430,7 @@ def list_candidates(db: Session = Depends(get_db), current: HRUser = Depends(get
         FormSubmission.candidate_id.in_([c.id for c in rows]),
         FormSubmission.form_type == FormType.DOCUMENT_COLLECTION).all()) if rows else {}
     return [CandidateListItem(id=c.id, name=c.name, email=c.email, stage=c.stage.value,
-                              created_at=c.created_at,
+                              candidate_type=c.candidate_type.value, created_at=c.created_at,
                               doc_status=doc_status[c.id].value if c.id in doc_status else None,
                               **owners.get(c.assigned_hr_id, {}))
             for c in rows]
@@ -512,6 +512,14 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         zoho_ref_status=candidate.zoho_ref_status,
         zoho_ref_synced_at=candidate.zoho_ref_synced_at,
         zoho_ref_last_error=candidate.zoho_ref_last_error,
+        zoho_decl_record_id=candidate.zoho_decl_record_id,
+        zoho_decl_status=candidate.zoho_decl_status,
+        zoho_decl_synced_at=candidate.zoho_decl_synced_at,
+        zoho_decl_last_error=candidate.zoho_decl_last_error,
+        zoho_od_record_id=candidate.zoho_od_record_id,
+        zoho_od_status=candidate.zoho_od_status,
+        zoho_od_synced_at=candidate.zoho_od_synced_at,
+        zoho_od_last_error=candidate.zoho_od_last_error,
     )
 
 
@@ -1127,6 +1135,65 @@ def push_reference_check_to_zoho(candidate_id: int, db: Session = Depends(get_db
     verb = "Created" if result["created"] else "Updated"
     return {"detail": f"{verb} Zoho Documents Collection record {result['record_id']} "
                       "with the Referee Check PDF.", **result}
+
+
+@router.post("/candidates/{candidate_id}/zoho/declaration/push")
+def push_declaration_to_zoho(candidate_id: int, db: Session = Depends(get_db),
+                             current: HRUser = Depends(get_current_staff)):
+    """Write the Declaration form's pending documents (status, expected date,
+    Declaration PDF) into Zoho's "New Joiner Documents Track" form. Tracked in
+    zoho_decl_* columns."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    if candidate.stage not in _ZOHO_PUSH_STAGES:
+        raise HTTPException(
+            status_code=400,
+            detail="Only candidates approved for BGV, or fully onboarded, can be "
+                    "published to Zoho People.")
+    try:
+        result = zoho_push.push_declaration(candidate)
+    except zoho_push.ZohoPushError as exc:
+        candidate.zoho_decl_last_error = str(exc)[:2000]
+        db.commit()
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    candidate.zoho_decl_record_id = result["record_id"]
+    candidate.zoho_decl_status = result["status"]
+    candidate.zoho_decl_synced_at = datetime.now(timezone.utc)
+    candidate.zoho_decl_last_error = None
+    db.commit()
+    verb = "Created" if result["created"] else "Updated"
+    note = ("" if result["employee_linked"] else
+            " Employee Name is left empty because the candidate is not a Zoho employee yet "
+            "(they are named in Comments); re-sync once they are to fill it in.")
+    return {"detail": f"{verb} Zoho New Joiner Documents Track record {result['record_id']} "
+                      f"from the Declaration form.{note}", **result}
+
+
+@router.post("/candidates/{candidate_id}/zoho/ondemand/push")
+def push_ondemand_to_zoho(candidate_id: int, db: Session = Depends(get_db),
+                          current: HRUser = Depends(get_current_staff)):
+    """Write the On-Demand Candidate form (details plus Aadhaar / PAN / photo)
+    into Zoho's Consultant Tracker as a draft. Tracked in zoho_od_* columns."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    if candidate.candidate_type.value != "ONDEMAND":
+        raise HTTPException(status_code=400,
+                            detail="Only On-Demand Consultants go to the Zoho Consultant Tracker.")
+    try:
+        result = zoho_push.push_ondemand(candidate)
+    except zoho_push.ZohoPushError as exc:
+        candidate.zoho_od_last_error = str(exc)[:2000]
+        db.commit()
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    candidate.zoho_od_record_id = result["record_id"]
+    candidate.zoho_od_status = result["status"]
+    candidate.zoho_od_synced_at = datetime.now(timezone.utc)
+    candidate.zoho_od_last_error = None
+    db.commit()
+    verb = "Created" if result["created"] else "Updated"
+    return {"detail": f"{verb} Zoho Consultant Tracker draft {result['record_id']} from the "
+                      "On-Demand Candidate form. Complete the remaining mandatory fields "
+                      "in Zoho and submit it there.", **result}
 
 
 # ---------------------------------------------------------------------------

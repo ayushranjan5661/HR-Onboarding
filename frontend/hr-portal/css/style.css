@@ -947,8 +947,7 @@ table .edit-input { min-width: 120px; margin: 0; padding: 6px 8px; font-size: 0.
 .row-actions .btn-small { padding: 5px 10px; font-size: 0.76rem; }
 .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
 .filters .search-input { flex: 1; min-width: 220px; }
-.filters select { padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; font-size: 0.86rem; }
-.section-gap { margin-top: 22px; }
+.filters select { padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; font-size: 0.86rem; }.section-gap { margin-top: 22px; }
 .temp-pass { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem;
   background: var(--warn-bg); color: var(--warn); padding: 2px 6px; border-radius: 4px; }
 .pending-tag { color: var(--warn); font-size: 0.75rem; font-weight: 600; }

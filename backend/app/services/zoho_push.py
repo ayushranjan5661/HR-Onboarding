@@ -121,11 +121,17 @@ def push_candidate(db: Session, candidate: Candidate, target: str = "confirmatio
         except _zc.ZohoError as exc:
             raise ZohoPushError(
                 f"Duplicate check against Zoho failed, refusing to insert: {exc}") from exc
-        if existing:
+        if len(existing) > 1:
             raise ZohoPushError(
-                f"A Zoho record for {email} already exists on '{form}' that this candidate "
-                "is not linked to. Resolve it in Zoho first (or link it via the CLI's "
-                "--record-id) before publishing from here.")
+                f"{len(existing)} records for {email} already exist on '{form}'. "
+                "Remove the duplicates in Zoho first, then publish again.")
+        if existing:
+            # The record Zoho already has for this email is this candidate's:
+            # link it and overwrite it below (its table rows are replaced too).
+            record_id = _hit_id(existing[0])
+            if not record_id:
+                raise ZohoPushError(f"Could not read the id of the existing Zoho record: "
+                                    f"{str(existing[0])[:400]}")
 
     # Tabular columns in inputData always APPEND rows, so a re-sync would
     # duplicate every table. For sections the map marks with a section id,
@@ -290,3 +296,309 @@ def push_reference_check(candidate: Candidate) -> dict:
     if not new_id:
         raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
     return {"record_id": new_id, "status": "SYNCED", "created": not record_id}
+
+
+# "New Joiner Documents Track" (form API name Referral_Bonus). Each document
+# has a status picklist and a submission date. Its upload fields
+# are left empty: the Declaration attaches no documents.
+# Employee Name (Referrer_Name) is a lookup into P_Employee: it takes the
+# employee's record id, never a name (a name fails with 7016).
+DECL_NAME_FIELD = "Referrer_Name"
+EMPLOYEE_FORM = "P_Employee"
+EMPLOYEE_EMAIL_FIELDS = ("EmailID", "Other_Email")    # official, personal
+DECL_COMMENT_FIELD = "comments"     # names the candidate while Employee Name is empty
+# Declaration key prefix -> (status field, date field)
+DECL_DOCS = {
+    "semester_marksheets": ("individual_semester_mark_stateme",
+                            "individual_semester_mark_statement_submission_date"),
+    "consolidated_provisional": ("consolidated_mark_statement_and_provisional_certificate",
+                                 "consolidated_mark_provisional_certificate_submission_date"),
+    "degree_certificate": ("degree_certific", "degree_certificate_submission_date"),
+    "pan_card": ("pan_card", "pan_card_submission_date"),
+    "relieving_experience": ("relieving_letter", "relieving_letter_submission_date"),
+}
+
+
+def _zoho_date(value) -> str:
+    """DD/MM/YYYY (the portal's format) -> Zoho's dd-MMM-yyyy; blank stays blank."""
+    from datetime import datetime
+    text = str(value or "").strip()
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).strftime("%d-%b-%Y")
+        except ValueError:
+            continue
+    return text
+
+
+def declaration_payload(candidate: Candidate) -> dict:
+    """Zoho inputData for the Declaration. A ticked document is "Required"
+    with its expected date; an unticked one is not sent, so Zoho shows
+    "-Select-". The picklist has only Required/Submitted and ignores "", so a
+    re-push cannot clear an old status. The relieving letter applies to
+    Experienced hires only, and either Declaration can mark it pending."""
+    d = candidate.declaration_details
+    exp = candidate.exp_declaration_details
+    payload = {}
+    for key, (status_f, date_f) in DECL_DOCS.items():
+        pending = (getattr(d, f"{key}_pending") or "") == "Yes"
+        if key == "relieving_experience":
+            pending = pending or (exp is not None and exp.relieving_experience_pending == "Yes")
+        if pending:
+            payload[status_f] = "Required"
+            date = _zoho_date(getattr(d, f"{key}_expected_date"))
+            if date:
+                payload[date_f] = date
+    return payload
+
+
+def _hit_id(hit) -> str:
+    """getRecords keys each hit by its record id: {"<id>": [{fields}]}."""
+    return next((str(k) for k in (hit if isinstance(hit, dict) else {}) if str(k).isdigit()), "")
+
+
+def _candidate_emails(candidate: Candidate) -> list[str]:
+    """Every email the candidate is known by, official one first."""
+    cif = candidate.cif_details
+    emails = [cif.hr_candidate_email if cif else None, candidate.email,
+              candidate.profile.email if candidate.profile else None]
+    return list(dict.fromkeys(e.strip() for e in emails if e and e.strip()))
+
+
+def _employee_record_id(token, candidate: Candidate) -> str:
+    """The candidate's Zoho employee record id, found by email, or "" when
+    they are not a Zoho employee yet. A lookup failure aborts the push."""
+    emails = _candidate_emails(candidate)
+    if not emails:
+        raise ZohoPushError("Candidate has no email on record to find their Zoho employee by.")
+    for email in emails:
+        for field in EMPLOYEE_EMAIL_FIELDS:
+            try:
+                hits = _zc.find_by_email(token, EMPLOYEE_FORM, email, field)
+            except _zc.ZohoUnreachable as exc:
+                raise ZohoPushError(_network_message(exc)) from exc
+            except _zc.ZohoError as exc:
+                raise ZohoPushError(f"Could not look up the Zoho employee: {exc}") from exc
+            if len(hits) > 1:
+                raise ZohoPushError(f"{len(hits)} Zoho employees have the email {email}; "
+                                    "fix the duplicates in Zoho, then publish again.")
+            if hits and _hit_id(hits[0]):
+                return _hit_id(hits[0])
+    return ""
+
+
+def push_declaration(candidate: Candidate) -> dict:
+    """Write the Declaration into ZOHO_DECLARATION_WRITE_FORM: one status /
+    expected date per document, no uploads. The first push inserts; later pushes update the linked record.
+    Returns {"record_id", "status", "created"}; raises ZohoPushError."""
+    form = settings.ZOHO_DECLARATION_WRITE_FORM
+    if not form:
+        raise ZohoPushError("Zoho push is not configured: set "
+                            "ZOHO_DECLARATION_WRITE_FORM in .env.")
+    from app.services import declaration_pdf
+    reason = declaration_pdf.not_ready_reason(candidate)
+    if reason:
+        raise ZohoPushError(reason)
+
+    payload = declaration_payload(candidate)
+
+    try:
+        token = _zc.access_token(force=True)
+    except _zc.ZohoUnreachable as exc:
+        raise ZohoPushError(_network_message(exc)) from exc
+    except _zc.ZohoError as exc:
+        raise ZohoPushError(f"Could not authenticate with Zoho: {exc}") from exc
+
+    # New joiners are often not Zoho employees yet. Employee Name is optional
+    # on the form, so the record is written without it and named in Comments;
+    # a re-sync once the employee exists fills Employee Name in.
+    employee_id = _employee_record_id(token, candidate)
+    if employee_id:
+        payload[DECL_NAME_FIELD] = employee_id
+    else:
+        emails = _candidate_emails(candidate)
+        payload[DECL_COMMENT_FIELD] = (
+            f"Candidate: {candidate.name or ''}{f' ({emails[0]})' if emails else ''}. "
+            "Not yet a Zoho employee; Employee Name is set on re-sync once they are.")
+
+    # A tracker record already on this employee is theirs, so it is updated
+    # rather than duplicated; more than one needs sorting out in Zoho first.
+    record_id = candidate.zoho_decl_record_id
+    if not record_id and employee_id:
+        try:
+            existing = _zc.find_by_email(token, form, employee_id, DECL_NAME_FIELD)
+        except _zc.ZohoUnreachable as exc:
+            raise ZohoPushError(_network_message(exc)) from exc
+        except _zc.ZohoError as exc:
+            raise ZohoPushError(
+                f"Duplicate check against Zoho failed, refusing to insert: {exc}") from exc
+        if len(existing) > 1:
+            raise ZohoPushError(
+                f"{len(existing)} records for this employee already exist on '{form}'. "
+                "Remove the duplicates in Zoho first, then publish again.")
+        if existing:
+            record_id = _hit_id(existing[0])
+            if not record_id:
+                raise ZohoPushError(f"Could not read the id of the existing Zoho record: "
+                                    f"{str(existing[0])[:400]}")
+
+    _zc.log("push.request", source="hr-portal", target="declaration", form=form,
+            candidate_id=candidate.id, record_id=record_id, fields=len(payload))
+    try:
+        response = (_zc.update_record(token, form, record_id, payload)
+                    if record_id
+                    else _zc.insert_record(token, form, payload))
+    except _zc.ZohoUnreachable as exc:
+        _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
+                reason="unreachable", message=str(exc))
+        raise ZohoPushError(_network_message(exc)) from exc
+    except _zc.ZohoError as exc:
+        _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
+                message=str(exc))
+        raise ZohoPushError(f"Zoho rejected the push: {exc}") from exc
+
+    _zc.log("push.response", source="hr-portal", form=form, candidate_id=candidate.id,
+            response=response)
+    if _zc.has_errors(response):
+        raise ZohoPushError(f"Zoho reported an error: {str(response)[:600]}")
+
+    new_id = record_id or _zc.record_id_from(response)
+    if not new_id:
+        raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
+    return {"record_id": new_id, "status": "SYNCED", "created": not record_id,
+            "employee_linked": bool(employee_id)}
+
+
+# "Consultant Tracker" (form API name consultant_tracker). The On-Demand form
+# answers only a few of its fields; the rest (department, manager, agreement,
+# SOW/NDA/MSA...) are mandatory there, so the record is written as a DRAFT
+# for HR to complete in Zoho. Matched on Consultant_Email.
+OD_EMAIL_FIELD = "Consultant_Email"
+OD_CONSULTANT_TYPE = "On - Demand Consultant"
+OD_COMMENT_FIELD = "Comments_Notes"      # answers the form has no field for
+# On-Demand document key -> Zoho upload field
+OD_FILES = {"aadhar_card": "Aadhar_Card", "pan_card": "Pan_Card",
+            "passport_size_photo": "Passport_Size_Photo"}
+
+
+def ondemand_payload(candidate: Candidate) -> dict:
+    """Zoho inputData for the On-Demand Candidate form."""
+    od = candidate.ondemand_details
+    first, _, last = (od.full_name or candidate.name or "").strip().partition(" ")
+    payload = {
+        "First_Name": first,
+        "Last_Name": last.strip() or first,     # mandatory; single names repeat
+        OD_EMAIL_FIELD: od.email or "",
+        "Personal_Email_ID": od.email or "",
+        "Contact_Number": "".join(ch for ch in od.contact_number or "" if ch.isdigit()),
+        "Consultant_Type": OD_CONSULTANT_TYPE,
+        "Name_as_in_the_Bank_account": od.bank_account_name or "",
+        "Account_Number": od.bank_account_number or "",
+        "Bank_Name": od.bank_name or "",
+        "IFSC_Code": od.bank_ifsc_code or "",
+    }
+    account_type = (od.bank_account_type or "").strip().lower()
+    if account_type.startswith("sav"):
+        payload["Account_Type"] = "Savings"
+    elif account_type.startswith("cur"):
+        payload["Account_Type"] = "Current"
+    notes = [f"{label}: {value}" for label, value in (
+        ("Alternate Email", od.alternate_email), ("Alternate Contact Number", od.alternate_number),
+        ("LinkedIn", od.linkedin_link), ("Date of Birth", od.date_of_birth),
+        ("Bank Branch", od.bank_branch)) if value]
+    if notes:
+        payload[OD_COMMENT_FIELD] = "\n".join(notes)
+    return {k: v for k, v in payload.items() if v}
+
+
+def push_ondemand(candidate: Candidate) -> dict:
+    """Write the On-Demand Candidate form, with its Aadhaar / PAN / photo
+    uploads, into ZOHO_ONDEMAND_WRITE_FORM as a draft. Updates the record
+    already linked to this candidate, else the one Zoho has for their email,
+    else inserts one. Returns {"record_id", "status", "created"}; raises
+    ZohoPushError."""
+    form = settings.ZOHO_ONDEMAND_WRITE_FORM
+    if not form:
+        raise ZohoPushError("Zoho push is not configured: set "
+                            "ZOHO_ONDEMAND_WRITE_FORM in .env.")
+    from app.models import FormType
+    from app.services import ondemand_pdf
+    from app.utils.file_storage import upload_path
+    reason = ondemand_pdf.not_ready_reason(candidate)
+    if reason:
+        raise ZohoPushError(reason)
+    payload = ondemand_payload(candidate)
+    email = payload.get(OD_EMAIL_FIELD) or candidate.email or ""
+    if not email:
+        raise ZohoPushError("Candidate has no email on record — Zoho's duplicate check needs one.")
+    payload[OD_EMAIL_FIELD] = email
+
+    latest = {}
+    for doc in sorted(candidate.documents, key=lambda d: d.id or 0):
+        if doc.form_type == FormType.ONDEMAND and doc.field_key in OD_FILES:
+            latest[doc.field_key] = doc
+    files, missing = [], []
+    for key, doc in latest.items():
+        path = upload_path(doc.stored_filename)
+        if not os.path.exists(path):
+            missing.append(key)
+            continue
+        files.append((OD_FILES[key], doc.original_filename,
+                      doc.content_type or "application/octet-stream", path))
+    if missing:
+        raise ZohoPushError("Cannot push: these documents are missing from the "
+                            f"server's uploads folder: {', '.join(missing)}.")
+
+    try:
+        token = _zc.access_token(force=True)
+    except _zc.ZohoUnreachable as exc:
+        raise ZohoPushError(_network_message(exc)) from exc
+    except _zc.ZohoError as exc:
+        raise ZohoPushError(f"Could not authenticate with Zoho: {exc}") from exc
+
+    record_id = candidate.zoho_od_record_id
+    if not record_id:
+        try:
+            existing = _zc.find_by_email(token, form, email, OD_EMAIL_FIELD)
+        except _zc.ZohoUnreachable as exc:
+            raise ZohoPushError(_network_message(exc)) from exc
+        except _zc.ZohoError as exc:
+            raise ZohoPushError(
+                f"Duplicate check against Zoho failed, refusing to insert: {exc}") from exc
+        if len(existing) > 1:
+            raise ZohoPushError(
+                f"{len(existing)} records for {email} already exist on '{form}'. "
+                "Remove the duplicates in Zoho first, then publish again.")
+        if existing:
+            record_id = _hit_id(existing[0])
+            if not record_id:
+                raise ZohoPushError(f"Could not read the id of the existing Zoho record: "
+                                    f"{str(existing[0])[:400]}")
+
+    _zc.log("push.request", source="hr-portal", target="ondemand", form=form,
+            candidate_id=candidate.id, email=email, record_id=record_id, fields=len(payload),
+            files=[f[0] for f in files])
+    try:
+        response = (_zc.update_record(token, form, record_id, payload, files=files, draft=True)
+                    if record_id
+                    else _zc.insert_record(token, form, payload, draft=True, files=files))
+    except _zc.ZohoUnreachable as exc:
+        _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
+                reason="unreachable", message=str(exc))
+        raise ZohoPushError(_network_message(exc)) from exc
+    except _zc.ZohoError as exc:
+        _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
+                message=str(exc))
+        raise ZohoPushError(f"Zoho rejected the push: {exc}") from exc
+
+    _zc.log("push.response", source="hr-portal", form=form, candidate_id=candidate.id,
+            response=response)
+    if _zc.has_errors(response):
+        raise ZohoPushError(
+            "Zoho reported an error — it usually names the offending field: "
+            f"{str(response)[:600]}")
+
+    new_id = record_id or _zc.record_id_from(response)
+    if not new_id:
+        raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
+    return {"record_id": new_id, "status": "DRAFT", "created": not record_id}

@@ -16,7 +16,7 @@ _PERSONAL_FIELDS = [("full_name", "Name"), ("email", "Email"),
                     ("alternate_email", "Alternate Email"), ("contact_number", "Contact Number"),
                     ("alternate_number", "Alternate Contact Number"),
                     ("linkedin_link", "LinkedIn"), ("date_of_birth", "Date of Birth")]
-_BANK_FIELDS = [("bank_account_name", "Name as per Bank"),
+_BANK_FIELDS = [("bank_account_name", "Name as per Bank"), ("bank_name", "Bank Name"),
                 ("bank_account_number", "Account Number"), ("bank_ifsc_code", "IFSC Code"),
                 ("bank_account_type", "Savings / Current Account"), ("bank_branch", "Branch")]
 _DOCS = [("aadhar_card", "Aadhar Card"), ("pan_card", "Pan Card"),

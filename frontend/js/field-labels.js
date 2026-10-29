@@ -83,7 +83,7 @@ const DECLARATION_FIELDS = [
 const ONDEMAND_FIELDS = [
   "full_name", "email", "alternate_email", "contact_number", "alternate_number",
   "linkedin_link", "date_of_birth",
-  "bank_account_name", "bank_account_number", "bank_ifsc_code",
+  "bank_account_name", "bank_name", "bank_account_number", "bank_ifsc_code",
   "bank_account_type", "bank_branch",
 ];
 
@@ -182,7 +182,8 @@ const FIELD_LABELS = {
   bank_ifsc_code: "Bank IFSC Code", emergency_contact_name: "Emergency Contact Name",
   emergency_contact_number: "Emergency Contact Number",
   // On-Demand Candidate form
-  bank_account_name: "Name as per Bank", bank_account_type: "Savings / Current Account",
+  bank_account_name: "Name as per Bank", bank_name: "Bank Name",
+  bank_account_type: "Savings / Current Account",
   bank_branch: "Branch",
   marital_status: "Marital Status", blood_group: "Blood Group",
   position_applied_for: "Position Applied For", skills_technologies: "Skill/Technologies Worked",

@@ -196,6 +196,16 @@ class Candidate(Base):
     zoho_ref_status = Column(String(20), nullable=True)
     zoho_ref_synced_at = Column(DateTime(timezone=True), nullable=True)
     zoho_ref_last_error = Column(Text, nullable=True)
+    # Same four, for the Declaration push into Zoho's "New Joiner Documents
+    # Track" form (the "Publish Declaration" button).
+    zoho_decl_record_id = Column(String(50), nullable=True)
+    zoho_decl_status = Column(String(20), nullable=True)
+    zoho_decl_synced_at = Column(DateTime(timezone=True), nullable=True)
+    zoho_decl_last_error = Column(Text, nullable=True)
+    zoho_od_record_id = Column(String(50), nullable=True)
+    zoho_od_status = Column(String(20), nullable=True)
+    zoho_od_synced_at = Column(DateTime(timezone=True), nullable=True)
+    zoho_od_last_error = Column(Text, nullable=True)
 
     profile = relationship("CandidateProfile", uselist=False, back_populates="candidate", cascade="all, delete-orphan")
     submissions = relationship("FormSubmission", back_populates="candidate", cascade="all, delete-orphan")
@@ -510,6 +520,7 @@ class OnDemandDetails(Base):
     linkedin_link = Column(String(500))
     date_of_birth = Column(String(20))
     bank_account_name = Column(String(150))
+    bank_name = Column(String(150))
     bank_account_number = Column(String(30))
     bank_ifsc_code = Column(String(20))
     bank_account_type = Column(String(20))   # Savings | Current
