@@ -83,6 +83,19 @@ class HRUser(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(150), nullable=False)
     email = Column(String(255), unique=True, nullable=False, index=True)
+    # Company employee ID. Required on new accounts; NULL for accounts
+    # created before the field existed.
+    employee_id = Column(String(50), unique=True, nullable=True, index=True)
+    # The staff user's own Zoho connection (app/services/zoho_oauth.py).
+    # Pushes run on this token, and the employee record id fills the
+    # Pushed By / Assigned_HR lookup. NULL refresh token = not connected.
+    zoho_refresh_token_enc = Column(Text, nullable=True)
+    zoho_email = Column(String(255), nullable=True)
+    zoho_employee_record_id = Column(String(50), nullable=True)   # P_Employee record id
+    zoho_employee_id = Column(String(50), nullable=True)          # visible Employee ID
+    zoho_connected_at = Column(DateTime(timezone=True), nullable=True)
+    # Nonce of the Connect Zoho attempt in flight; the callback must match it.
+    zoho_oauth_nonce = Column(String(64), nullable=True)
     password_hash = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -818,3 +831,24 @@ class BGVGap(Base):
     duration = Column(String(255))
     reason = Column(Text)
 
+
+
+class ZohoPushRecord(Base):
+    """One row per successful push to Zoho: which record it wrote, who pushed
+    it, whose token it ran on and the employee put in Pushed By / Assigned_HR.
+    added_by is Zoho's own Added By, read back after the push, kept to check
+    it names the pushing HR."""
+    __tablename__ = "zoho_push_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id"), nullable=False, index=True)
+    target = Column(String(20), nullable=False)      # confirmation | candidate | reference | declaration | ondemand
+    form = Column(String(100), nullable=False)
+    record_id = Column(String(50), nullable=False)
+    created = Column(Boolean, nullable=False, default=False)
+    pushed_by_hr_id = Column(Integer, ForeignKey("hr_users.id"), nullable=False)
+    auth_mode = Column(String(10), nullable=False)   # user | admin
+    assigned_employee_record_id = Column(String(50), nullable=True)
+    pushed_by_status = Column(String(20), nullable=True)   # linked | no_field | no_employee_id
+    added_by = Column(String(255), nullable=True)
+    pushed_at = Column(DateTime(timezone=True), server_default=func.now())

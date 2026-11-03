@@ -97,6 +97,24 @@ h1, h2, h3, h4 { font-family: inherit; letter-spacing: -0.01em; }
 }
 .logout-btn:hover { background: rgba(255,255,255,0.14); }
 
+/* Zoho connection card (js/zoho-connect.js), between the user chip and Change password */
+#zohoConnectBox:empty { display: none; }
+#zohoConnectBox { margin-bottom: 12px; }
+.zoho-card {
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+  border-radius: var(--radius-sm); padding: 10px 12px; min-width: 0;
+}
+.zoho-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.zoho-status { display: flex; align-items: center; gap: 6px; font-size: 0.74rem; font-weight: 600; color: #fff; white-space: nowrap; }
+.zoho-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.2); }
+.zoho-disconnect {
+  background: none; border: none; padding: 0; cursor: pointer; font-family: inherit;
+  font-size: 0.72rem; font-weight: 600; color: #f87171; transition: color var(--ease);
+}
+.zoho-disconnect:hover { color: #fca5a5; }
+.zoho-email { font-size: 0.76rem; color: rgba(255,255,255,0.85); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zoho-meta { font-size: 0.7rem; color: rgba(255,255,255,0.55); margin-top: 2px; }
+
 .main-area { flex: 1; min-width: 0; background: var(--bg); }
 
 /* Avatar chip inside candidate table rows */
@@ -173,10 +191,16 @@ h1, h2, h3, h4 { font-family: inherit; letter-spacing: -0.01em; }
   .user-chip { margin-bottom: 0; padding: 0; }
   .user-name { display: none; }
   .logout-btn { width: auto; }
+  /* Top bar has no room for the card: just the status dot */
+  #zohoConnectBox { margin: 0; }
+  .zoho-card { background: none; border: none; padding: 0; }
+  .zoho-card-head { margin: 0; }
+  .zoho-status span:last-child, .zoho-disconnect, .zoho-email, .zoho-meta { display: none; }
 }
 /* List pages use the laptop's width instead of a narrow centre column */
 @media (min-width: 901px) {
-  .container:has(table.cards, table.stack),
+  /* .filters keeps the width when a search empties the table */
+  .container:has(table.cards, table.stack, .filters),
   body.cand-page .container { max-width: 1440px; }
 }
 /* Wide screens: real table. It scrolls inside its own card, never the page */

@@ -71,7 +71,8 @@ def staff_out(db: Session, users: list[HRUser], include_temp_password: bool = Fa
     out = []
     for u in users:
         out.append(StaffOut(
-            id=u.id, name=u.name, email=u.email, role=u.role, is_active=u.is_active,
+            id=u.id, name=u.name, email=u.email, employee_id=u.employee_id,
+            role=u.role, is_active=u.is_active,
             manager_id=u.manager_id, manager_name=managers.get(u.manager_id),
             must_reset_password=u.must_reset_password,
             temp_password=(decrypt_password(u.temp_password_enc)
@@ -99,8 +100,8 @@ def get_manager(db: Session, manager_id: int | None) -> HRUser | None:
 # Staff accounts
 # ---------------------------------------------------------------------------
 
-def create_staff(db: Session, actor: HRUser, *, name: str, email: str, role: StaffRole,
-                 manager: HRUser | None) -> tuple[HRUser, str]:
+def create_staff(db: Session, actor: HRUser, *, name: str, email: str, employee_id: str,
+                 role: StaffRole, manager: HRUser | None) -> tuple[HRUser, str]:
     """Create a Super Admin (Master Admin only), Admin (Master or Super Admin
     only), Manager or HR Executive with
     a system-generated password that must be changed on first login. Returns
@@ -108,6 +109,9 @@ def create_staff(db: Session, actor: HRUser, *, name: str, email: str, role: Sta
     name = (name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Name is required")
+    employee_id = (employee_id or "").strip()
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="Employee ID is required")
     if role == StaffRole.MASTER_ADMIN:
         raise HTTPException(status_code=400,
                              detail="The Master Admin is seeded from .env and cannot be created here")
@@ -126,10 +130,12 @@ def create_staff(db: Session, actor: HRUser, *, name: str, email: str, role: Sta
         raise HTTPException(status_code=400, detail="A Manager does not report to another Manager")
     if db.query(HRUser).filter(HRUser.email == email).first():
         raise HTTPException(status_code=400, detail="An employee account with this email already exists")
+    if db.query(HRUser).filter(func.lower(HRUser.employee_id) == employee_id.lower()).first():
+        raise HTTPException(status_code=400, detail="An employee account with this Employee ID already exists")
 
     temp_password = generate_temp_password(12)
     user = HRUser(
-        name=name, email=email, role=role.value,
+        name=name, email=email, employee_id=employee_id, role=role.value,
         manager_id=manager.id if manager else None,
         password_hash=hash_password(temp_password),
         temp_password_enc=encrypt_password(temp_password),
@@ -205,6 +211,22 @@ def rename(db: Session, actor: HRUser, target: HRUser, name: str) -> None:
     target.name = name
     audit(db, actor, "STAFF_RENAMED", target_type="STAFF", target=target,
           detail=f"Renamed {old} to {name}", team_manager_id=team_of(target))
+
+
+def set_employee_id(db: Session, actor: HRUser, target: HRUser, employee_id: str) -> None:
+    employee_id = (employee_id or "").strip()
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="Employee ID is required")
+    if employee_id == target.employee_id:
+        return
+    clash = db.query(HRUser).filter(func.lower(HRUser.employee_id) == employee_id.lower(),
+                                    HRUser.id != target.id).first()
+    if clash:
+        raise HTTPException(status_code=400, detail="An employee account with this Employee ID already exists")
+    old = target.employee_id
+    target.employee_id = employee_id
+    audit(db, actor, "STAFF_EMPLOYEE_ID_SET", target_type="STAFF", target=target,
+          detail=f"Employee ID {old or '(none)'} -> {employee_id}", team_manager_id=team_of(target))
 
 
 def move_hr(db: Session, actor: HRUser, target: HRUser, manager: HRUser | None) -> None:

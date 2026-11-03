@@ -47,7 +47,8 @@ def create_hr(payload: CreateStaffRequest, db: Session = Depends(get_db),
             raise HTTPException(status_code=403, detail="You can only add HR Executives to your own team")
         manager = current
     user, temp_password = staff_service.create_staff(
-        db, current, name=payload.name, email=payload.email, role=StaffRole.HR, manager=manager)
+        db, current, name=payload.name, email=payload.email, employee_id=payload.employee_id,
+        role=StaffRole.HR, manager=manager)
     db.commit()
     return CreatedStaffResponse(staff=staff_service.staff_out(db, [user])[0],
                                 temp_password=temp_password)
@@ -63,6 +64,8 @@ def update_hr(staff_id: int, payload: UpdateStaffRequest, db: Session = Depends(
         raise HTTPException(status_code=403, detail="Only the Super Admin can move an HR Executive to another team")
     if payload.name is not None:
         staff_service.rename(db, current, target, payload.name)
+    if payload.employee_id is not None:
+        staff_service.set_employee_id(db, current, target, payload.employee_id)
     if payload.is_active is not None:
         staff_service.set_active(db, current, target, payload.is_active)
     if payload.manager_id is not None:

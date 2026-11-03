@@ -53,6 +53,16 @@ TARGETS = {
                   "map_file": CANDIDATE_MAP_FILE, "prefix": "zoho_cand_"},
 }
 
+# "Added By" (AddedBy) is never sent: Zoho fills it with the account whose
+# OAuth token made the call and rejects any written value (7075, read only).
+# Pushes run on the pushing HR's own token (`actor`, see zoho_oauth.py), and
+# the HR also goes into settings.ZOHO_PUSHED_BY_FIELD, an editable lookup
+# into P_Employee written with their employee record id — the field the
+# record's ownership and access rules rely on.
+# Pushed By, like every other field, is only written when the form shows it
+# to the pushing HR (see _form_fields), so it starts filling as soon as a Zoho
+# admin adds it, without a restart.
+
 
 class ZohoPushError(RuntimeError):
     """Message is safe to show HR as-is."""
@@ -67,9 +77,127 @@ def _network_message(exc: "_zc.ZohoUnreachable") -> str:
             "connection is back.")
 
 
-def push_candidate(db: Session, candidate: Candidate, target: str = "confirmation") -> dict:
+_PERMISSION_HELP = (" Ask a Zoho People admin to grant your Zoho role this permission on the "
+                    "form (Settings > Permissions / Data Sharing). The candidate's data is "
+                    "unchanged.")
+
+
+def _error_message(response, form: str, record_id: str | None,
+                   prefix: str = "Zoho reported an error") -> str:
+    """HR-facing text for an error response. Permission errors come from the
+    pushing HR's own Zoho role, not from bad data, so they say so."""
+    errors = (response.get("response") or {}).get("errors") if isinstance(response, dict) else None
+    code = str(errors.get("code")) if isinstance(errors, dict) else ""
+    message = str(errors.get("message")) if isinstance(errors, dict) else ""
+    if code == "7040":
+        # Another account added the record and this role only sees its own.
+        return (f"Your Zoho account is not allowed to view Zoho record {record_id or ''} on "
+                f"'{form}' — it was added by another Zoho user, and your Zoho role only sees "
+                "records you added. Ask a Zoho People admin to give your role View/Edit access "
+                "to all records on this form (Settings > Data Sharing / Permissions), or have "
+                "the HR who added it publish. The candidate's data is unchanged.")
+    if code == "7038":
+        return f"Your Zoho account is not allowed to add records to '{form}'." + _PERMISSION_HELP
+    if "permission denied" in message.lower():
+        return f"Zoho denied your account on '{form}': {message}." + _PERMISSION_HELP
+    return f"{prefix}: {str(response)[:600]}"
+
+
+def _form_fields(token, form: str) -> set[str]:
+    """API names of the fields `form` shows to the token's account. Zoho
+    hides fields the account's role has no permission on, and a write that
+    names one fails outright (7013 "Field name ... is invalid")."""
+    try:
+        components = _zc.api("GET", f"forms/{form}/components", token=token)
+    except _zc.ZohoUnreachable as exc:
+        raise ZohoPushError(_network_message(exc)) from exc
+    except _zc.ZohoError as exc:
+        raise ZohoPushError(f"Could not read the fields of Zoho form '{form}': {exc}") from exc
+
+    fields = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            label = node.get("labelname") or node.get("labelName")
+            if label:
+                fields.add(label)
+            for value in node.values():
+                if isinstance(value, (dict, list)):
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(components)
+    if not fields:
+        raise ZohoPushError(f"Your Zoho account cannot see any fields of '{form}'."
+                            + _PERMISSION_HELP)
+    return fields
+
+
+def _drop_hidden(fields: set[str], payload: dict, files: list | None = None) -> list[str]:
+    """Remove the payload keys and uploads `fields` (see _form_fields) does
+    not include, so one hidden field doesn't sink the whole push. Returns
+    what was left out, for HR to see."""
+    hidden = sorted(k for k in payload if k not in fields)
+    for key in hidden:
+        del payload[key]
+    if files is not None:
+        hidden += sorted(f[0] for f in files if f[0] not in fields)
+        files[:] = [f for f in files if f[0] in fields]
+    if hidden and not payload and not files:
+        raise ZohoPushError("Nothing to push: your Zoho role cannot see any of the fields "
+                            f"this form writes ({', '.join(hidden)})." + _PERMISSION_HELP)
+    return hidden
+
+
+def _delete_denied(response) -> bool:
+    """True when Zoho refused a table-row delete for lack of permission
+    (7338 "You are not allowed to delete record in ... tabular section")."""
+    body = response.get("response", response) if isinstance(response, dict) else {}
+    errors = body.get("errors") if isinstance(body, dict) else None
+    if isinstance(errors, dict):
+        return str(errors.get("code")) == "7338" or "not allowed to delete" in str(errors).lower()
+    return "not allowed to delete" in str(response).lower()
+
+
+def _hidden_note(hidden: list[str]) -> str:
+    return (f" Not sent, because your Zoho role cannot see these fields: {', '.join(hidden)}."
+            " A Zoho People admin can grant your role access to them, then re-sync."
+            if hidden else "")
+
+
+def _add_pushed_by(fields: set[str], payload: dict, employee_record_id: str) -> str:
+    """Put the pushing HR's P_Employee record id into the Pushed By field when
+    `fields` has one. Returns "linked", "no_field" or "no_employee_id" (admin
+    mode only: an HR without an Employee ID)."""
+    field = settings.ZOHO_PUSHED_BY_FIELD
+    if not field or field not in fields:
+        return "no_field"
+    if not employee_record_id:
+        return "no_employee_id"
+    payload[field] = employee_record_id
+    return "linked"
+
+
+def read_added_by(token, form: str, record_id: str) -> str | None:
+    """Zoho's Added By on a record, read back after a push to confirm it names
+    the HR whose token wrote it. Best effort: None if it cannot be read."""
+    try:
+        record = _zc.get_record(token, form, record_id)
+    except _zc.ZohoError:
+        return None
+    for key, value in record.items():
+        if key.replace("_", "").lower() == "addedby" and value:
+            return str(value)[:255]
+    return None
+
+
+def push_candidate(db: Session, candidate: Candidate, target: str = "confirmation",
+                   *, actor) -> dict:
     """Insert (first call) or update (every call after) this candidate's Zoho
-    People record on the form `target` names (see TARGETS). Returns
+    People record on the form `target` names (see TARGETS). `actor` is the
+    pushing HR's zoho_oauth.ZohoActor. Returns
     {"record_id", "status", "fields_pushed", "fields_unmapped"}. Raises
     ZohoPushError on anything that stops the push — the caller is expected
     to surface str(exc) to HR and move on."""
@@ -105,12 +233,11 @@ def push_candidate(db: Session, candidate: Candidate, target: str = "confirmatio
             "Cannot push: these documents are mapped for Zoho but missing from the "
             f"server's uploads folder: {', '.join(files_missing)}.")
 
-    try:
-        token = _zc.access_token(force=True)  # fresh token on every publish click
-    except _zc.ZohoUnreachable as exc:
-        raise ZohoPushError(_network_message(exc)) from exc
-    except _zc.ZohoError as exc:
-        raise ZohoPushError(f"Could not authenticate with Zoho: {exc}") from exc
+    token = actor.token   # the pushing HR's own token (app/services/zoho_oauth.py)
+
+    fields = _form_fields(token, form)
+    hidden = _drop_hidden(fields, payload, files)
+    pushed_by_status = _add_pushed_by(fields, payload, actor.employee_record_id)
 
     record_id = getattr(candidate, cfg["prefix"] + "record_id")
     if not record_id:
@@ -135,12 +262,14 @@ def push_candidate(db: Session, candidate: Candidate, target: str = "confirmatio
 
     # Tabular columns in inputData always APPEND rows, so a re-sync would
     # duplicate every table. For sections the map marks with a section id,
-    # note the rows already there now and delete them once the update has
-    # landed — the record ends up mirroring the portal. Read failures abort
+    # the rows already there are deleted BEFORE the update, so the record ends
+    # up mirroring the portal. A role that may not delete table rows (7338)
+    # makes the delete fail with nothing changed; those tables are then left
+    # as they are and not re-sent, rather than duplicated. Read failures abort
     # before anything is written.
-    replace_sections = {cfg_s["_zoho_section_id"]: cfg_s.get("_zoho_section_display", "")
-                        for cfg_s in load_subforms(cfg["map_file"]).values()
-                        if cfg_s.get("_zoho_section_id")}
+    subforms = load_subforms(cfg["map_file"])
+    replace_sections = {cfg_s["_zoho_section_id"]: cfg_s
+                        for cfg_s in subforms.values() if cfg_s.get("_zoho_section_id")}
     old_rows = {}
     if record_id and replace_sections:
         try:
@@ -149,8 +278,31 @@ def push_candidate(db: Session, candidate: Candidate, target: str = "confirmatio
             raise ZohoPushError(_network_message(exc)) from exc
         except _zc.ZohoError as exc:
             raise ZohoPushError(f"Could not read the existing Zoho record before updating it: {exc}") from exc
-        old_rows = {sec: _zc.tabular_row_ids(existing_record, display)
-                    for sec, display in replace_sections.items()}
+        old_rows = {sec: _zc.tabular_row_ids(existing_record, cfg_s.get("_zoho_section_display", ""))
+                    for sec, cfg_s in replace_sections.items()}
+        old_rows = {sec: ids for sec, ids in old_rows.items() if ids}
+
+    kept_tables = []
+    if old_rows:
+        try:
+            cleanup = _zc.delete_tabular_rows(token, form, record_id, old_rows, draft=True)
+        except _zc.ZohoUnreachable as exc:
+            raise ZohoPushError(_network_message(exc)) from exc
+        except _zc.ZohoError as exc:
+            cleanup = {"error": str(exc)}
+        _zc.log("push.tabular_cleanup", source="hr-portal", target=target, form=form,
+                candidate_id=candidate.id, deleted={s: len(i) for s, i in old_rows.items()},
+                response=cleanup)
+        if "error" in cleanup or _zc.has_errors(cleanup):
+            if not _delete_denied(cleanup):
+                raise ZohoPushError("Could not remove the record's previous table rows, so "
+                                    "nothing was updated. Re-sync again: "
+                                    f"{str(cleanup)[:400]}")
+            for sec in old_rows:
+                cfg_s = replace_sections[sec]
+                kept_tables.append(cfg_s.get("_zoho_section_display") or cfg_s.get("_zoho_section", sec))
+                for column in (cfg_s.get("map") or {}).values():
+                    payload.pop(column, None)
 
     # The record is written as a Zoho DRAFT: a non-draft write enforces every
     # mandatory field on the form, including ones no local data answers
@@ -160,6 +312,9 @@ def push_candidate(db: Session, candidate: Candidate, target: str = "confirmatio
     _zc.log("push.request", source="hr-portal", target=target, form=form, candidate_id=candidate.id,
             email=email, record_id=record_id, fields=len(payload),
             files=[f[0] for f in files], tabular_rows=subform_counts)
+    # Old table rows already deleted above are only restored by a successful update.
+    rows_gone = (" Its previous Education/Experience rows were already removed; re-sync "
+                 "to put them back." if old_rows and not kept_tables else "")
     try:
         response = (_zc.update_record(token, form, record_id, payload, files=files, draft=True)
                     if record_id
@@ -167,45 +322,35 @@ def push_candidate(db: Session, candidate: Candidate, target: str = "confirmatio
     except _zc.ZohoUnreachable as exc:
         _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
                 reason="unreachable", message=str(exc))
-        raise ZohoPushError(_network_message(exc)) from exc
+        raise ZohoPushError(_network_message(exc) + rows_gone) from exc
     except _zc.ZohoError as exc:
         _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
                 message=str(exc))
-        raise ZohoPushError(f"Zoho rejected the push: {exc}") from exc
+        raise ZohoPushError(f"Zoho rejected the push: {exc}{rows_gone}") from exc
 
     _zc.log("push.response", source="hr-portal", form=form, candidate_id=candidate.id,
             response=response)
     if _zc.has_errors(response):
-        raise ZohoPushError(
-            "Zoho reported an error — it usually names the offending field: "
-            f"{str(response)[:600]}")
+        raise ZohoPushError(_error_message(
+            response, form, record_id,
+            "Zoho reported an error — it usually names the offending field") + rows_gone)
 
     new_id = record_id or _zc.record_id_from(response)
     if not new_id:
         raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
 
-    if any(old_rows.values()):
-        try:
-            cleanup = _zc.delete_tabular_rows(token, form, record_id, old_rows, draft=True)
-        except _zc.ZohoError as exc:
-            cleanup = {"error": str(exc)}
-        _zc.log("push.tabular_cleanup", source="hr-portal", target=target, form=form,
-                candidate_id=candidate.id, deleted={s: len(i) for s, i in old_rows.items()},
-                response=cleanup)
-        if "error" in cleanup or _zc.has_errors(cleanup):
-            raise ZohoPushError(
-                "The record was updated, but its previous table rows could not be removed, "
-                "so Education/Experience may now appear twice in Zoho. Re-sync again or "
-                f"delete the extra rows in Zoho: {str(cleanup)[:400]}")
-
     return {
         "record_id": new_id,
+        "form": form,
         # Always a draft in Zoho for now (see the tabular note above).
         "status": "DRAFT",
         "fields_pushed": len(payload),
         "fields_unmapped": len(unmapped),
         "tabular_columns": len(tabular),
         "tabular_rows": sum(subform_counts.values()),
+        "pushed_by": pushed_by_status,
+        "hidden_fields": hidden,
+        "kept_tables": kept_tables,
     }
 
 
@@ -216,7 +361,7 @@ REF_NAME_FIELD = "Candidate_Name"
 REF_FILE_FIELD = "Reference_check"
 
 
-def push_reference_check(candidate: Candidate) -> dict:
+def push_reference_check(candidate: Candidate, *, actor) -> dict:
     """Upload the generated Reference Check PDF (app/services/reference_pdf.py)
     to ZOHO_REFERENCE_CHECK_WRITE_FORM. Updates the record already linked to
     this candidate, else the one Zoho has for their email, else inserts one.
@@ -237,12 +382,7 @@ def push_reference_check(candidate: Candidate) -> dict:
     safe = "".join(ch if ch.isalnum() else "_" for ch in (candidate.name or "candidate")).strip("_")
     filename = f"Referee_Check_{safe or candidate.id}.pdf"
 
-    try:
-        token = _zc.access_token(force=True)
-    except _zc.ZohoUnreachable as exc:
-        raise ZohoPushError(_network_message(exc)) from exc
-    except _zc.ZohoError as exc:
-        raise ZohoPushError(f"Could not authenticate with Zoho: {exc}") from exc
+    token = actor.token   # the pushing HR's own token (app/services/zoho_oauth.py)
 
     record_id = candidate.zoho_ref_record_id
     if not record_id:
@@ -272,6 +412,9 @@ def push_reference_check(candidate: Candidate) -> dict:
     # On an existing record only the PDF is touched; a new one also gets
     # the email/name it is matched on next time.
     payload = {} if record_id else {REF_EMAIL_FIELD: email, REF_NAME_FIELD: candidate.name or ""}
+    fields = _form_fields(token, form)
+    hidden = _drop_hidden(fields, payload, files)
+    pushed_by_status = _add_pushed_by(fields, payload, actor.employee_record_id)
     _zc.log("push.request", source="hr-portal", target="reference_check", form=form,
             candidate_id=candidate.id, email=email, record_id=record_id, files=[REF_FILE_FIELD])
     try:
@@ -290,12 +433,13 @@ def push_reference_check(candidate: Candidate) -> dict:
     _zc.log("push.response", source="hr-portal", form=form, candidate_id=candidate.id,
             response=response)
     if _zc.has_errors(response):
-        raise ZohoPushError(f"Zoho reported an error: {str(response)[:600]}")
+        raise ZohoPushError(_error_message(response, form, record_id))
 
     new_id = record_id or _zc.record_id_from(response)
     if not new_id:
         raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
-    return {"record_id": new_id, "status": "SYNCED", "created": not record_id}
+    return {"record_id": new_id, "form": form, "status": "SYNCED", "created": not record_id,
+            "pushed_by": pushed_by_status, "hidden_fields": hidden}
 
 
 # "New Joiner Documents Track" (form API name Referral_Bonus). Each document
@@ -387,7 +531,7 @@ def _employee_record_id(token, candidate: Candidate) -> str:
     return ""
 
 
-def push_declaration(candidate: Candidate) -> dict:
+def push_declaration(candidate: Candidate, *, actor) -> dict:
     """Write the Declaration into ZOHO_DECLARATION_WRITE_FORM: one status /
     expected date per document, no uploads. The first push inserts; later pushes update the linked record.
     Returns {"record_id", "status", "created"}; raises ZohoPushError."""
@@ -402,12 +546,7 @@ def push_declaration(candidate: Candidate) -> dict:
 
     payload = declaration_payload(candidate)
 
-    try:
-        token = _zc.access_token(force=True)
-    except _zc.ZohoUnreachable as exc:
-        raise ZohoPushError(_network_message(exc)) from exc
-    except _zc.ZohoError as exc:
-        raise ZohoPushError(f"Could not authenticate with Zoho: {exc}") from exc
+    token = actor.token   # the pushing HR's own token (app/services/zoho_oauth.py)
 
     # New joiners are often not Zoho employees yet. Employee Name is optional
     # on the form, so the record is written without it and named in Comments;
@@ -420,6 +559,9 @@ def push_declaration(candidate: Candidate) -> dict:
         payload[DECL_COMMENT_FIELD] = (
             f"Candidate: {candidate.name or ''}{f' ({emails[0]})' if emails else ''}. "
             "Not yet a Zoho employee; Employee Name is set on re-sync once they are.")
+    fields = _form_fields(token, form)
+    hidden = _drop_hidden(fields, payload)
+    pushed_by_status = _add_pushed_by(fields, payload, actor.employee_record_id)
 
     # A tracker record already on this employee is theirs, so it is updated
     # rather than duplicated; more than one needs sorting out in Zoho first.
@@ -460,13 +602,14 @@ def push_declaration(candidate: Candidate) -> dict:
     _zc.log("push.response", source="hr-portal", form=form, candidate_id=candidate.id,
             response=response)
     if _zc.has_errors(response):
-        raise ZohoPushError(f"Zoho reported an error: {str(response)[:600]}")
+        raise ZohoPushError(_error_message(response, form, record_id))
 
     new_id = record_id or _zc.record_id_from(response)
     if not new_id:
         raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
-    return {"record_id": new_id, "status": "SYNCED", "created": not record_id,
-            "employee_linked": bool(employee_id)}
+    return {"record_id": new_id, "form": form, "status": "SYNCED", "created": not record_id,
+            "employee_linked": bool(employee_id), "pushed_by": pushed_by_status,
+            "hidden_fields": hidden}
 
 
 # "Consultant Tracker" (form API name consultant_tracker). The On-Demand form
@@ -511,7 +654,7 @@ def ondemand_payload(candidate: Candidate) -> dict:
     return {k: v for k, v in payload.items() if v}
 
 
-def push_ondemand(candidate: Candidate) -> dict:
+def push_ondemand(candidate: Candidate, *, actor) -> dict:
     """Write the On-Demand Candidate form, with its Aadhaar / PAN / photo
     uploads, into ZOHO_ONDEMAND_WRITE_FORM as a draft. Updates the record
     already linked to this candidate, else the one Zoho has for their email,
@@ -549,12 +692,11 @@ def push_ondemand(candidate: Candidate) -> dict:
         raise ZohoPushError("Cannot push: these documents are missing from the "
                             f"server's uploads folder: {', '.join(missing)}.")
 
-    try:
-        token = _zc.access_token(force=True)
-    except _zc.ZohoUnreachable as exc:
-        raise ZohoPushError(_network_message(exc)) from exc
-    except _zc.ZohoError as exc:
-        raise ZohoPushError(f"Could not authenticate with Zoho: {exc}") from exc
+    token = actor.token   # the pushing HR's own token (app/services/zoho_oauth.py)
+
+    fields = _form_fields(token, form)
+    hidden = _drop_hidden(fields, payload, files)
+    pushed_by_status = _add_pushed_by(fields, payload, actor.employee_record_id)
 
     record_id = candidate.zoho_od_record_id
     if not record_id:
@@ -594,11 +736,12 @@ def push_ondemand(candidate: Candidate) -> dict:
     _zc.log("push.response", source="hr-portal", form=form, candidate_id=candidate.id,
             response=response)
     if _zc.has_errors(response):
-        raise ZohoPushError(
-            "Zoho reported an error — it usually names the offending field: "
-            f"{str(response)[:600]}")
+        raise ZohoPushError(_error_message(
+            response, form, record_id,
+            "Zoho reported an error — it usually names the offending field"))
 
     new_id = record_id or _zc.record_id_from(response)
     if not new_id:
         raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
-    return {"record_id": new_id, "status": "DRAFT", "created": not record_id}
+    return {"record_id": new_id, "form": form, "status": "DRAFT", "created": not record_id,
+            "pushed_by": pushed_by_status, "hidden_fields": hidden}

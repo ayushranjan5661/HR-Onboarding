@@ -1017,6 +1017,10 @@ async function pushToZoho(target = "confirmation") {
     await load();
     await showAlert(result.detail, { title: `Published to ${t.label}` });
   } catch (err) {
+    if (err.status === 428) {   // this user has not connected their Zoho account
+      await load();
+      return promptZohoConnect(err.message);
+    }
     await showAlert(err.message, { title: "Zoho push failed", danger: true });
     await load();
   }

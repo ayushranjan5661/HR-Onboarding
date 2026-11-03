@@ -38,6 +38,7 @@ class StaffOut(BaseModel):
     id: int
     name: str
     email: str
+    employee_id: Optional[str] = None
     role: str
     is_active: bool
     manager_id: Optional[int] = None
@@ -53,12 +54,14 @@ class StaffOut(BaseModel):
 class CreateStaffRequest(BaseModel):
     name: str
     email: EmailStr
-    role: str = "HR"                      # SUPER_ADMIN (Master Admin only) | ADMIN (Master/Super Admin) | MANAGER | HR
+    employee_id: str
+    role: str = "HR"                    # SUPER_ADMIN (Master Admin only) | ADMIN (Master/Super Admin) | MANAGER | HR
     manager_id: Optional[int] = None      # HR only: the team they join
 
 
 class UpdateStaffRequest(BaseModel):
     name: Optional[str] = None
+    employee_id: Optional[str] = None
     is_active: Optional[bool] = None
     # HR Executives only: move to another Manager. Send 0 to leave them unassigned.
     manager_id: Optional[int] = None
