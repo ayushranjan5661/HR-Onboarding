@@ -137,6 +137,10 @@ def main():
         conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS manager_id INTEGER"))
         conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS created_by_id INTEGER"))
         conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS temp_password_enc TEXT"))
+        conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS password_enc TEXT"))
+        conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS employee_id VARCHAR(50)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_hr_users_employee_id "
+                           "ON hr_users (employee_id)"))
         conn.execute(text("ALTER TABLE hr_users ADD COLUMN IF NOT EXISTS must_reset_password "
                            "BOOLEAN NOT NULL DEFAULT FALSE"))
         conn.execute(text("UPDATE hr_users SET role = 'SUPER_ADMIN' WHERE email = :e"),

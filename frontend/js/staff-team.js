@@ -61,6 +61,8 @@ async function initTeamPage(mode) {
         <form id="createForm">
           <label>Full name</label>
           <input type="text" id="cName" required>
+          <label>Employee ID</label>
+          <input type="text" id="cEmpId" maxlength="50" required>
           <label>Email</label>
           <input type="email" id="cEmail" required>
           ${isAdmin ? `
@@ -128,6 +130,7 @@ async function initTeamPage(mode) {
     const why = s.candidate_count > 0 ? `Still owns ${s.candidate_count} candidate(s). Reassign first.`
               : s.team_size > 0 ? `Still leads ${s.team_size} HR Executive(s). Move them first.` : "";
     return `<div class="row-actions">
+      <button class="btn btn-outline btn-small" data-act="empid" data-id="${s.id}">${s.employee_id ? "Edit" : "Set"} Employee ID</button>
       <button class="btn btn-outline btn-small" data-act="reset" data-id="${s.id}">Reset password</button>
       <button class="btn btn-outline btn-small" data-act="toggle" data-id="${s.id}">${s.is_active ? "Deactivate" : "Reactivate"}</button>
       ${isAdmin && s.role === "HR" ? `<button class="btn btn-outline btn-small" data-act="move" data-id="${s.id}">Move</button>` : ""}
@@ -140,7 +143,7 @@ async function initTeamPage(mode) {
       ? `<td>${s.manager_name ? escapeHtml(s.manager_name) : `<span class="pending-tag">No team</span>`}</td>` : "";
     const teamCell = s.role === "MANAGER" ? `<td class="nowrap">${s.team_size} HR</td>` : "";
     return `<tr class="${s.is_active ? "" : "inactive-row"}">
-      <td><div class="name-cell"><span class="row-avatar">${escapeHtml(initials(s.name))}</span>${escapeHtml(s.name)}</div></td>
+      <td><div class="name-cell"><span class="row-avatar">${escapeHtml(initials(s.name))}</span><div>${escapeHtml(s.name)}${s.employee_id ? `<div class="muted-text">${escapeHtml(s.employee_id)}</div>` : ""}</div></div></td>
       <td>${escapeHtml(s.email).replace("@", "<wbr>@")}</td>
       <td>${activeBadge(s.is_active)}</td>
       ${teamCell}${managerCell}
@@ -210,6 +213,17 @@ async function initTeamPage(mode) {
         if (!ok) return;
         await apiFetch(`${BASE}/${id}`, { method: "PATCH", body: JSON.stringify({ is_active: !deactivating }) });
         await load();
+      } else if (kind === "empid") {
+        const ok = await confirmDialog({
+          title: `Employee ID for ${s.name}`, danger: false, confirmLabel: "Save",
+          html: `<label>Employee ID</label><input type="text" id="empIdInput" maxlength="50" value="${escapeHtml(s.employee_id || "")}">
+`,
+        });
+        if (!ok) return;
+        const employee_id = document.getElementById("empIdInput").value.trim();
+        if (!employee_id) return;
+        await apiFetch(`${BASE}/${id}`, { method: "PATCH", body: JSON.stringify({ employee_id }) });
+        await load();
       } else if (kind === "move") {
         const options = managers().filter(m => m.is_active)
           .map(m => `<option value="${m.id}" ${m.id === s.manager_id ? "selected" : ""}>${escapeHtml(m.name)}</option>`).join("");
@@ -262,6 +276,7 @@ async function initTeamPage(mode) {
     setError("createError", "");
     const body = {
       name: document.getElementById("cName").value.trim(),
+      employee_id: document.getElementById("cEmpId").value.trim(),
       email: document.getElementById("cEmail").value.trim(),
       role: isAdmin ? document.getElementById("cRole").value : "HR",
     };

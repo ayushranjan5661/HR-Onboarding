@@ -78,7 +78,8 @@ def create_staff(payload: CreateStaffRequest, db: Session = Depends(get_db),
     if role == StaffRole.MANAGER and payload.manager_id:
         raise HTTPException(status_code=400, detail="A Manager does not report to another Manager")
     user, temp_password = staff_service.create_staff(
-        db, current, name=payload.name, email=payload.email, role=role, manager=manager)
+        db, current, name=payload.name, email=payload.email, employee_id=payload.employee_id,
+        role=role, manager=manager)
     db.commit()
     return CreatedStaffResponse(staff=_out(db, [user], current)[0], temp_password=temp_password)
 
@@ -92,6 +93,8 @@ def update_staff(staff_id: int, payload: UpdateStaffRequest, db: Session = Depen
     target = _target(db, staff_id, current)
     if payload.name is not None:
         staff_service.rename(db, current, target, payload.name)
+    if payload.employee_id is not None:
+        staff_service.set_employee_id(db, current, target, payload.employee_id)
     if payload.is_active is not None:
         staff_service.set_active(db, current, target, payload.is_active)
     if payload.manager_id is not None:

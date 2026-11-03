@@ -52,6 +52,7 @@ from app.models import (
     OnDemandDetails,
     ReferenceCheckDetails,
     ReferenceDetail,
+    ZohoPushRecord,
 )
 from app.schemas import (
     AuditEntryOut,
@@ -71,7 +72,7 @@ from app.schemas import (
 from app.security import (decrypt_password, encrypt_password, generate_invite_token,
                             generate_temp_password, hash_password)
 from app.agents import doc_validator
-from app.services import zoho_push
+from app.services import zoho_oauth, zoho_push
 from app.utils.file_storage import save_upload, snapshot_document, upload_path
 
 router = APIRouter(prefix="/hr", tags=["hr"])
@@ -1051,7 +1052,50 @@ def mark_onboarding_complete(candidate_id: int, db: Session = Depends(get_db),
 _ZOHO_PUSH_STAGES = {CandidateStage.APPROVED_FOR_BGV, CandidateStage.ONBOARDING_COMPLETE}
 
 
-def _run_zoho_push(db: Session, candidate, target: str) -> dict:
+def _pushed_by_note(result: dict) -> str:
+    """Appended when the record could not be assigned to the pushing HR, or
+    fields their Zoho role cannot see were left out."""
+    note = zoho_push._hidden_note(result.get("hidden_fields") or [])
+    if result.get("kept_tables"):
+        note += (f" The {' / '.join(result['kept_tables'])} table(s) were not re-sent and keep "
+                 "their existing rows in Zoho, because your Zoho role cannot delete table rows "
+                 "there; a Zoho People admin can grant that, then re-sync.")
+    if result.get("pushed_by") == "no_employee_id":
+        return note + (" Pushed By is empty because your account has no Employee ID; ask your "
+                       "Manager or an Admin to set it, then re-sync.")
+    if result.get("pushed_by") == "no_field" and settings.ZOHO_PUSHED_BY_FIELD:
+        return note + (f" This Zoho form has no {settings.ZOHO_PUSHED_BY_FIELD} field, so the "
+                       "record is not assigned to you there.")
+    return note
+
+
+def _zoho_actor(db: Session, current: HRUser) -> "zoho_oauth.ZohoActor":
+    """Whose Zoho token a push runs on. 428 tells the page to offer Connect Zoho."""
+    try:
+        return zoho_oauth.actor_for(db, current)
+    except zoho_oauth.ZohoNotConnected as exc:
+        raise HTTPException(status_code=428, detail=str(exc))
+    except zoho_oauth.ZohoAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+def _record_zoho_push(db: Session, candidate, target: str, result: dict, current: HRUser,
+                      actor: "zoho_oauth.ZohoActor") -> None:
+    """Who pushed which Zoho record, as whom (see ZohoPushRecord). Adds
+    result["added_by"] when ZOHO_VERIFY_ADDED_BY reads it back."""
+    added_by = (zoho_push.read_added_by(actor.token, result["form"], result["record_id"])
+                if settings.ZOHO_VERIFY_ADDED_BY else None)
+    result["added_by"] = added_by
+    db.add(ZohoPushRecord(
+        candidate_id=candidate.id, target=target, form=result["form"],
+        record_id=str(result["record_id"]), created=bool(result.get("created")),
+        pushed_by_hr_id=current.id, auth_mode=actor.mode,
+        assigned_employee_record_id=(actor.employee_record_id
+                                     if result.get("pushed_by") == "linked" else None),
+        pushed_by_status=result.get("pushed_by"), added_by=added_by))
+
+
+def _run_zoho_push(db: Session, candidate, target: str, current: HRUser) -> dict:
     """Shared body of both Zoho buttons. `target` picks the form and the
     Candidate columns its record is tracked in (zoho_* / zoho_cand_*)."""
     if candidate.stage not in _ZOHO_PUSH_STAGES:
@@ -1061,9 +1105,10 @@ def _run_zoho_push(db: Session, candidate, target: str) -> dict:
                     "published to Zoho People.")
 
     prefix = zoho_push.TARGETS[target]["prefix"]
+    actor = _zoho_actor(db, current)
     try:
         was_synced_before = bool(getattr(candidate, prefix + "record_id"))
-        result = zoho_push.push_candidate(db, candidate, target=target)
+        result = zoho_push.push_candidate(db, candidate, target=target, actor=actor)
     except zoho_push.ZohoPushError as exc:
         setattr(candidate, prefix + "last_error", str(exc)[:2000])
         db.commit()
@@ -1073,13 +1118,15 @@ def _run_zoho_push(db: Session, candidate, target: str) -> dict:
     setattr(candidate, prefix + "status", result["status"])
     setattr(candidate, prefix + "synced_at", datetime.now(timezone.utc))
     setattr(candidate, prefix + "last_error", None)
+    result["created"] = not was_synced_before
+    _record_zoho_push(db, candidate, target, result, current, actor)
     db.commit()
 
     form_label = "the Zoho Candidate form" if target == "candidate" else "Zoho People"
     detail = (f"Draft updated in {form_label} (record {result['record_id']})."
               if was_synced_before else
               f"Draft created in {form_label} (record {result['record_id']}).")
-    # tabular_rows still rides in the response for the caller/logs; it is left
+    detail += _pushed_by_note(result)    # tabular_rows still rides in the response for the caller/logs; it is left
     # out of the message because the API reports success for tabular writes it
     # did not actually make, so the count promised more than it could confirm.
     return {"detail": detail, **result}
@@ -1094,7 +1141,7 @@ def push_candidate_to_zoho(candidate_id: int, db: Session = Depends(get_db),
     ZOHO_CANDIDATE_WRITE_FORM is configured in .env — see
     integrations/zoho/README.md."""
     candidate = scope.get_scoped_candidate(db, candidate_id, current)
-    return _run_zoho_push(db, candidate, "confirmation")
+    return _run_zoho_push(db, candidate, "confirmation", current)
 
 
 @router.post("/candidates/{candidate_id}/zoho/candidate-form/push")
@@ -1105,7 +1152,7 @@ def push_candidate_to_zoho_candidate_form(candidate_id: int, db: Session = Depen
     columns, so it never touches the Confirmation_Process_Form record.
     Nothing is sent unless ZOHO_CANDIDATE_PROFILE_WRITE_FORM is set in .env."""
     candidate = scope.get_scoped_candidate(db, candidate_id, current)
-    return _run_zoho_push(db, candidate, "candidate")
+    return _run_zoho_push(db, candidate, "candidate", current)
 
 
 @router.post("/candidates/{candidate_id}/zoho/reference-check/push")
@@ -1120,8 +1167,9 @@ def push_reference_check_to_zoho(candidate_id: int, db: Session = Depends(get_db
             status_code=400,
             detail="Only candidates approved for BGV, or fully onboarded, can be "
                     "published to Zoho People.")
+    actor = _zoho_actor(db, current)
     try:
-        result = zoho_push.push_reference_check(candidate)
+        result = zoho_push.push_reference_check(candidate, actor=actor)
     except zoho_push.ZohoPushError as exc:
         candidate.zoho_ref_last_error = str(exc)[:2000]
         db.commit()
@@ -1131,10 +1179,11 @@ def push_reference_check_to_zoho(candidate_id: int, db: Session = Depends(get_db
     candidate.zoho_ref_status = result["status"]
     candidate.zoho_ref_synced_at = datetime.now(timezone.utc)
     candidate.zoho_ref_last_error = None
+    _record_zoho_push(db, candidate, "reference", result, current, actor)
     db.commit()
     verb = "Created" if result["created"] else "Updated"
     return {"detail": f"{verb} Zoho Documents Collection record {result['record_id']} "
-                      "with the Referee Check PDF.", **result}
+                      f"with the Referee Check PDF.{_pushed_by_note(result)}", **result}
 
 
 @router.post("/candidates/{candidate_id}/zoho/declaration/push")
@@ -1149,8 +1198,9 @@ def push_declaration_to_zoho(candidate_id: int, db: Session = Depends(get_db),
             status_code=400,
             detail="Only candidates approved for BGV, or fully onboarded, can be "
                     "published to Zoho People.")
+    actor = _zoho_actor(db, current)
     try:
-        result = zoho_push.push_declaration(candidate)
+        result = zoho_push.push_declaration(candidate, actor=actor)
     except zoho_push.ZohoPushError as exc:
         candidate.zoho_decl_last_error = str(exc)[:2000]
         db.commit()
@@ -1160,13 +1210,14 @@ def push_declaration_to_zoho(candidate_id: int, db: Session = Depends(get_db),
     candidate.zoho_decl_status = result["status"]
     candidate.zoho_decl_synced_at = datetime.now(timezone.utc)
     candidate.zoho_decl_last_error = None
+    _record_zoho_push(db, candidate, "declaration", result, current, actor)
     db.commit()
     verb = "Created" if result["created"] else "Updated"
     note = ("" if result["employee_linked"] else
             " Employee Name is left empty because the candidate is not a Zoho employee yet "
             "(they are named in Comments); re-sync once they are to fill it in.")
     return {"detail": f"{verb} Zoho New Joiner Documents Track record {result['record_id']} "
-                      f"from the Declaration form.{note}", **result}
+                      f"from the Declaration form.{note}{_pushed_by_note(result)}", **result}
 
 
 @router.post("/candidates/{candidate_id}/zoho/ondemand/push")
@@ -1178,8 +1229,9 @@ def push_ondemand_to_zoho(candidate_id: int, db: Session = Depends(get_db),
     if candidate.candidate_type.value != "ONDEMAND":
         raise HTTPException(status_code=400,
                             detail="Only On-Demand Consultants go to the Zoho Consultant Tracker.")
+    actor = _zoho_actor(db, current)
     try:
-        result = zoho_push.push_ondemand(candidate)
+        result = zoho_push.push_ondemand(candidate, actor=actor)
     except zoho_push.ZohoPushError as exc:
         candidate.zoho_od_last_error = str(exc)[:2000]
         db.commit()
@@ -1189,11 +1241,12 @@ def push_ondemand_to_zoho(candidate_id: int, db: Session = Depends(get_db),
     candidate.zoho_od_status = result["status"]
     candidate.zoho_od_synced_at = datetime.now(timezone.utc)
     candidate.zoho_od_last_error = None
+    _record_zoho_push(db, candidate, "ondemand", result, current, actor)
     db.commit()
     verb = "Created" if result["created"] else "Updated"
     return {"detail": f"{verb} Zoho Consultant Tracker draft {result['record_id']} from the "
                       "On-Demand Candidate form. Complete the remaining mandatory fields "
-                      "in Zoho and submit it there.", **result}
+                      f"in Zoho and submit it there.{_pushed_by_note(result)}", **result}
 
 
 # ---------------------------------------------------------------------------

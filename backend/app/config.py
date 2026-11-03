@@ -133,7 +133,32 @@ class Settings(BaseSettings):
     # documents into this form ("New Joiner Documents Track"). Blank keeps it refusing.
     ZOHO_DECLARATION_WRITE_FORM: str = "Referral_Bonus"
     ZOHO_ONDEMAND_WRITE_FORM: str = "consultant_tracker"
+    # API name of the editable "Pushed By" lookup (into P_Employee) on the
+    # Zoho forms. Filled with the pushing HR's employee record on any form
+    # that has it; forms without it are left alone. Blank turns it off.
+    ZOHO_PUSHED_BY_FIELD: str = "Pushed_By"
     ZOHO_TIMEOUT: int = 30
+
+    # --- Per-HR Zoho connection (app/services/zoho_oauth.py) ---
+    # "per_user" (or "user"): every push runs on the pushing HR's own Zoho OAuth token, and an
+    # HR who has not connected Zoho is told to; there is no admin fallback.
+    # "admin": the old behaviour, every push on ZOHO_REFRESH_TOKEN above.
+    ZOHO_AUTH_MODE: str = "per_user"
+    # A "Server-based Application" client from api-console.zoho.in — not the
+    # Self Client that issued ZOHO_REFRESH_TOKEN. Its Authorized Redirect URI
+    # must be exactly ZOHO_OAUTH_REDIRECT_URI.
+    ZOHO_OAUTH_CLIENT_ID: str = ""
+    ZOHO_OAUTH_CLIENT_SECRET: str = ""
+    ZOHO_OAUTH_REDIRECT_URI: str = "http://127.0.0.1:8000/zoho/oauth/callback"
+    ZOHO_OAUTH_SCOPES: str = ("ZOHOPEOPLE.forms.READ,ZOHOPEOPLE.forms.CREATE,"
+                              "ZOHOPEOPLE.forms.UPDATE,AaaServer.profile.Read")
+    # Fernet key the HRs' refresh tokens are encrypted with. Generate once:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Changing it disconnects every HR (their tokens can no longer be read).
+    ZOHO_TOKEN_ENCRYPTION_KEY: str = ""
+    # After each push, read the record back and store Zoho's Added By, to
+    # confirm it names the pushing HR. One extra GET per push.
+    ZOHO_VERIFY_ADDED_BY: bool = True
 
     # --- File uploads ---
     UPLOAD_DIR: str = "uploads"

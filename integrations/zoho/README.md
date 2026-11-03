@@ -152,3 +152,34 @@ the backend as a service call. `zoho_client.py`'s functions (`access_token`,
 `insert_record`, `update_record`, `find_by_email`) are importable as-is, and the
 mapping stays in `field_map.json` so the CLI and any backend code read the same
 source.
+
+## Per-HR connection ("Connect Zoho")
+
+With `ZOHO_AUTH_MODE=user` (the default) every HR-portal push runs on the
+pushing HR's own Zoho token, never the admin token above. An HR who has not
+connected gets "Connect your Zoho account" (HTTP 428) and a Connect Zoho prompt.
+
+One-time setup:
+1. api-console.zoho.in → Add Client → **Server-based Applications**.
+   Authorized Redirect URI: `ZOHO_OAUTH_REDIRECT_URI` exactly
+   (local: `http://127.0.0.1:8000/zoho/oauth/callback`; Azure: `https://<app>/zoho/oauth/callback`).
+2. `.env`: `ZOHO_OAUTH_CLIENT_ID`, `ZOHO_OAUTH_CLIENT_SECRET`, `ZOHO_OAUTH_REDIRECT_URI`,
+   and a new `ZOHO_TOKEN_ENCRYPTION_KEY` (Fernet key, see `.env.example`).
+3. Zoho admin: an Employee Lookup field (e.g. `Assigned_HR`) on each target form;
+   set `ZOHO_PUSHED_BY_FIELD` to its API name. HR/TA role needs View/Add/Edit on
+   the forms plus the lookup and attachment fields.
+4. `python init_db.py` (adds the `hr_users.zoho_*` columns and `zoho_push_records`).
+
+On connect the app requires the Zoho account's email to equal the HR's portal
+email, finds their `P_Employee` record by `EmailID` and stores its record id
+(plus the visible Employee ID) and the encrypted refresh token. Each push writes
+that record id into `ZOHO_PUSHED_BY_FIELD` and adds a row to `zoho_push_records`
+(record id, pushing HR, assigned employee, and Zoho's Added By read back).
+
+POC check after pushing a synthetic candidate as each HR:
+```sql
+SELECT p.pushed_at, h.email, p.target, p.form, p.record_id, p.auth_mode,
+       p.assigned_employee_record_id, p.pushed_by_status, p.added_by
+FROM zoho_push_records p JOIN hr_users h ON h.id = p.pushed_by_hr_id
+ORDER BY p.pushed_at DESC;
+```

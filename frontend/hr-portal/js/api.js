@@ -154,7 +154,9 @@ async function apiFetch(path, options = {}) {
     return new Promise(() => {});
   }
   if (!res.ok) {
-    throw new Error(errorMessage(data, res.status));
+    const err = new Error(errorMessage(data, res.status));
+    err.status = res.status;   // e.g. 428: connect Zoho first
+    throw err;
   }
   return data;
 }
