@@ -379,7 +379,10 @@ def push_reference_check(candidate: Candidate, *, actor) -> dict:
         raise ZohoPushError("Candidate has no email on record — Zoho's duplicate check needs one.")
 
     pdf = reference_pdf.build(candidate)
-    safe = "".join(ch if ch.isalnum() else "_" for ch in (candidate.name or "candidate")).strip("_")
+    # The CIF full name, not the (often first-name-only) name HR typed in.
+    name = ((candidate.profile.full_name if candidate.profile else None)
+            or candidate.name or "").strip()
+    safe = "".join(ch if ch.isalnum() else "_" for ch in (name or "candidate")).strip("_")
     filename = f"Referee_Check_{safe or candidate.id}.pdf"
 
     token = actor.token   # the pushing HR's own token (app/services/zoho_oauth.py)
@@ -409,9 +412,9 @@ def push_reference_check(candidate: Candidate, *, actor) -> dict:
     # tempfile hangs on this machine (its temp dir refuses new files and
     # Python retries effectively forever).
     files = [(REF_FILE_FIELD, filename, "application/pdf", pdf)]
-    # On an existing record only the PDF is touched; a new one also gets
-    # the email/name it is matched on next time.
-    payload = {} if record_id else {REF_EMAIL_FIELD: email, REF_NAME_FIELD: candidate.name or ""}
+    # The name is always (re)written so records created with a short name
+    # get corrected; a new record also gets the email it is matched on.
+    payload = {REF_NAME_FIELD: name} if record_id else {REF_EMAIL_FIELD: email, REF_NAME_FIELD: name}
     fields = _form_fields(token, form)
     hidden = _drop_hidden(fields, payload, files)
     pushed_by_status = _add_pushed_by(fields, payload, actor.employee_record_id)
