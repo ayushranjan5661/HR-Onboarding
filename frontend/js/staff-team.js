@@ -143,7 +143,7 @@ async function initTeamPage(mode) {
       ? `<td>${s.manager_name ? escapeHtml(s.manager_name) : `<span class="pending-tag">No team</span>`}</td>` : "";
     const teamCell = s.role === "MANAGER" ? `<td class="nowrap">${s.team_size} HR</td>` : "";
     return `<tr class="${s.is_active ? "" : "inactive-row"}">
-      <td><div class="name-cell"><span class="row-avatar">${escapeHtml(initials(s.name))}</span><div>${escapeHtml(s.name)}${s.employee_id ? `<div class="muted-text">${escapeHtml(s.employee_id)}</div>` : ""}</div></div></td>
+      <td><div class="name-cell"><span class="row-avatar" data-tone="${avatarTone(s.name)}">${escapeHtml(initials(s.name))}</span><div>${escapeHtml(s.name)}${s.employee_id ? `<div class="muted-text">${escapeHtml(s.employee_id)}</div>` : ""}</div></div></td>
       <td>${escapeHtml(s.email).replace("@", "<wbr>@")}</td>
       <td>${activeBadge(s.is_active)}</td>
       ${teamCell}${managerCell}
