@@ -7,6 +7,13 @@ function escapeHtml(str) {
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
+function avatarTone(name) {
+  // Same person -> same colour on every page (0-4, matched in portal-theme.css).
+  let h = 0;
+  for (const ch of String(name || "").trim().toLowerCase()) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return h % 5;
+}
+
 function initials(name) {
   const parts = (name || "").trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return "?";
@@ -202,7 +209,7 @@ function renderAudit(container, entries) {
     <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
     <tbody>${entries.map(e => `<tr>
       <td style="white-space:nowrap;">${fmtDateTime(e.created_at)}</td>
-      <td><div class="name-cell"><span class="row-avatar">${escapeHtml(initials(e.actor_name))}</span>
+      <td><div class="name-cell"><span class="row-avatar" data-tone="${avatarTone(e.actor_name)}">${escapeHtml(initials(e.actor_name))}</span>
         <div>${escapeHtml(e.actor_name || "—")}<div class="muted-text">${escapeHtml(roleLabel(e.actor_role))}</div></div></div></td>
       <td><span class="badge badge-action">${escapeHtml(actionLabel(e.action))}</span></td>
       <td>${escapeHtml(e.target_name || "—")}<div class="muted-text">${e.target_type === "CANDIDATE" ? "Candidate" : "Employee"}</div></td>

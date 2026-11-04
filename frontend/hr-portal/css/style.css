@@ -116,6 +116,9 @@ h1, h2, h3, h4 { font-family: inherit; letter-spacing: -0.01em; }
 .zoho-meta { font-size: 0.7rem; color: rgba(255,255,255,0.55); margin-top: 2px; }
 
 .main-area { flex: 1; min-width: 0; background: var(--bg); }
+/* Default link purple is unreadable on the dark sidebar */
+.sidebar-footer .back-link { color: #c7d2fe; text-decoration: none; }
+.sidebar-footer .back-link:hover { color: #fff; text-decoration: underline; }
 
 /* Avatar chip inside candidate table rows */
 .name-cell { display: flex; align-items: center; gap: 10px; font-weight: 600; min-width: 0; }
@@ -173,29 +176,90 @@ h1, h2, h3, h4 { font-family: inherit; letter-spacing: -0.01em; }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
-/* Tablet & phone: sidebar collapses into a sticky top app bar */
+/* Desktop: the mobile top bar, drawer close button and backdrop don't exist */
+.mobile-topbar, .sidebar-scrim, .menu-close { display: none; }
+
+/* Tablet & phone: compact top bar + the sidebar slides in from the left
+   (js/mobile-nav.js adds the bar, backdrop and close button). */
 @media (max-width: 900px) {
-  .app-shell { flex-direction: column; }
-  .sidebar {
-    width: 100%; flex: none; height: auto; position: sticky; top: 0;
-    flex-direction: row; align-items: center; gap: 10px;
-    padding: 10px 14px; padding-top: max(10px, env(safe-area-inset-top));
-    box-shadow: 0 2px 12px rgba(21,19,46,0.3);
+  .app-shell { display: block; }
+
+  .mobile-topbar {
+    display: flex; align-items: center; gap: 12px;
+    position: sticky; top: 0; z-index: 30;
+    min-height: 58px; padding: 8px 14px;
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+    background: #15132e;
+    background-image: radial-gradient(120% 140% at 0% 0%, rgba(99,102,241,0.45) 0%, transparent 60%);
+    color: #fff;
+    box-shadow: 0 2px 14px rgba(21,19,46,0.28);
   }
-  .sidebar-brand { padding: 0; margin-right: auto; font-size: 0.95rem; }
-  .sidebar-nav { flex-direction: row; flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-  .sidebar-nav::-webkit-scrollbar { display: none; }
-  .nav-item { padding: 7px 12px; }
-  .nav-item.active { box-shadow: none; }
-  .sidebar-footer { border-top: none; margin: 0; padding: 0; display: flex; align-items: center; gap: 8px; }
-  .user-chip { margin-bottom: 0; padding: 0; }
-  .user-name { display: none; }
-  .logout-btn { width: auto; }
-  /* Top bar has no room for the card: just the status dot */
-  #zohoConnectBox { margin: 0; }
-  .zoho-card { background: none; border: none; padding: 0; }
-  .zoho-card-head { margin: 0; }
-  .zoho-status span:last-child, .zoho-disconnect, .zoho-email, .zoho-meta { display: none; }
+  .menu-toggle {
+    flex: none; width: 42px; height: 42px; padding: 0 11px; border-radius: 12px;
+    display: flex; flex-direction: column; justify-content: center; gap: 4px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: background var(--ease);
+  }
+  .menu-toggle:active { background: rgba(255,255,255,0.18); }
+  .menu-toggle span {
+    display: block; height: 2px; border-radius: 2px; background: #fff;
+    transition: transform 240ms ease, opacity 200ms ease;
+  }
+  .menu-toggle span:nth-child(2) { width: 70%; }
+  .mobile-title { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+  .mobile-page { font-weight: 700; font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-portal { font-size: 0.72rem; color: rgba(255,255,255,0.6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-portal:empty { display: none; }
+  .mobile-avatar {
+    width: 36px; height: 36px; padding: 0; border: 0; cursor: pointer; font-family: inherit;
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.18); -webkit-tap-highlight-color: transparent;
+  }
+  .sidebar:focus { outline: none; }
+  .mobile-avatar:empty { visibility: hidden; }
+
+  /* The drawer */
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 50;
+    width: min(300px, 84vw); height: 100%; height: 100dvh;
+    padding: 18px 16px; padding-top: max(18px, env(safe-area-inset-top));
+    padding-bottom: max(18px, env(safe-area-inset-bottom));
+    overflow-y: auto; overscroll-behavior: contain;
+    transform: translateX(-104%); visibility: hidden;
+    transition: transform 280ms cubic-bezier(0.32, 0.72, 0, 1), visibility 0s linear 280ms;
+    box-shadow: none;
+  }
+  body.nav-open .sidebar {
+    transform: none; visibility: visible;
+    transition: transform 280ms cubic-bezier(0.32, 0.72, 0, 1), visibility 0s;
+    box-shadow: 12px 0 40px rgba(10,8,30,0.45);
+  }
+  .sidebar-brand { padding: 4px 4px 22px 8px; }
+  .menu-close {
+    display: flex; align-items: center; justify-content: center;
+    margin-left: auto; width: 36px; height: 36px; border-radius: 10px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
+    color: #fff; font-size: 1.4rem; line-height: 1; cursor: pointer;
+  }
+  .menu-close:active { background: rgba(255,255,255,0.18); }
+  .nav-item { padding: 13px 14px; font-size: 0.95rem; }
+  .sidebar-footer .back-link { padding: 6px 2px; }
+  .logout-btn { padding: 11px 12px; font-size: 0.88rem; }
+
+  /* Backdrop */
+  .sidebar-scrim {
+    display: block; position: fixed; inset: 0; z-index: 40;
+    background: rgba(15,13,35,0.5);
+    -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+    opacity: 0; pointer-events: none; transition: opacity 260ms ease;
+  }
+  body.nav-open .sidebar-scrim { opacity: 1; pointer-events: auto; }
+  body.nav-open { overflow: hidden; }
+}
+@media (max-width: 900px) and (prefers-reduced-motion: reduce) {
+  .sidebar, body.nav-open .sidebar, .sidebar-scrim { transition: none; }
 }
 /* List pages use the laptop's width instead of a narrow centre column */
 @media (min-width: 901px) {
@@ -208,6 +272,10 @@ h1, h2, h3, h4 { font-family: inherit; letter-spacing: -0.01em; }
   .card:has(> table.cards) { overflow-x: auto; }
   /* Short values (headers, badges, counts, dates) never break mid-phrase */
   table.cards th, table.cards .badge, table.cards .nowrap { white-space: nowrap; }
+  /* Action buttons stay on one line; names wrap only between words */
+  table.cards .row-actions .btn { white-space: nowrap; }
+  table.cards .name-cell { min-width: 150px; }
+  table.cards td[data-label="Who"] .name-cell { min-width: 160px; }
   table.cards td:last-child:not(.cell-actions) { min-width: 200px; }
   table.cards td select { min-width: 140px; max-width: 170px; }
   /* Long emails may break at the @ (<wbr> in the markup) so the row fits */
@@ -251,28 +319,6 @@ h1, h2, h3, h4 { font-family: inherit; letter-spacing: -0.01em; }
   table.cards td.cell-actions .btn { flex: 1 1 auto; padding: 10px 14px; font-size: 0.8rem; }
   table.cards .btn-small { min-height: 36px; }
 }
-@media (max-width: 640px) {
-  .user-name { display: none; }
-  /* Page links drop to a second row of tabs under the brand/logout bar */
-  .sidebar {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "brand foot" "nav nav"; row-gap: 10px; padding-bottom: 10px;
-  }
-  .sidebar-brand { grid-area: brand; min-width: 0; }
-  .sidebar-footer { grid-area: foot; }
-  .sidebar-footer .back-link { margin: 0 !important; max-width: 64px; line-height: 1.2; text-align: right; }
-  .sidebar-nav { grid-area: nav; gap: 6px; }
-  .sidebar-nav .nav-section, .nav-dot { display: none; }
-  .nav-item {
-    flex: 1 1 auto; justify-content: center; text-align: center; line-height: 1.2;
-    padding: 8px 10px; font-size: 0.82rem; border-radius: 20px; background: rgba(255,255,255,0.05);
-  }
-  body.themed .sidebar .nav-item:not(.active):hover { transform: none; }
-  .nav-item.active { background: rgba(167,139,250,0.3); }
-  .avatar { width: 30px; height: 30px; }
-  .logout-btn { padding: 7px 12px; }
-}
-
 /* ---------------------------------------------------------------------
    Top bar (legacy — kept for any page not yet on the sidebar shell)
 --------------------------------------------------------------------- */
@@ -382,6 +428,19 @@ h1, h2, h3, h4 { font-family: inherit; letter-spacing: -0.01em; }
 }
 .role-tab.active { background: #fff; color: var(--brand-dark); box-shadow: var(--shadow-sm); }
 .role-tab:not(.active):hover { color: var(--text); }
+
+/* Login responsive (original theme) */
+@media (max-width: 480px) {
+  .login-shell { padding: 30px 22px; }
+}
+@media (max-width: 720px) {
+  /* Login: logo sits above the card instead of floating over it */
+  .login-wrap { justify-content: flex-start; gap: 22px; padding: 28px 16px 24px; padding-top: max(28px, env(safe-area-inset-top)); }
+  .login-mark { position: static; align-self: center; }
+  .login-mark .mark-logo { height: 64px; }
+  .login-foot { margin-top: auto; }
+  .role-tab { padding: 11px 10px; font-size: 0.9rem; }
+}
 
 /* ---------------------------------------------------------------------
    Cards
@@ -687,19 +746,6 @@ table .edit-input { min-width: 120px; margin: 0; padding: 6px 8px; font-size: 0.
 /* ---------------------------------------------------------------------
    Responsive
 --------------------------------------------------------------------- */
-@media (max-width: 480px) {
-  .login-shell { padding: 30px 22px; }
-}
-
-@media (max-width: 720px) {
-  /* Login: logo sits above the card instead of floating over it */
-  .login-wrap { justify-content: flex-start; gap: 22px; padding: 28px 16px 24px; padding-top: max(28px, env(safe-area-inset-top)); }
-  .login-mark { position: static; align-self: center; }
-  .login-mark .mark-logo { height: 64px; }
-  .login-foot { margin-top: auto; }
-  .role-tab { padding: 11px 10px; font-size: 0.9rem; }
-}
-
 @media (max-width: 640px) {
   .container { padding: 18px 12px 40px; }
   .card { padding: 18px 16px; }
@@ -748,6 +794,14 @@ table .edit-input { min-width: 120px; margin: 0; padding: 6px 8px; font-size: 0.
   /* Finger-sized tap targets for the compact buttons */
   .btn-small { min-height: 36px; padding: 8px 14px; }
   .section-title-actions { order: 3; flex: 1 1 100%; justify-content: flex-start; margin-left: 0; }
+  /* Form actions: an even two-column grid instead of ragged wrapped lines */
+  .section-title-actions:has(> * + * + *) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .section-title-actions > .btn { width: 100%; justify-content: center; white-space: nowrap; }
+  /* Login link row: link + expiry get the full width, buttons share a line below */
+  .field-row:has(> .field-actions) > .fval { flex: 1 1 100%; }
+  .field-row > .field-actions { flex: 1 1 100%; }
+  .field-row > .field-actions .btn { flex: 1 1 0; justify-content: center; }
+  .field-row .fval .link-truncate { display: block; max-width: 100%; }
   .decision-bar .btn { flex: 1; padding: 12px; }
   .access-banner-head, .access-row { flex-wrap: wrap; }
   .audit-timeline { padding-left: 18px; }
@@ -968,6 +1022,8 @@ table .edit-input { min-width: 120px; margin: 0; padding: 6px 8px; font-size: 0.
 }
 .inline-select:disabled { background: #f6f7fb; color: var(--muted); }
 .row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+/* Buttons and status badges inside table cells never split over two lines */
+td .btn, td .badge { white-space: nowrap; }
 .row-actions .btn-small { padding: 5px 10px; font-size: 0.76rem; }
 .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
 .filters .search-input { flex: 1; min-width: 220px; }
@@ -975,6 +1031,14 @@ table .edit-input { min-width: 120px; margin: 0; padding: 6px 8px; font-size: 0.
 .temp-pass { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem;
   background: var(--warn-bg); color: var(--warn); padding: 2px 6px; border-radius: 4px; }
 .pending-tag { color: var(--warn); font-size: 0.75rem; font-weight: 600; }
+/* One-time password cell: password + copy button on one line, note below */
+td:has(> .temp-pass) .temp-pass + .cred-copy { display: inline-flex; vertical-align: middle; margin-left: 6px; width: 30px; height: 30px; }
+@media (max-width: 1319px) {
+  table.cards td:has(> .temp-pass) { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 8px; }
+  table.cards td[data-label]:not(.cell-actions):has(> .temp-pass)::before { margin-right: auto; }
+  table.cards td:has(> .temp-pass) .temp-pass + .cred-copy { margin-left: 0; }
+  table.cards td:has(> .temp-pass) .pending-tag { flex-basis: 100%; text-align: right; }
+}
 tr.inactive-row td { opacity: 0.6; }
 .sidebar-nav .nav-section { color: rgba(255,255,255,0.45); font-size: 0.68rem; letter-spacing: 0.08em;
   text-transform: uppercase; padding: 14px 14px 4px; }

@@ -158,7 +158,7 @@ async function initCandidatesPage(mode) {
     document.getElementById("emptyState").classList.toggle("hidden", rows.length > 0);
     body.innerHTML = rows.map(c => `
       <tr data-open="${c.id}">
-        <td><div class="name-cell"><span class="row-avatar">${escapeHtml(initials(c.name))}</span>${escapeHtml(c.name)}</div></td>
+        <td><div class="name-cell"><span class="row-avatar" data-tone="${avatarTone(c.name)}">${escapeHtml(initials(c.name))}</span>${escapeHtml(c.name)}</div></td>
         <td>${escapeHtml(c.email).replace("@", "<wbr>@")}</td>
         <td>${stageBadge(c.stage)}</td>
         <td>${ownerSelect(c)}</td>

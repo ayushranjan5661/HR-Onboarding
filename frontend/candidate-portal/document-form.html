@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#3730a3">
 <title>Candidate Document Collection</title>
-<link rel="stylesheet" href="css/style.css?v=20261008a">
+<link rel="stylesheet" href="css/style.css?v=20261104n">
+<link rel="stylesheet" href="css/theme.css?v=20261104n">
 <style>
   .form-card { max-width: 980px; }
   .doc-group { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 18px; }
@@ -278,8 +279,8 @@
 
       const isFresher = data.candidate_type === "FRESHER";
       document.getElementById("formTitle").textContent = isFresher
-        ? "Candidate Document collection - Fresher/trainee"
-        : "Permanent / Fulltime Consultant Document collection";
+        ? "Document Collection — Fresher / Trainee"
+        : "Document Collection — Permanent / Fulltime Consultant";
       applyRequired(data.candidate_type);
 
       const doc = data.forms.find(f => f.form_type === "DOCUMENT_COLLECTION");

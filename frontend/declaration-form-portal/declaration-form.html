@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#3730a3">
 <title>Declaration Form for Pending Documents</title>
-<link rel="stylesheet" href="../candidate-portal/css/style.css?v=20261008a">
+<link rel="stylesheet" href="../candidate-portal/css/style.css?v=20261104n">
+<link rel="stylesheet" href="../candidate-portal/css/theme.css?v=20261104n">
 <style>
   .form-card { max-width: 1000px; }
   .decl-letter { line-height: 1.6; }
@@ -18,6 +19,20 @@
   .decl-table td.due input { margin: 0; }
   .decl-table input[name="pending_semesters"] { margin-top: 8px; }
   .done-msg { display: none; text-align: center; padding: 30px 10px; }
+  /* Phones: each document becomes a card — name on top, tick + date below. */
+  @media (max-width: 640px) {
+    .decl-table, .decl-table tbody { display: block; }
+    .decl-table thead { display: none; }
+    .decl-table tr {
+      display: grid; grid-template-columns: auto 1fr; gap: 10px 12px; align-items: center;
+      border: 1px solid #e9e6f5; border-radius: 12px; padding: 12px; margin-bottom: 10px; background: #fff;
+    }
+    .decl-table td { border: 0 !important; padding: 0 !important; width: auto !important; }
+    .decl-table td:first-child { grid-column: 1 / -1; font-weight: 600; color: #1f2937; }
+    .decl-table td.tick { display: flex; align-items: center; gap: 8px; text-align: left; }
+    .decl-table td.tick::after { content: "Pending"; font-size: .85rem; color: #6b7280; }
+    .decl-table td.due::before { content: "Expected date"; display: block; font-size: .75rem; color: #6b7280; margin-bottom: 4px; }
+  }
 </style>
 </head>
 <body>
