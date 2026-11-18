@@ -133,6 +133,10 @@ class Settings(BaseSettings):
     # documents into this form ("New Joiner Documents Track"). Blank keeps it refusing.
     ZOHO_DECLARATION_WRITE_FORM: str = "Referral_Bonus"
     ZOHO_ONDEMAND_WRITE_FORM: str = "consultant_tracker"
+    # The "Publish Documents" button: Document Collection uploads go to the
+    # form matching the candidate type (integrations/zoho/field_map_documents.json).
+    ZOHO_DOCS_EXPERIENCED_WRITE_FORM: str = "documents_collection"
+    ZOHO_DOCS_TRAINEE_WRITE_FORM: str = "documents_collection_trainee"
     # API name of the editable "Pushed By" lookup (into P_Employee) on the
     # Zoho forms. Filled with the pushing HR's employee record on any form
     # that has it; forms without it are left alone. Blank turns it off.

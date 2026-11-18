@@ -388,6 +388,9 @@ def push_reference_check(candidate: Candidate, *, actor) -> dict:
     token = actor.token   # the pushing HR's own token (app/services/zoho_oauth.py)
 
     record_id = candidate.zoho_ref_record_id
+    if not record_id and candidate.zoho_doc_form == form:
+        # The Documents push already created this candidate's record there.
+        record_id = candidate.zoho_doc_record_id
     if not record_id:
         try:
             existing = _zc.find_by_email(token, form, email, REF_EMAIL_FIELD)
@@ -442,6 +445,153 @@ def push_reference_check(candidate: Candidate, *, actor) -> dict:
     if not new_id:
         raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
     return {"record_id": new_id, "form": form, "status": "SYNCED", "created": not record_id,
+            "pushed_by": pushed_by_status, "hidden_fields": hidden}
+
+
+# "Documents Collection" (Experienced) / "Documents Collection - Trainee"
+# (Fresher): every Document Collection upload plus the portal's own CIF,
+# Declaration and (Trainee) Reference Check PDFs. See field_map_documents.json.
+DOCS_MAP_FILE = os.path.join(_INTEGRATIONS_ZOHO, "field_map_documents.json")
+
+
+def _docs_map() -> dict:
+    import json
+    with open(DOCS_MAP_FILE, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _generated_pdf(kind: str):
+    """(filename stem, builder module) for a PDF the portal generates."""
+    from app.services import cif_pdf, declaration_pdf, reference_pdf
+    return {"cif": ("CIF", cif_pdf), "declaration": ("Declaration", declaration_pdf),
+            "reference_check": ("Referee_Check", reference_pdf)}[kind]
+
+
+def documents_target(candidate: Candidate) -> tuple[str, dict]:
+    """(form, per-form map entry) for this candidate's Documents Collection
+    form, or ZohoPushError when the candidate type has none."""
+    entry = _docs_map()["forms"].get(candidate.candidate_type.value)
+    if entry is None:
+        raise ZohoPushError("Only Experienced and Fresher / Trainee candidates have a Zoho "
+                            "Documents Collection form.")
+    form = getattr(settings, entry["_setting"])
+    if not form:
+        raise ZohoPushError(f"Zoho push is not configured: set {entry['_setting']} in .env.")
+    return form, entry
+
+
+def documents_files(candidate: Candidate, entry: dict) -> tuple[list, list, list]:
+    """(files, skipped, missing): files are (zoho_field, filename, ctype,
+    path-or-bytes) ready for upload_files; skipped names generated PDFs that
+    are not ready yet; missing are uploads whose file is gone from disk."""
+    from app.utils.file_storage import upload_path
+    latest = {}
+    for doc in sorted(candidate.documents, key=lambda d: d.id or 0):
+        latest[doc.field_key] = doc
+    files, missing = [], []
+    for zoho_field, keys in _docs_map()["files"].items():
+        doc = next((latest[k] for k in keys if k in latest), None)
+        if doc is None:
+            continue
+        path = upload_path(doc.stored_filename)
+        if not os.path.exists(path):
+            missing.append(doc.field_key)
+            continue
+        files.append((zoho_field, doc.original_filename,
+                      doc.content_type or "application/octet-stream", path))
+
+    name = ((candidate.profile.full_name if candidate.profile else None)
+            or candidate.name or "").strip()
+    safe = "".join(ch if ch.isalnum() else "_" for ch in (name or "candidate")).strip("_")
+    skipped = []
+    for zoho_field, kind in entry.get("generated", {}).items():
+        stem, builder = _generated_pdf(kind)
+        reason = builder.not_ready_reason(candidate)
+        if reason:
+            skipped.append(f"{stem.replace('_', ' ')} PDF ({reason})")
+            continue
+        # Built in memory: tempfile hangs on this machine.
+        files.append((zoho_field, f"{stem}_{safe or candidate.id}.pdf", "application/pdf",
+                      builder.build(candidate)))
+    return files, skipped, missing
+
+
+def push_documents(candidate: Candidate, *, actor) -> dict:
+    """Upload the candidate's Document Collection files (and generated PDFs)
+    into their Documents Collection form. Updates the record already linked,
+    else the one Zoho has for their email, else inserts one. Returns
+    {"record_id", "form", "status", "created", "files", "skipped"}; raises
+    ZohoPushError."""
+    form, entry = documents_target(candidate)
+    email = candidate.email or ""
+    if not email:
+        raise ZohoPushError("Candidate has no email on record — Zoho's duplicate check needs one.")
+
+    files, skipped, missing = documents_files(candidate, entry)
+    if missing:
+        raise ZohoPushError("Cannot push: these documents are missing from the "
+                            f"server's uploads folder: {', '.join(missing)}.")
+    if not files:
+        raise ZohoPushError("Nothing to push: the candidate has no uploaded documents yet.")
+
+    name = ((candidate.profile.full_name if candidate.profile else None)
+            or candidate.name or "").strip()
+    email_field = entry["email_field"]
+    payload = {email_field: email, entry["name_field"]: name}
+
+    token = actor.token   # the pushing HR's own token (app/services/zoho_oauth.py)
+    fields = _form_fields(token, form)
+    hidden = _drop_hidden(fields, payload, files)
+    pushed_by_status = _add_pushed_by(fields, payload, actor.employee_record_id)
+
+    # A Trainee's Reference Check push writes the same record.
+    record_id = candidate.zoho_doc_record_id if candidate.zoho_doc_form == form else None
+    if not record_id and form == settings.ZOHO_REFERENCE_CHECK_WRITE_FORM:
+        record_id = candidate.zoho_ref_record_id
+    if not record_id:
+        try:
+            existing = _zc.find_by_email(token, form, email, email_field)
+        except _zc.ZohoUnreachable as exc:
+            raise ZohoPushError(_network_message(exc)) from exc
+        except _zc.ZohoError as exc:
+            raise ZohoPushError(
+                f"Duplicate check against Zoho failed, refusing to insert: {exc}") from exc
+        if len(existing) > 1:
+            raise ZohoPushError(
+                f"{len(existing)} records for {email} already exist on '{form}'. "
+                "Remove the duplicates in Zoho first, then publish again.")
+        if existing:
+            record_id = _hit_id(existing[0])
+            if not record_id:
+                raise ZohoPushError(f"Could not read the id of the existing Zoho record: "
+                                    f"{str(existing[0])[:400]}")
+
+    _zc.log("push.request", source="hr-portal", target="documents", form=form,
+            candidate_id=candidate.id, email=email, record_id=record_id,
+            files=[f[0] for f in files])
+    try:
+        response = (_zc.update_record(token, form, record_id, payload, files=files)
+                    if record_id
+                    else _zc.insert_record(token, form, payload, files=files))
+    except _zc.ZohoUnreachable as exc:
+        _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
+                reason="unreachable", message=str(exc))
+        raise ZohoPushError(_network_message(exc)) from exc
+    except _zc.ZohoError as exc:
+        _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
+                message=str(exc))
+        raise ZohoPushError(f"Zoho rejected the push: {exc}") from exc
+
+    _zc.log("push.response", source="hr-portal", form=form, candidate_id=candidate.id,
+            response=response)
+    if _zc.has_errors(response):
+        raise ZohoPushError(_error_message(response, form, record_id))
+
+    new_id = record_id or _zc.record_id_from(response)
+    if not new_id:
+        raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
+    return {"record_id": new_id, "form": form, "status": "SYNCED", "created": not record_id,
+            "files": len(files), "skipped": skipped,
             "pushed_by": pushed_by_status, "hidden_fields": hidden}
 
 
@@ -625,6 +775,10 @@ OD_COMMENT_FIELD = "Comments_Notes"      # answers the form has no field for
 # On-Demand document key -> Zoho upload field
 OD_FILES = {"aadhar_card": "Aadhar_Card", "pan_card": "Pan_Card",
             "passport_size_photo": "Passport_Size_Photo"}
+# The generated On-Demand form PDF (answers + every upload) goes here. The
+# tracker's other mandatory uploads (Resume, SOW, NDA, MSA, Interview
+# Feedbacks, Approval Email) have no source in the portal; HR adds them in Zoho.
+OD_PDF_FIELD = "Other_Documents"
 
 
 def ondemand_payload(candidate: Candidate) -> dict:
@@ -694,6 +848,10 @@ def push_ondemand(candidate: Candidate, *, actor) -> dict:
     if missing:
         raise ZohoPushError("Cannot push: these documents are missing from the "
                             f"server's uploads folder: {', '.join(missing)}.")
+    name = (candidate.ondemand_details.full_name or candidate.name or "").strip()
+    safe = "".join(ch if ch.isalnum() else "_" for ch in (name or "candidate")).strip("_")
+    files.append((OD_PDF_FIELD, f"OnDemand_Form_{safe or candidate.id}.pdf", "application/pdf",
+                  ondemand_pdf.build(candidate)))
 
     token = actor.token   # the pushing HR's own token (app/services/zoho_oauth.py)
 

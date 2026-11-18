@@ -521,6 +521,11 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         zoho_od_status=candidate.zoho_od_status,
         zoho_od_synced_at=candidate.zoho_od_synced_at,
         zoho_od_last_error=candidate.zoho_od_last_error,
+        zoho_doc_record_id=candidate.zoho_doc_record_id,
+        zoho_doc_form=candidate.zoho_doc_form,
+        zoho_doc_status=candidate.zoho_doc_status,
+        zoho_doc_synced_at=candidate.zoho_doc_synced_at,
+        zoho_doc_last_error=candidate.zoho_doc_last_error,
     )
 
 
@@ -1218,6 +1223,40 @@ def push_declaration_to_zoho(candidate_id: int, db: Session = Depends(get_db),
             "(they are named in Comments); re-sync once they are to fill it in.")
     return {"detail": f"{verb} Zoho New Joiner Documents Track record {result['record_id']} "
                       f"from the Declaration form.{note}{_pushed_by_note(result)}", **result}
+
+
+@router.post("/candidates/{candidate_id}/zoho/documents/push")
+def push_documents_to_zoho(candidate_id: int, db: Session = Depends(get_db),
+                           current: HRUser = Depends(get_current_staff)):
+    """Upload the Document Collection files plus the CIF / Declaration (and,
+    for trainees, Reference Check) PDFs into Zoho's Documents Collection form
+    for the candidate's type. Tracked in zoho_doc_* columns."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    if candidate.stage not in _ZOHO_PUSH_STAGES:
+        raise HTTPException(status_code=400,
+                            detail="Only candidates approved for BGV / Document Collection can be "
+                                   "published to Zoho People.")
+    actor = _zoho_actor(db, current)
+    try:
+        form, _entry = zoho_push.documents_target(candidate)
+        result = zoho_push.push_documents(candidate, actor=actor)
+    except zoho_push.ZohoPushError as exc:
+        candidate.zoho_doc_last_error = str(exc)[:2000]
+        db.commit()
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    candidate.zoho_doc_record_id = result["record_id"]
+    candidate.zoho_doc_form = form
+    candidate.zoho_doc_status = result["status"]
+    candidate.zoho_doc_synced_at = datetime.now(timezone.utc)
+    candidate.zoho_doc_last_error = None
+    _record_zoho_push(db, candidate, "documents", result, current, actor)
+    db.commit()
+    verb = "Created" if result["created"] else "Updated"
+    skipped = (" Not sent yet: " + "; ".join(result["skipped"]) + "."
+               if result["skipped"] else "")
+    return {"detail": f"{verb} Zoho {form} record {result['record_id']} with "
+                      f"{result['files']} document(s).{skipped}{_pushed_by_note(result)}", **result}
 
 
 @router.post("/candidates/{candidate_id}/zoho/ondemand/push")

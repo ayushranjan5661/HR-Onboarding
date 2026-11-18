@@ -1,0 +1,77 @@
+{
+  "_readme": "Document Collection uploads -> Zoho's two Documents Collection forms, picked by candidate_type: EXPERIENCED -> documents_collection (\"Documents Collection\"), FRESHER -> documents_collection_trainee (\"Documents Collection - Trainee\"). Used by push_documents() in backend/app/services/zoho_push.py (HR button \"Publish Documents\"). Every API name was re-read live from GET forms/<form>/components on 2026-11-13; where the HR-supplied sheet disagreed, the live name wins (see _sheet_corrections). Both forms share the same upload field names except where noted per form.",
+  "forms": {
+    "EXPERIENCED": {
+      "_form": "documents_collection",
+      "_setting": "ZOHO_DOCS_EXPERIENCED_WRITE_FORM",
+      "name_field": "candidate_name1",
+      "email_field": "Candidate_Email_ID",
+      "generated": {
+        "CIF": "cif",
+        "Declaration_document": "declaration"
+      }
+    },
+    "FRESHER": {
+      "_form": "documents_collection_trainee",
+      "_setting": "ZOHO_DOCS_TRAINEE_WRITE_FORM",
+      "name_field": "Candidate_Name",
+      "email_field": "Candidate_Email_ID",
+      "generated": {
+        "CIF": "cif",
+        "Declaration_document": "declaration",
+        "Reference_check": "reference_check"
+      }
+    }
+  },
+  "_generated_readme": "Zoho upload field -> PDF the portal builds itself (cif_pdf / declaration_pdf / reference_pdf). Uploaded from memory, and only once that form is submitted; a PDF that is not ready yet is skipped and named in the result.",
+  "_files_readme": "Zoho upload field -> local Document.field_key(s), in priority order: the first one the candidate actually uploaded is sent. Fallbacks: the CIF profile picture fills Passport_size_photo when no Document Collection photo exists; the BGV passport copy fills Passport_Copy likewise.",
+  "files": {
+    "Current_company_offer_letter": ["cc_offer_letter"],
+    "Current_company_role_change_letter": ["cc_role_change_letter"],
+    "Current_company_experience_letter": ["cc_experience_letter"],
+    "Current_company_Relieving_letter": ["cc_relieving_letter"],
+    "Current_company_Last_3_months_pay_slips": ["cc_pay_slips"],
+    "Previous_company_1_offer_letter": ["pc1_offer_letter"],
+    "Previous_company_1_role_change_letter": ["pc1_role_change_letter"],
+    "Previous_company_1_experience_letter": ["pc1_experience_letter"],
+    "Previous_company_1_relieving_letter": ["pc1_relieving_letter"],
+    "Previous_company_1_Last_3_months_pay_slips": ["pc1_pay_slips"],
+    "Previous_company_2_offer_letter": ["pc2_offer_letter"],
+    "Previous_company_2_role_change_letter": ["pc2_role_change_letter"],
+    "Previous_company_2_experience_letter": ["pc2_experience_letter"],
+    "Previous_company_2_relieving_letter": ["pc2_relieving_letter"],
+    "Previous_company_2_Last_3_months_salary_slip": ["pc2_pay_slips"],
+    "Previous_company_3_Offer_letter": ["pc3_offer_letter"],
+    "Previous_company_3_role_change_letter": ["pc3_role_change_letter"],
+    "Previous_company_3_experience_letter": ["pc3_experience_letter"],
+    "Previous_company_3_relieving_letter": ["pc3_relieving_letter"],
+    "Previous_company_3_Last_3_months_salary_slip": ["pc3_pay_slips"],
+    "Previous_company_4_Offer_letter": ["pc4_offer_letter"],
+    "Previous_company_4_role_change_letter": ["pc4_role_change_letter"],
+    "Previous_company_4_experience_letter": ["pc4_experience_letter"],
+    "Previous_company_4_relieving_letter": ["pc4_relieving_letter"],
+    "Previous_company_4_Last_3_months_pay_slips": ["pc4_pay_slips"],
+    "Th_marks_sheet": ["marksheet_10"],
+    "Th_marks_sheet_Diploma": ["marksheet_12_diploma"],
+    "UG_Consolidated_Marksheet": ["ug_consolidated_marksheet"],
+    "UG_certificate": ["ug_certificate"],
+    "PG_Consolidated_Marksheet": ["pg_consolidated_marksheet"],
+    "PG_Certificate": ["pg_certificate"],
+    "Other_educational_marksheet": ["other_edu_marksheet"],
+    "Other_educational_certificate": ["other_edu_certificate"],
+    "Additional_Certifications_if_any": ["additional_certifications"],
+    "Passport_size_photo": ["passport_size_photo", "profile_picture"],
+    "Pan_Card": ["pan_card"],
+    "Aadhar_Card": ["aadhar_card"],
+    "Passport_Copy": ["passport_copy", "passport_copy_bgv"],
+    "Address_proof": ["address_proof"],
+    "ID_proof": ["id_proof"]
+  },
+  "_sheet_corrections": {
+    "PG_Consolidated_Marksheet": "Sheet maps \"PG - Consolidated Marksheet\" to PG_Certificate. Both forms actually have a separate PG_Consolidated_Marksheet field, and PG_Certificate is the PG certificate.",
+    "Previous_company_3_role_change_letter": "Experienced sheet maps \"Previous company 3 role change letter\" to Previous_company_3_relieving_letter and omits the relieving letter row. Both fields exist separately on the live form.",
+    "Th_marks_sheet_Diploma": "Missing from the Trainee sheet, but the live Trainee form has it.",
+    "Assessment": "documents_collection spells it Assessment (as the Experienced sheet says); documents_collection_trainee spells it Assessement. Neither has a local source, so it is not mapped."
+  },
+  "_no_local_source": "HR-side documents the portal never collects, left for HR to upload in Zoho: Offer_details_approved_document, Offer_acceptance_document, L1/L2/L3_document, HR_document, Assessment/Assessement, Other_documents, LevelShift_Offer_letter, Resume, PreludeSys_Resume (Experienced only), Level_1/2/3_Interview, HR_Interview, pre_induction_id, Employee_Name (Trainee lookup), and the Name / DOB / Relationship fields."
+}

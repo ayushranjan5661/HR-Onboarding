@@ -219,6 +219,14 @@ class Candidate(Base):
     zoho_od_status = Column(String(20), nullable=True)
     zoho_od_synced_at = Column(DateTime(timezone=True), nullable=True)
     zoho_od_last_error = Column(Text, nullable=True)
+    # Same four, for the Document Collection uploads into Zoho's "Documents
+    # Collection" (Experienced) or "Documents Collection - Trainee" (Fresher)
+    # form; zoho_doc_form records which one the record id belongs to.
+    zoho_doc_record_id = Column(String(50), nullable=True)
+    zoho_doc_form = Column(String(100), nullable=True)
+    zoho_doc_status = Column(String(20), nullable=True)
+    zoho_doc_synced_at = Column(DateTime(timezone=True), nullable=True)
+    zoho_doc_last_error = Column(Text, nullable=True)
 
     profile = relationship("CandidateProfile", uselist=False, back_populates="candidate", cascade="all, delete-orphan")
     submissions = relationship("FormSubmission", back_populates="candidate", cascade="all, delete-orphan")

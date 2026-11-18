@@ -902,9 +902,11 @@ function render() {
   const refPushEligible = zohoEligible && c.candidate_type === "FRESHER";
   document.getElementById("zohoRefCard").classList.toggle("hidden", !refPushEligible);
   document.getElementById("zohoDeclCard").classList.toggle("hidden", !zohoEligible);
+  document.getElementById("zohoDocCard").classList.toggle("hidden", !zohoEligible);
   if (zohoEligible) {
     renderZoho(c, "confirmation");
     renderZoho(c, "candidate");
+    renderZoho(c, "documents");
     if (refPushEligible) renderZoho(c, "reference");
     renderZoho(c, "declaration");
   }
@@ -927,6 +929,17 @@ const ZOHO_TARGETS = {
     prefix: "zoho_cand_", bodyId: "zohoCandBody", btnId: "zohoCandPushBtn",
     path: "zoho/candidate-form/push", label: "Zoho Candidate Onboarding Form",
   },
+  // Document Collection uploads + CIF / Declaration PDFs into Zoho's
+  // "Documents Collection" (Experienced) or "... - Trainee" (Fresher).
+  documents: {
+    prefix: "zoho_doc_", bodyId: "zohoDocBody", btnId: "zohoDocPushBtn",
+    path: "zoho/documents/push", label: "Zoho Documents Collection Form",
+    confirmNew: "Upload this candidate's Document Collection files, with the CIF and "
+      + "Declaration PDFs (and the Referee Check PDF for trainees), to Zoho's Documents "
+      + "Collection form?",
+    confirmAgain: "Re-upload the latest documents to the Zoho Documents Collection record? "
+      + "Each document sent replaces the one in Zoho.",
+  },
   // Uploads the Referee Check PDF into Zoho's "Documents Collection - Trainee".
   reference: {
     prefix: "zoho_ref_", bodyId: "zohoRefBody", btnId: "zohoRefPushBtn",
@@ -948,7 +961,7 @@ const ZOHO_TARGETS = {
     prefix: "zoho_od_", bodyId: "zohoOdBody", btnId: "zohoOdPushBtn",
     path: "zoho/ondemand/push", label: "Zoho Consultant Tracker",
     confirmNew: "Create a Zoho Consultant Tracker draft from this On-Demand Candidate form, "
-      + "with the Aadhar, PAN and photo uploads?",
+      + "with the Aadhar, PAN and photo uploads and the form PDF (as Other Documents)?",
     confirmAgain: "Update the Zoho Consultant Tracker record with the latest On-Demand form?",
   },
 };
