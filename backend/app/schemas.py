@@ -345,6 +345,11 @@ class CandidateDetailOut(BaseModel):
     zoho_od_status: Optional[str] = None
     zoho_od_synced_at: Optional[datetime] = None
     zoho_od_last_error: Optional[str] = None
+    zoho_doc_record_id: Optional[str] = None
+    zoho_doc_form: Optional[str] = None
+    zoho_doc_status: Optional[str] = None
+    zoho_doc_synced_at: Optional[datetime] = None
+    zoho_doc_last_error: Optional[str] = None
 
     class Config:
         from_attributes = True

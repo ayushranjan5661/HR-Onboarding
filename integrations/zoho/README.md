@@ -183,3 +183,18 @@ SELECT p.pushed_at, h.email, p.target, p.form, p.record_id, p.auth_mode,
 FROM zoho_push_records p JOIN hr_users h ON h.id = p.pushed_by_hr_id
 ORDER BY p.pushed_at DESC;
 ```
+
+## Which portal form goes to which Zoho form
+
+| Portal form | Zoho form (API name) | Map / code | HR button |
+|---|---|---|---|
+| CIF | `Candidate` | `field_map_candidate.json` | Publish to Zoho Candidate Onboarding Form |
+| Document Collection — Experienced | `documents_collection` | `field_map_documents.json` → `push_documents` | Publish to Zoho Documents Collection Form |
+| Document Collection — Fresher/Trainee | `documents_collection_trainee` | `field_map_documents.json` → `push_documents` (+ `push_reference_check`, same record) | same button, picked by candidate type |
+| On-Demand Candidate form | `consultant_tracker` | `ondemand_payload` / `OD_FILES` in `zoho_push.py` | Publish to Zoho Consultant Tracker |
+
+The Documents Collection push also uploads the portal-generated CIF and
+Declaration PDFs (and, for trainees, the Referee Check PDF) into the `CIF`,
+`Declaration_document` and `Reference_check` fields. Field names were re-read
+live on 2026-11-13; `field_map_documents.json` → `_sheet_corrections` lists
+where the HR sheet was wrong.
