@@ -606,6 +606,9 @@ def delete_candidate(candidate_id: int, db: Session = Depends(get_db),
         FieldEditPermission.candidate_id == candidate_id).delete()
     db.query(FormDraftDocument).filter(FormDraftDocument.candidate_id == candidate_id).delete()
     db.query(FormDraft).filter(FormDraft.candidate_id == candidate_id).delete()
+    # Zoho push history points at the candidate too; without this, any
+    # candidate that was ever pushed fails the delete on the foreign key.
+    db.query(ZohoPushRecord).filter(ZohoPushRecord.candidate_id == candidate_id).delete()
     # The trail keeps the name and email as text, so it outlives the candidate.
     owner = db.get(HRUser, candidate.assigned_hr_id) if candidate.assigned_hr_id else None
     staff_service.audit(db, current, "CANDIDATE_DELETED", target_type="CANDIDATE", target=candidate,
