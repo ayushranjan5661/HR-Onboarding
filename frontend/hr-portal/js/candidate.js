@@ -1048,12 +1048,17 @@ async function pushToZoho(target = "confirmation") {
     alreadyPushed = rec.action === "update";
     const who = `${rec.name || "(no name)"}, ${rec.email}`;
     const pidNote = rec.pre_induction_id ? ` (Pre-Induction ID ${rec.pre_induction_id})` : "";
-    msg = (rec.action === "update"
+    msg = (rec.action === "create_pre_induction"
+        ? `No Pre-Induction record in Zoho for ${rec.email}. It will be created first for `
+          + `${rec.name || "(no name)"} (name, mail, contact and photo; the Zoho team fills `
+          + "DOJ, Designation etc. later), then the Documents Collection record linked to it."
+        : rec.action === "update" && rec.needs_link
+        ? `Found Zoho Documents Collection record ${rec.record_id}: ${who}. It has no Pre-Induction `
+          + (rec.pre_record_id
+            ? `link yet; it will be linked to Pre-Induction record${pidNote}.`
+            : "record yet; one will be created first and linked to it.")
+        : rec.action === "update"
         ? `Found Zoho Documents Collection record ${rec.record_id}${pidNote}: ${who}.`
-        : rec.action === "create_unlinked"
-        ? `No Pre-Induction or Documents Collection record in Zoho for ${rec.email}. `
-          + `A new Documents Collection record will be created for ${rec.name || "(no name)"}, `
-          + "without a Pre-Induction ID (the Zoho team can link it later)."
         : `No Documents Collection record yet. Found the Pre-Induction record${pidNote}: ${who}. `
           + "A new Documents Collection record will be created and linked to it.")
       + (rec.email_matches ? ""
@@ -1070,12 +1075,15 @@ async function pushToZoho(target = "confirmation") {
         title: `Publish to ${t.label}`,
         confirmText: alreadyPushed ? "Re-sync" : "Publish",
       })) return;
+  return sendZohoPush(t, btn, zohoEmail ? { zoho_email: zohoEmail } : {});
+}
 
+async function sendZohoPush(t, btn, body) {
   btn.disabled = true;
   btn.textContent = "Publishing…";
   try {
     const result = await apiFetch(`/hr/candidates/${candidateId}/${t.path}`, {
-      method: "POST", body: JSON.stringify(zohoEmail ? { zoho_email: zohoEmail } : {}),
+      method: "POST", body: JSON.stringify(body),
     });
     await load();
     await showAlert(result.detail, { title: `Published to ${t.label}` });

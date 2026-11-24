@@ -166,6 +166,9 @@ class DocumentsPushRequest(BaseModel):
     # Candidate email on the Zoho record (as the Zoho team entered it):
     # update that exact record.
     zoho_email: Optional[str] = None
+    # Pre-Induction popup values {field API name: value}, used only when Zoho
+    # has no Pre_Induction_Procedure record for zoho_email (created first).
+    pre_induction: Optional[dict[str, str]] = None
 
 
 class ChangeSetRequest(BaseModel):

@@ -137,6 +137,14 @@ class Settings(BaseSettings):
     # form matching the candidate type (integrations/zoho/field_map_documents.json).
     ZOHO_DOCS_EXPERIENCED_WRITE_FORM: str = "documents_collection"
     ZOHO_DOCS_TRAINEE_WRITE_FORM: str = "documents_collection_trainee"
+    # Values the Documents push puts on the Pre_Induction_Procedure record it
+    # creates when Zoho has none for the email. JSON object
+    # {field API name: value}: lookup fields take the Zoho record id, picklists
+    # the exact option, e.g.
+    # {"Department":"312853000000078045","Cab_Required":"No","Laptop_Required":"Yes"}
+    # Reporting_Manager is the one field Zoho demands even with
+    # skipMandatoryFields; 312853000034502005 is "1234 - Team - HR".
+    ZOHO_PRE_INDUCTION_DEFAULTS: str = '{"Reporting_Manager":"312853000034502005"}'
     # API name of the editable "Pushed By" lookup (into P_Employee) on the
     # Zoho forms. Filled with the pushing HR's employee record on any form
     # that has it; forms without it are left alone. Blank turns it off.

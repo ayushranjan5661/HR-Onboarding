@@ -435,21 +435,28 @@ def upload_files(token, form, files):
         return {zoho_field: fut.result() for zoho_field, fut in futures.items()}
 
 
-def insert_record(token, form, payload, draft=False, files=None):
+def insert_record(token, form, payload, draft=False, files=None, skip_mandatory=False):
     """Create a record. `payload` is the whole inputData, tabular columns
     included — build_full_payload has already merged them in, because Zoho
     takes tabular rows as column arrays inside inputData and has no
-    tabularData parameter (see build_subforms)."""
+    tabularData parameter (see build_subforms).
+
+    skip_mandatory sends skipMandatoryFields=true: a normal (non-draft)
+    record without the form's mandatory fields. Verified on
+    Pre_Induction_Procedure 2026-11-24 — it still demanded Reporting_Manager."""
     if files:
         payload = dict(payload, **upload_files(token, form, files))
     data = {"inputData": _dumps(payload)}
     if draft:
         data["isDraft"] = "true"
+    if skip_mandatory:
+        data["skipMandatoryFields"] = "true"
     path = "forms/json/%s/insertRecord" % urllib.parse.quote(form)
     return api("POST", path, data=data, token=token)
 
 
-def update_record(token, form, record_id, payload, files=None, draft=False):
+def update_record(token, form, record_id, payload, files=None, draft=False,
+                  skip_mandatory=False):
     """Update a record. Same payload contract as insert_record."""
     if files:
         payload = dict(payload, **upload_files(token, form, files))
@@ -457,6 +464,8 @@ def update_record(token, form, record_id, payload, files=None, draft=False):
         "recordId": record_id,
         "inputData": _dumps(payload),
     }
+    if skip_mandatory:
+        data["skipMandatoryFields"] = "true"
     if draft:
         # Keep the record a draft on update too: a non-draft update enforces
         # every mandatory field on the form, including ones no local data
