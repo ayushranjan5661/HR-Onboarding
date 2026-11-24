@@ -545,6 +545,7 @@ class OnDemandDetails(Base):
     alternate_number = Column(String(20))
     linkedin_link = Column(String(500))
     date_of_birth = Column(String(20))
+    blood_group = Column(String(10))          # Full Time / C2C Full Time only
     bank_account_name = Column(String(150))
     bank_name = Column(String(150))
     bank_account_number = Column(String(30))

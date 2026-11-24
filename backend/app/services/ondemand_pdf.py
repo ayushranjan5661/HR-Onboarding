@@ -45,7 +45,8 @@ def build(candidate: Candidate) -> bytes:
     rep = _Report("Consultant Form")
     rep.banner(details.full_name or candidate.name or "")
     layout = consultant_layout(candidate.consultant_type)
-    sections = [("Personal Details", _PERSONAL_FIELDS, _PERSONAL)]
+    personal = _PERSONAL_FIELDS + ([("blood_group", "Blood Group")] if layout["blood_group"] else [])
+    sections = [("Personal Details", personal, _PERSONAL)]
     if layout["bank"]:
         sections.append(("Bank Details", _BANK_FIELDS, _BANK))
     for title, fields, (accent, tint) in sections:
@@ -53,6 +54,6 @@ def build(candidate: Candidate) -> bytes:
         for key, label in fields:
             rep.row(label, getattr(details, key), accent, tint)
         rep.gap(16)
-    doc_rows = [(k, _DOC_LABELS[k]) for k in layout["docs"]]
+    doc_rows = [(k, layout["doc_labels"].get(k, _DOC_LABELS[k])) for k in layout["docs"]]
     _checklist(rep, "Documents", doc_rows, docs, set(layout["required_docs"]), _IDENTITY)
     return rep.finish()

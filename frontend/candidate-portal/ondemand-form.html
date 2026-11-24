@@ -39,6 +39,12 @@
             <div><label>Contact Number *</label><input type="tel" name="contact_number" required></div>
             <div><label>Alternate Contact Number</label><input type="tel" name="alternate_number"></div>
             <div><label>LinkedIn</label><input type="url" name="linkedin_link" placeholder="https://www.linkedin.com/in/..."></div>
+            <div id="bloodGroupBox" class="hidden"><label>Blood Group *</label>
+              <select name="blood_group" disabled>
+                <option value="">Select</option><option>A+</option><option>A-</option>
+                <option>B+</option><option>B-</option><option>AB+</option><option>AB-</option>
+                <option>O+</option><option>O-</option>
+              </select></div>
           </div>
         </div>
 
@@ -62,7 +68,7 @@
               <input type="file" name="nda" accept="image/*,.pdf,.doc,.docx"></div>
             <div data-doc="msa"><label>MSA<span class="req"></span></label>
               <input type="file" name="msa" accept="image/*,.pdf,.doc,.docx"></div>
-            <div data-doc="approval_mail"><label>Approval Mail<span class="req"></span></label>
+            <div data-doc="approval_mail"><label><span class="doc-label">Approval Mail</span><span class="req"></span></label>
               <input type="file" name="approval_mail" accept="image/*,.pdf,.doc,.docx"></div>
             <div data-doc="other_documents"><label>Other Documents<span class="req"></span></label>
               <input type="file" name="other_documents" accept="image/*,.pdf,.doc,.docx"></div>
@@ -111,9 +117,12 @@
 
     // Same as _DEFAULT_LAYOUT in backend/app/form_definitions.py.
     const DEFAULT_LAYOUT = {
-      docs: ["aadhar_card", "pan_card", "passport_size_photo", "resume", "sow", "nda", "msa", "other_documents"],
+      docs: ["aadhar_card", "pan_card", "passport_size_photo", "resume", "sow", "nda", "msa",
+             "approval_mail", "other_documents"],
       required_docs: ["aadhar_card", "passport_size_photo"],
       bank: true,
+      blood_group: false,
+      doc_labels: { approval_mail: "Offer Approval Mail" },
     };
 
     // Show only this consultant type's uploads, in its order, and mark the
@@ -135,8 +144,18 @@
         input.disabled = false;
         input.required = required;
         box.querySelector(".req").textContent = required ? " *" : "";
+        const label = box.querySelector(".doc-label");
+        if (label) {
+          label.dataset.default ??= label.textContent;
+          label.textContent = (layout.doc_labels || {})[key] || label.dataset.default;
+        }
         grid.appendChild(box);   // follow the layout's order
       }
+      const blood = document.getElementById("bloodGroupBox");
+      const bloodSelect = blood.querySelector("select");
+      blood.classList.toggle("hidden", !layout.blood_group);
+      bloodSelect.disabled = !layout.blood_group;
+      bloodSelect.required = !!layout.blood_group;
       const bank = document.getElementById("bankSection");
       bank.classList.toggle("hidden", !layout.bank);
       for (const el of bank.querySelectorAll("input, select")) el.disabled = !layout.bank;
