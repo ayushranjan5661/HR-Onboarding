@@ -103,10 +103,27 @@ def _error_message(response, form: str, record_id: str | None,
     return f"{prefix}: {str(response)[:600]}"
 
 
+_FIELDS_CACHE: dict = {}          # (token, form) -> (fetched_at, fields)
+_FIELDS_TTL_SECONDS = 15 * 60
+
+
 def _form_fields(token, form: str) -> set[str]:
     """API names of the fields `form` shows to the token's account. Zoho
     hides fields the account's role has no permission on, and a write that
-    names one fails outright (7013 "Field name ... is invalid")."""
+    names one fails outright (7013 "Field name ... is invalid").
+
+    Cached per token + form for 15 minutes: the components call is often the
+    slowest request of a push, and a form's layout rarely changes."""
+    import time
+    hit = _FIELDS_CACHE.get((token, form))
+    if hit and time.monotonic() - hit[0] < _FIELDS_TTL_SECONDS:
+        return set(hit[1])
+    fields = _fetch_form_fields(token, form)
+    _FIELDS_CACHE[(token, form)] = (time.monotonic(), frozenset(fields))
+    return fields
+
+
+def _fetch_form_fields(token, form: str) -> set[str]:
     try:
         components = _zc.api("GET", f"forms/{form}/components", token=token)
     except _zc.ZohoUnreachable as exc:
@@ -516,12 +533,99 @@ def documents_files(candidate: Candidate, entry: dict) -> tuple[list, list, list
     return files, skipped, missing
 
 
-def push_documents(candidate: Candidate, *, actor) -> dict:
+# The Zoho team creates each candidate's Pre_Induction_Procedure record
+# (Pre-Induction ID e.g. PRECND2236, Mail_ID, names, Reporting_Manager...).
+# The Documents Collection record links to it through a lookup that takes
+# its record id (per-form name: pre_induction_field in the docs map). The
+# portal never creates Pre_Induction_Procedure records.
+PRE_INDUCTION_FORM = "Pre_Induction_Procedure"
+PRE_INDUCTION_EMAIL_FIELD = "Mail_ID"
+PRE_INDUCTION_ID_FIELD = "Pre_Induction_ID"
+
+
+def _hit_row(hit) -> dict:
+    """The field dict of one getRecords hit ({"<id>": [{fields}]})."""
+    rows = (hit if isinstance(hit, dict) else {}).get(_hit_id(hit)) or [{}]
+    if isinstance(rows, list):
+        return rows[0] if rows and isinstance(rows[0], dict) else {}
+    return rows if isinstance(rows, dict) else {}
+
+
+def _one_by_email(token, form: str, email: str, field: str, what: str):
+    """The single hit on `form` whose `field` is `email`, or None. Several
+    hits or a failed search raise ZohoPushError — never guesses."""
+    try:
+        hits = _zc.find_by_email(token, form, email, field)
+    except _zc.ZohoUnreachable as exc:
+        raise ZohoPushError(_network_message(exc)) from exc
+    except _zc.ZohoError as exc:
+        raise ZohoPushError(f"Could not search {what} ('{form}') by email: {exc}") from exc
+    if len(hits) > 1:
+        raise ZohoPushError(f"{len(hits)} {what} records have the email {email}; "
+                            "fix the duplicates in Zoho first.")
+    if hits and not _hit_id(hits[0]):
+        raise ZohoPushError(f"Could not read the id of the {what} record: {str(hits[0])[:400]}")
+    return hits[0] if hits else None
+
+
+def _candidate_name(candidate: Candidate) -> str:
+    """The CIF full name, not the (often first-name-only) name HR typed in."""
+    return ((candidate.profile.full_name if candidate.profile else None)
+            or candidate.name or "").strip()
+
+
+def find_documents_record(token, candidate: Candidate, zoho_email: str) -> dict:
+    """Where a push by `zoho_email` would write. The Documents Collection
+    record with that email -> {"action": "update", "record_id", ...}; else
+    the Pre_Induction_Procedure record with that Mail_ID -> {"action":
+    "create", "pre_record_id", ...}; else {"action": "create_unlinked"}: a
+    new record with no Pre-Induction link (the portal does not create
+    Pre-Induction records — HR has no DOJ, Reporting Manager etc. for them).
+    All carry "form", "pre_induction_id", "name", "email", "email_matches"."""
+    email = (zoho_email or "").strip()
+    if not email or "@" not in email or len(email) > 254:
+        raise ZohoPushError("Enter the candidate email used on the Zoho record.")
+    form, entry = documents_target(candidate)
+    known = {e.lower() for e in _candidate_emails(candidate)}
+    base = {"form": form, "email": email, "email_matches": email.lower() in known}
+
+    hit = _one_by_email(token, form, email, entry["email_field"], "Documents Collection")
+    if hit:
+        row = _hit_row(hit)
+        return {**base, "action": "update", "record_id": _hit_id(hit),
+                "pre_induction_id": str(row.get(entry["pre_induction_field"]) or "").strip(),
+                "name": str(row.get(entry["name_field"]) or "").strip()}
+
+    pre = _one_by_email(token, PRE_INDUCTION_FORM, email, PRE_INDUCTION_EMAIL_FIELD,
+                        "Pre-Induction")
+    if not pre:
+        return {**base, "action": "create_unlinked", "pre_induction_id": "",
+                "name": _candidate_name(candidate)}
+    row = _hit_row(pre)
+    name = " ".join(str(row.get(k) or "").strip() for k in ("First_Name", "Last_Name")).strip()
+    return {**base, "action": "create", "pre_record_id": _hit_id(pre),
+            "pre_induction_id": str(row.get(PRE_INDUCTION_ID_FIELD) or "").strip(),
+            "name": name}
+
+
+def _file_signature(source) -> str:
+    """Identifies one upload's content: the stored path for a file on disk
+    (stored names are unique per upload), a hash for in-memory bytes."""
+    if isinstance(source, (bytes, bytearray)):
+        import hashlib
+        return "sha256:" + hashlib.sha256(source).hexdigest()
+    return "path:" + os.path.basename(str(source))
+
+
+def push_documents(candidate: Candidate, *, actor, zoho_email: str | None = None) -> dict:
     """Upload the candidate's Document Collection files (and generated PDFs)
-    into their Documents Collection form. Updates the record already linked,
-    else the one Zoho has for their email, else inserts one. Returns
-    {"record_id", "form", "status", "created", "files", "skipped"}; raises
-    ZohoPushError."""
+    into their Documents Collection form. With `zoho_email` (see
+    find_documents_record): updates the record with that email, leaving the
+    Zoho team's name / email alone; else creates one (not a draft), linked to
+    the Pre-Induction record with that Mail_ID when there is one. Without one: the record
+    already linked, else the one Zoho has for their email, else inserts one.
+    Returns {"record_id", "form", "status", "created", "files", "skipped"};
+    raises ZohoPushError."""
     form, entry = documents_target(candidate)
     email = candidate.email or ""
     if not email:
@@ -537,18 +641,39 @@ def push_documents(candidate: Candidate, *, actor) -> dict:
     name = ((candidate.profile.full_name if candidate.profile else None)
             or candidate.name or "").strip()
     email_field = entry["email_field"]
-    payload = {email_field: email, entry["name_field"]: name}
-
     token = actor.token   # the pushing HR's own token (app/services/zoho_oauth.py)
+    record_id = None
     fields = _form_fields(token, form)
+    if zoho_email:
+        target = find_documents_record(token, candidate, zoho_email)
+        if target["action"] == "update":
+            # The Zoho team's record: its name / email stay as they entered them.
+            record_id = target["record_id"]
+            payload = {}
+        elif target["action"] == "create_unlinked":
+            # No Pre-Induction record: plain record, the link is left for Zoho.
+            payload = {email_field: target["email"], entry["name_field"]: target["name"] or name}
+        else:
+            # New record tied to the Pre-Induction one, as the Zoho team's
+            # Deluge sample does it. Unlinked is worse than failing.
+            pre_field = entry["pre_induction_field"]
+            if pre_field not in fields:
+                raise ZohoPushError(f"Your Zoho role cannot see the Pre-Induction ID field "
+                                    f"({pre_field}) on '{form}'." + _PERMISSION_HELP)
+            payload = {email_field: target["email"], entry["name_field"]: target["name"] or name,
+                       pre_field: target["pre_record_id"]}
+    else:
+        payload = {email_field: email, entry["name_field"]: name}
+
     hidden = _drop_hidden(fields, payload, files)
     pushed_by_status = _add_pushed_by(fields, payload, actor.employee_record_id)
 
     # A Trainee's Reference Check push writes the same record.
-    record_id = candidate.zoho_doc_record_id if candidate.zoho_doc_form == form else None
-    if not record_id and form == settings.ZOHO_REFERENCE_CHECK_WRITE_FORM:
+    if not zoho_email and not record_id and candidate.zoho_doc_form == form:
+        record_id = candidate.zoho_doc_record_id
+    if not zoho_email and not record_id and form == settings.ZOHO_REFERENCE_CHECK_WRITE_FORM:
         record_id = candidate.zoho_ref_record_id
-    if not record_id:
+    if not zoho_email and not record_id:
         try:
             existing = _zc.find_by_email(token, form, email, email_field)
         except _zc.ZohoUnreachable as exc:
@@ -566,9 +691,31 @@ def push_documents(candidate: Candidate, *, actor) -> dict:
                 raise ZohoPushError(f"Could not read the id of the existing Zoho record: "
                                     f"{str(existing[0])[:400]}")
 
+    # Re-sync to the same record: leave out files Zoho already has. Uploaded
+    # documents are matched by their stored file (a replacement gets a new
+    # one); generated PDFs by their bytes.
+    signatures = {f[0]: _file_signature(f[3]) for f in files}
+    unchanged = 0
+    if record_id and record_id == candidate.zoho_doc_record_id and candidate.zoho_doc_form == form:
+        import json
+        try:
+            already = json.loads(candidate.zoho_doc_sent or "{}")
+        except ValueError:
+            already = {}
+        before = len(files)
+        files = [f for f in files if already.get(f[0]) != signatures[f[0]]]
+        unchanged = before - len(files)
+    sent = {f[0]: signatures[f[0]] for f in files}
+
+    if record_id and not files and not payload:
+        # Nothing new for Zoho: skip the round trip entirely.
+        return {"record_id": record_id, "form": form, "status": "SYNCED", "created": False,
+                "files": 0, "unchanged": unchanged, "sent": sent, "skipped": skipped,
+                "pre_linked": False, "pushed_by": pushed_by_status, "hidden_fields": hidden}
+
     _zc.log("push.request", source="hr-portal", target="documents", form=form,
             candidate_id=candidate.id, email=email, record_id=record_id,
-            files=[f[0] for f in files])
+            files=[f[0] for f in files], unchanged=unchanged)
     try:
         response = (_zc.update_record(token, form, record_id, payload, files=files)
                     if record_id
@@ -591,7 +738,8 @@ def push_documents(candidate: Candidate, *, actor) -> dict:
     if not new_id:
         raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
     return {"record_id": new_id, "form": form, "status": "SYNCED", "created": not record_id,
-            "files": len(files), "skipped": skipped,
+            "files": len(files), "unchanged": unchanged, "sent": sent, "skipped": skipped,
+            "pre_linked": bool(zoho_email) and target["action"] == "create",
             "pushed_by": pushed_by_status, "hidden_fields": hidden}
 
 
@@ -771,18 +919,27 @@ def push_declaration(candidate: Candidate, *, actor) -> dict:
 # for HR to complete in Zoho. Matched on Consultant_Email.
 OD_EMAIL_FIELD = "Consultant_Email"
 OD_CONSULTANT_TYPE = "On - Demand Consultant"
+# Portal consultant sub-type -> Zoho Consultant_Type picklist value. Only the
+# On-Demand value is confirmed; fix the others to Zoho's exact spelling.
+OD_CONSULTANT_TYPES = {
+    "ONDEMAND": OD_CONSULTANT_TYPE,
+    "FULLTIME": "Full Time Consultant",
+    "C2C_FULLTIME": "Corp to Corp (Full Time)",
+    "C2C_ONDEMAND": "Corp to Corp (On Demand)",
+}
 OD_COMMENT_FIELD = "Comments_Notes"      # answers the form has no field for
 # On-Demand document key -> Zoho upload field
 OD_FILES = {"aadhar_card": "Aadhar_Card", "pan_card": "Pan_Card",
-            "passport_size_photo": "Passport_Size_Photo"}
-# The generated On-Demand form PDF (answers + every upload) goes here. The
-# tracker's other mandatory uploads (Resume, SOW, NDA, MSA, Interview
-# Feedbacks, Approval Email) have no source in the portal; HR adds them in Zoho.
+            "passport_size_photo": "Passport_Size_Photo", "resume": "Resume",
+            "sow": "SOW", "nda": "NDA", "msa": "MSA", "approval_mail": "Approval_Email"}
+# The generated On-Demand form PDF (answers + every upload, including the
+# candidate's own "Other Documents" file) goes here. Interview Feedbacks and
+# Approval Email have no source in the portal; HR adds them in Zoho.
 OD_PDF_FIELD = "Other_Documents"
 
 
 def ondemand_payload(candidate: Candidate) -> dict:
-    """Zoho inputData for the On-Demand Candidate form."""
+    """Zoho inputData for the Consultant form."""
     od = candidate.ondemand_details
     first, _, last = (od.full_name or candidate.name or "").strip().partition(" ")
     payload = {
@@ -791,7 +948,8 @@ def ondemand_payload(candidate: Candidate) -> dict:
         OD_EMAIL_FIELD: od.email or "",
         "Personal_Email_ID": od.email or "",
         "Contact_Number": "".join(ch for ch in od.contact_number or "" if ch.isdigit()),
-        "Consultant_Type": OD_CONSULTANT_TYPE,
+        "Consultant_Type": OD_CONSULTANT_TYPES.get(candidate.consultant_type or "ONDEMAND",
+                                                   OD_CONSULTANT_TYPE),
         "Name_as_in_the_Bank_account": od.bank_account_name or "",
         "Account_Number": od.bank_account_number or "",
         "Bank_Name": od.bank_name or "",
@@ -812,7 +970,7 @@ def ondemand_payload(candidate: Candidate) -> dict:
 
 
 def push_ondemand(candidate: Candidate, *, actor) -> dict:
-    """Write the On-Demand Candidate form, with its Aadhaar / PAN / photo
+    """Write the Consultant form, with its Aadhaar / PAN / photo
     uploads, into ZOHO_ONDEMAND_WRITE_FORM as a draft. Updates the record
     already linked to this candidate, else the one Zoho has for their email,
     else inserts one. Returns {"record_id", "status", "created"}; raises

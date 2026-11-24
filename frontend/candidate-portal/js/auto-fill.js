@@ -8,7 +8,7 @@ const SOURCE_NAMES = {
   REFERENCE_CHECK: "your Reference Check form",
   DECLARATION: "your Declaration form",
   BGV: "your BGV form",
-  ONDEMAND: "your On-Demand Candidate form",
+  ONDEMAND: "your Consultant form",
 };
 
 async function loadAutoFill(formType) {

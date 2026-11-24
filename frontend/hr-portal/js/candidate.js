@@ -19,7 +19,7 @@ const FORM_TITLES = {
   REFERENCE_CHECK: "Referee Check Form",
   DECLARATION: "Declaration Form for Pending Documents",
   BGV: "Background Verification Form",
-  ONDEMAND: "On-Demand Candidate Form",
+  ONDEMAND: "Consultant Form",
 };
 // The CIF card is static markup; the follow-up cards are built by render().
 const FORM_CARD_ID = { CIF: "cifCard", DOCUMENT_COLLECTION: "card-DOCUMENT_COLLECTION",
@@ -30,7 +30,31 @@ const FORM_DOCS_ID = { CIF: "cifDocs", DOCUMENT_COLLECTION: "docs-DOCUMENT_COLLE
                        REFERENCE_CHECK: "docs-REFERENCE_CHECK",
                        DECLARATION: "docs-DECLARATION", BGV: "docs-BGV",
                        ONDEMAND: "docs-ONDEMAND" };
-const TYPE_LABELS = { FRESHER: "Fresher / Trainee", ONDEMAND: "On-Demand Consultant" };
+const TYPE_LABELS = { FRESHER: "Fresher / Trainee", ONDEMAND: "Consultant" };
+// Consultant sub-types; mirrors CONSULTANT_TYPES in backend/app/form_definitions.py.
+const CONSULTANT_TYPES = {
+  C2C_FULLTIME: "Corp to Corp (Full Time)",
+  C2C_ONDEMAND: "Corp to Corp (On Demand)",
+  FULLTIME: "Full Time Consultant",
+  ONDEMAND: "On Demand Consultant",
+};
+
+async function saveConsultantType(sel) {
+  const previous = currentData.consultant_type || "ONDEMAND";
+  sel.disabled = true;
+  try {
+    const res = await apiFetch(`/hr/candidates/${currentData.id}/consultant-type`, {
+      method: "POST", body: JSON.stringify({ consultant_type: sel.value }),
+    });
+    currentData.consultant_type = res.consultant_type;
+    await showAlert(res.detail, { title: "Consultant type saved" });
+  } catch (err) {
+    sel.value = previous;
+    await showAlert(err.message, { title: "Could not save", danger: true });
+  } finally {
+    sel.disabled = false;
+  }
+}
 
 // Values long enough that a single-line input is unusable.
 const LONG_TEXT_FIELDS = new Set([
@@ -232,7 +256,7 @@ async function downloadDocCollectionPdf(btn) {
 }
 
 async function downloadOnDemandPdf(btn) {
-  return downloadPdf(btn, "ondemand", "On-Demand Candidate Form.pdf");
+  return downloadPdf(btn, "ondemand", "Consultant Form.pdf");
 }
 
 async function downloadCifPdf(btn) {
@@ -634,7 +658,6 @@ function showLoadError(message) {
   document.getElementById("auditCard").classList.add("hidden");
   document.getElementById("zohoCard").classList.add("hidden");
   document.getElementById("zohoCandCard").classList.add("hidden");
-  document.getElementById("zohoRefCard").classList.add("hidden");
   document.getElementById("openAccessBanner").innerHTML = "";
   document.getElementById("followupForms").innerHTML = "";
   const notice = document.getElementById("rejectedNotice");
@@ -661,6 +684,12 @@ function render() {
 
   // Login credentials issued to this candidate (HR-owned; candidate cannot change them)
   document.getElementById("credentialsBody").innerHTML = `
+    ${onDemand ? `<div class="field-row"><div class="fname">Consultant Type</div>
+      <div class="fval"><select id="consultantTypeSel" onchange="saveConsultantType(this)"
+        style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;">
+        ${Object.entries(CONSULTANT_TYPES).map(([k, v]) =>
+          `<option value="${k}"${(c.consultant_type || "ONDEMAND") === k ? " selected" : ""}>${v}</option>`).join("")}
+      </select></div></div>` : ""}
     <div class="field-row"><div class="fname">Login ID</div><div class="fval"><code>${escapeHtml(c.email)}</code></div></div>
     <div class="field-row"><div class="fname">Password</div>
       <div class="fval" id="pwdCell">${c.temp_password
@@ -869,7 +898,7 @@ function render() {
     const wrap = document.createElement("div");
     wrap.className = "card section-card";
     wrap.innerHTML = `<div class="section-title"><h3>Onboarding</h3></div>
-      <p style="color:#6b7280;">The On-Demand Candidate form is approved.</p>
+      <p style="color:#6b7280;">The Consultant form is approved.</p>
       <button class="btn btn-success" onclick="markComplete()">Mark Onboarding Complete</button>`;
     document.getElementById("followupForms").appendChild(wrap);
   } else if (c.stage === "APPROVED_FOR_BGV") {
@@ -885,7 +914,7 @@ function render() {
             + "You can still complete the onboarding without it.";
       const wrap = document.createElement("div");
       wrap.className = "card section-card";
-      wrap.innerHTML = `<div class="section-title"><h3>Onboarding</h3></div>
+      wrap.innerHTML = `<div class="section-title"><h3>Onboarding Completion</h3></div>
         <p style="color:#6b7280;">Document Collection is approved. ${bgvNote}</p>
         <button class="btn btn-success" onclick="markComplete()">Mark Onboarding Complete</button>`;
       document.getElementById("followupForms").appendChild(wrap);
@@ -898,16 +927,13 @@ function render() {
     && (c.stage === "APPROVED_FOR_BGV" || c.stage === "ONBOARDING_COMPLETE");
   document.getElementById("zohoCard").classList.toggle("hidden", !zohoEligible);
   document.getElementById("zohoCandCard").classList.toggle("hidden", !zohoEligible);
-  // The Reference Check is a Fresher / Trainee form only, so is its push.
-  const refPushEligible = zohoEligible && c.candidate_type === "FRESHER";
-  document.getElementById("zohoRefCard").classList.toggle("hidden", !refPushEligible);
+  // The Referee Check PDF goes up with the Documents push (trainees only).
   document.getElementById("zohoDeclCard").classList.toggle("hidden", !zohoEligible);
   document.getElementById("zohoDocCard").classList.toggle("hidden", !zohoEligible);
   if (zohoEligible) {
     renderZoho(c, "confirmation");
     renderZoho(c, "candidate");
     renderZoho(c, "documents");
-    if (refPushEligible) renderZoho(c, "reference");
     renderZoho(c, "declaration");
   }
   // On-Demand Consultants go to Zoho's Consultant Tracker instead.
@@ -940,13 +966,6 @@ const ZOHO_TARGETS = {
     confirmAgain: "Re-upload the latest documents to the Zoho Documents Collection record? "
       + "Each document sent replaces the one in Zoho.",
   },
-  // Uploads the Referee Check PDF into Zoho's "Documents Collection - Trainee".
-  reference: {
-    prefix: "zoho_ref_", bodyId: "zohoRefBody", btnId: "zohoRefPushBtn",
-    path: "zoho/reference-check/push", label: "Zoho Referee Check Form",
-    confirmNew: "Upload the Referee Check PDF to this candidate's Zoho Documents Collection record?",
-    confirmAgain: "Replace the Referee Check PDF in Zoho with a freshly generated one?",
-  },
   // Declaration's pending documents into Zoho's "New Joiner Documents Track".
   declaration: {
     prefix: "zoho_decl_", bodyId: "zohoDeclBody", btnId: "zohoDeclPushBtn",
@@ -956,13 +975,13 @@ const ZOHO_TARGETS = {
       + "and the Declaration PDF.",
     confirmAgain: "Update the Zoho New Joiner Documents Track record with the latest Declaration?",
   },
-  // On-Demand Candidate form into Zoho's Consultant Tracker, as a draft.
+  // Consultant form into Zoho's Consultant Tracker, as a draft.
   ondemand: {
     prefix: "zoho_od_", bodyId: "zohoOdBody", btnId: "zohoOdPushBtn",
     path: "zoho/ondemand/push", label: "Zoho Consultant Tracker",
-    confirmNew: "Create a Zoho Consultant Tracker draft from this On-Demand Candidate form, "
-      + "with the Aadhar, PAN and photo uploads and the form PDF (as Other Documents)?",
-    confirmAgain: "Update the Zoho Consultant Tracker record with the latest On-Demand form?",
+    confirmNew: "Create a Zoho Consultant Tracker draft from this Consultant form, "
+      + "with the Aadhar, PAN, photo, Resume, SOW, NDA and MSA uploads and the form PDF (as Other Documents)?",
+    confirmAgain: "Update the Zoho Consultant Tracker record with the latest Consultant form?",
   },
 };
 
@@ -989,43 +1008,74 @@ function renderZoho(c, target) {
   const errorLine = lastError
     ? `<div style="color:var(--danger);margin-top:6px;font-size:0.85rem;">Last attempt failed: ${escapeHtml(lastError)}</div>`
     : "";
-  // The Referee Check PDF only exists once both referees have submitted.
-  const pendingRefs = target === "reference" ? pendingReferees(c) : [];
   // The Declaration push needs the candidate's submitted Declaration.
   const noDecl = (target === "declaration" && !c.declaration_details)
     || (target === "ondemand" && !c.ondemand_details);
-  const waitLine = pendingRefs.length
-    ? `<p style="color:#92400e;font-size:0.85rem;">Waiting for ${pendingRefs.map(n => `Referee ${n}`).join(" and ")} `
-      + "to submit feedback — the PDF is generated once both have.</p>"
-    : noDecl
-      ? `<p style="color:#92400e;font-size:0.85rem;">Waiting for the candidate to submit the ${target === "ondemand" ? "On-Demand Candidate" : "Declaration"} form.</p>`
-      : "";
+  const waitLine = noDecl
+    ? `<p style="color:#92400e;font-size:0.85rem;">Waiting for the candidate to submit the ${target === "ondemand" ? "On-Demand Candidate" : "Declaration"} form.</p>`
+    : "";
   document.getElementById(t.bodyId).innerHTML = `
     <p style="color:#6b7280;font-size:0.88rem;">${statusLine}</p>
     ${errorLine}${waitLine}
-    <button class="btn btn-primary" id="${t.btnId}" onclick="pushToZoho('${target}')"${pendingRefs.length || noDecl ? " disabled" : ""}>
+    <button class="btn btn-primary" id="${t.btnId}" onclick="pushToZoho('${target}')"${noDecl ? " disabled" : ""}>
       ${pushed ? `Re-sync to ${t.label}` : `Publish to ${t.label}`}
     </button>`;
 }
 
 async function pushToZoho(target = "confirmation") {
   const t = ZOHO_TARGETS[target];
-  const alreadyPushed = !!(currentData && currentData[t.prefix + "record_id"]);
-  const msg = (alreadyPushed ? t.confirmAgain : t.confirmNew) || (alreadyPushed
-    ? `Push this candidate's latest data to the existing ${t.label} record?`
-    : `Create this candidate as a draft record in ${t.label}? You'll be able to `
-      + "review it there before treating it as final.");
+  const btn = document.getElementById(t.btnId);
+  // Documents: the Zoho record is found by the candidate's own email.
+  const zohoEmail = target === "documents" ? ((currentData && currentData.email) || "").trim() : "";
+  let alreadyPushed = !!(currentData && currentData[t.prefix + "record_id"]);
+  let msg;
+  if (zohoEmail) {
+    // Show HR which Zoho record the email points at before anything is written.
+    btn.disabled = true;
+    btn.textContent = "Finding record…";
+    let rec;
+    try {
+      rec = await apiFetch(`/hr/candidates/${candidateId}/zoho/documents/lookup?email=`
+        + encodeURIComponent(zohoEmail));
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = alreadyPushed ? `Re-sync to ${t.label}` : `Publish to ${t.label}`;
+      if (err.status === 428) return promptZohoConnect(err.message);
+      return showAlert(err.message, { title: "Zoho record not found", danger: true });
+    }
+    btn.disabled = false;
+    btn.textContent = alreadyPushed ? `Re-sync to ${t.label}` : `Publish to ${t.label}`;
+    alreadyPushed = rec.action === "update";
+    const who = `${rec.name || "(no name)"}, ${rec.email}`;
+    const pidNote = rec.pre_induction_id ? ` (Pre-Induction ID ${rec.pre_induction_id})` : "";
+    msg = (rec.action === "update"
+        ? `Found Zoho Documents Collection record ${rec.record_id}${pidNote}: ${who}.`
+        : rec.action === "create_unlinked"
+        ? `No Pre-Induction or Documents Collection record in Zoho for ${rec.email}. `
+          + `A new Documents Collection record will be created for ${rec.name || "(no name)"}, `
+          + "without a Pre-Induction ID (the Zoho team can link it later)."
+        : `No Documents Collection record yet. Found the Pre-Induction record${pidNote}: ${who}. `
+          + "A new Documents Collection record will be created and linked to it.")
+      + (rec.email_matches ? ""
+        : " WARNING: this email is not one this candidate gave us. Make sure it is the right person.")
+      + (rec.action === "update" ? " Upload this candidate's documents to that record?"
+        : " Create it with this candidate's documents?");
+  } else {
+    msg = (alreadyPushed ? t.confirmAgain : t.confirmNew) || (alreadyPushed
+      ? `Push this candidate's latest data to the existing ${t.label} record?`
+      : `Create this candidate as a draft record in ${t.label}? You'll be able to `
+        + "review it there before treating it as final.");
+  }
   if (!await showConfirm(msg, {
         title: `Publish to ${t.label}`,
         confirmText: alreadyPushed ? "Re-sync" : "Publish",
       })) return;
 
-  const btn = document.getElementById(t.btnId);
   btn.disabled = true;
   btn.textContent = "Publishing…";
   try {
     const result = await apiFetch(`/hr/candidates/${candidateId}/${t.path}`, {
-      method: "POST", body: JSON.stringify({}),
+      method: "POST", body: JSON.stringify(zohoEmail ? { zoho_email: zohoEmail } : {}),
     });
     await load();
     await showAlert(result.detail, { title: `Published to ${t.label}` });
@@ -2029,7 +2079,7 @@ async function sendForm(formType) {
 document.getElementById("approveBtn").addEventListener("click", async () => {
   if (!currentData) return;  // page never loaded — don't act on a stale id
   if (currentData.candidate_type === "ONDEMAND") {
-    if (!await showConfirm("This approves the On-Demand Candidate form. You can then "
+    if (!await showConfirm("This approves the Consultant form. You can then "
         + "mark the onboarding complete.",
         { title: "Approve this consultant?", confirmText: "Approve" })) return;
   } else if (!await showConfirm("Nothing is sent to the candidate yet — press Send on the Document "

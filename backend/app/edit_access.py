@@ -186,7 +186,7 @@ FORM_TITLES = {
     "DECLARATION": "Declaration",
     "EXPERIENCE_DECLARATION": "Declaration (Relieving / Experience Letter)",
     "BGV": "Background Verification",
-    "ONDEMAND": "On-Demand Candidate Form",
+    "ONDEMAND": "Consultant Form",
 }
 
 

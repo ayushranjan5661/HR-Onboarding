@@ -98,6 +98,8 @@ EXPECTED: dict[str, set[str]] = {
     "passport_copy": {"PASSPORT"},
     "address_proof": _ID_CARDS | {"ADDRESS_PROOF_OTHER", "BANK_STATEMENT"},
     "id_proof": set(_ID_CARDS),
+    # On-Demand form
+    "resume": {"RESUME"},
 }
 # Employment blocks: the same five documents for the current and each of
 # four previous companies. Companies often issue one experience-cum-

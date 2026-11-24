@@ -114,6 +114,7 @@ def log(event, **fields):
 # three seconds: the observed outages last tens of seconds, so the old window
 # was almost guaranteed to fall inside one. Still short enough to sit behind
 # the HR portal's button without the request feeling hung.
+_UPLOAD_WORKERS = 4      # parallel uploadFile calls per push
 _MAX_ATTEMPTS = 5
 _RETRY_DELAY_SECONDS = 1.0
 _RETRY_BACKOFF = 2.0
@@ -421,8 +422,17 @@ def upload_files(token, form, files):
     that is not on the form, error 7013) fails the push loudly instead of
     landing a record with silently missing documents.
     """
-    return {zoho_field: upload_file(token, form, zoho_field, filename, ctype, path)
-            for zoho_field, filename, ctype, path in files}
+    files = list(files)
+    if len(files) <= 1:
+        return {zoho_field: upload_file(token, form, zoho_field, filename, ctype, path)
+                for zoho_field, filename, ctype, path in files}
+    # Each upload is a slow round trip to Zoho; a few at a time cuts a
+    # 15-document push from minutes to well under one. Any failure still
+    # fails the whole push before the record is written.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(_UPLOAD_WORKERS, len(files))) as pool:
+        futures = {f[0]: pool.submit(upload_file, token, form, *f) for f in files}
+        return {zoho_field: fut.result() for zoho_field, fut in futures.items()}
 
 
 def insert_record(token, form, payload, draft=False, files=None):

@@ -43,6 +43,49 @@ _PAD = 7              # cell padding
 _LH = 1.35            # line height factor
 
 
+# LevelShift logo, dark-background variant (frontend/assets/logo-white.svg),
+# embedded so the backend doesn't depend on the frontend folder at runtime.
+_LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 217.4">
+<g fill="#FFFFFF">
+<path d="M2.6,134.3V81.3h9.2V125h35.6v9.2H2.6z"/>
+<path d="M54.1,134.3V81.3h47.2v9.2H63.3V125h38.1v9.2H54.1z M70.1,111.3v-7.8h29.3v7.8H70.1z"/>
+<path d="M186.9,134.3V81.3h47.2v9.2h-38.1V125h38.1v9.2H186.9z M202.9,111.3v-7.8h29.3v7.8H202.9z"/>
+<path d="M242.2,134.3V81.3h9.2V125H287v9.2H242.2z"/>
+</g>
+<g fill="#4DD8FF">
+<path d="M293.7,134.3V125h39.7c5,0,7.7-2.8,7.7-6.9c0-4.5-2.8-6.8-7.7-6.8H309c-10,0-16.2-6.3-16.2-15.1
+c0-8.5,5.8-14.9,16.3-14.9h38v9.2h-38c-4.2,0-6.7,2.5-6.7,6.5s2.5,6.4,6.6,6.4h24.2c10.7,0,16.5,5,16.5,15.3
+c0,8.9-5.4,15.5-16.5,15.5H293.7z"/>
+<path d="M357.7,134.5V81.3h9.2v53.1H357.7z M400.3,134.5v-23h-26.6v-8.2h26.6V81.3h9.2v53.1H400.3z"/>
+<path d="M419.3,134.3V81.3h9.2v52.9H419.3z"/>
+<path d="M438.2,134.3V81.3h44.9v9.2h-35.7v43.7H438.2z M454.1,112.3v-8.1h26.8v8.1H454.1z"/>
+<path d="M509.5,134.3V90.6h-20.1v-9.2h49.4v9.2h-20.1v43.7H509.5z"/>
+<polygon points="119.1,97.5 124.9,107 164.4,107 170.2,97.5"/>
+<polygon points="137.2,127.4 152.1,127.4 155.6,121.7 133.8,121.7"/>
+<polygon points="179.6,81.9 109.7,81.9 117.2,94.3 172.1,94.3"/>
+<polygon points="131.8,118.5 157.5,118.5 162.5,110.2 126.8,110.2"/>
+<path d="M140.7,133.1c1.8,3,6.2,3,8,0l1.5-2.5h-11L140.7,133.1z"/>
+</g>
+</svg>"""
+_LOGO_CLIP = (2.0, 80.8, 539.4, 135.0)   # artwork bounds inside the viewBox
+_LOGO_ASPECT = (_LOGO_CLIP[2] - _LOGO_CLIP[0]) / (_LOGO_CLIP[3] - _LOGO_CLIP[1])
+_LOGO_W = 112.0       # banner logo width, pt
+_logo_pdf = None
+
+
+def _draw_logo(page, rect: pymupdf.Rect) -> None:
+    """Place the vector logo, cropped to its artwork, into rect."""
+    global _logo_pdf
+    if _logo_pdf is None:
+        svg = pymupdf.open(stream=_LOGO_SVG.encode(), filetype="svg")
+        _logo_pdf = pymupdf.open("pdf", svg.convert_to_pdf())
+    src = _logo_pdf[0].rect
+    sx, sy = src.width / 540, src.height / 217.4   # viewBox -> PDF points
+    clip = pymupdf.Rect(_LOGO_CLIP[0] * sx, _LOGO_CLIP[1] * sy,
+                        _LOGO_CLIP[2] * sx, _LOGO_CLIP[3] * sy)
+    page.show_pdf_page(rect, _logo_pdf, 0, clip=clip)
+
+
 def _wrap(text: str, font: str, size: float, width: float) -> list[str]:
     """Greedy word wrap; words wider than the box are broken by character."""
     lines: list[str] = []
@@ -102,11 +145,11 @@ class _Report:
                             fill=_rgb("#4338ca"), radius=0.12)
         self._text(r.x0 + 18, r.y0 + 30, self.title, _BOLD, 20, "#ffffff")
         self._text(r.x0 + 18, r.y0 + 50, f"Candidate: {candidate_name}", _REG, 10, "#c7d2fe")
-        stamp = datetime.now().strftime("%d/%m/%Y, %I:%M %p")
-        for i, s in enumerate(("LevelShift", f"Generated {stamp}")):
-            w = pymupdf.get_text_length(s, _BOLD if i == 0 else _REG, 11 if i == 0 else 8)
-            self._text(_RIGHT - 16 - w, r.y0 + 30 + i * 18, s, _BOLD if i == 0 else _REG,
-                       11 if i == 0 else 8, "#ffffff" if i == 0 else "#c7d2fe")
+        _draw_logo(self.page, pymupdf.Rect(_RIGHT - 16 - _LOGO_W, r.y0 + 19,
+                                           _RIGHT - 16, r.y0 + 19 + _LOGO_W / _LOGO_ASPECT))
+        stamp = f"Generated {datetime.now().strftime('%d/%m/%Y, %I:%M %p')}"
+        w = pymupdf.get_text_length(stamp, _REG, 8)
+        self._text(_RIGHT - 16 - w, r.y0 + 48, stamp, _REG, 8, "#c7d2fe")
         self.page.draw_rect(pymupdf.Rect(_LEFT, r.y1 + 4, _RIGHT, r.y1 + 8), color=None,
                             fill=_rgb("#f59e0b"), radius=0.5)
         self.y = r.y1 + 22

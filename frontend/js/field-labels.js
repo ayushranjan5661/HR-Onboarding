@@ -126,7 +126,8 @@ const FORM_FILE_FIELDS = {
   ],
   REFERENCE_CHECK: [],
   DECLARATION: ["declaration_signature"],
-  ONDEMAND: ["aadhar_card", "pan_card", "passport_size_photo"],
+  ONDEMAND: ["aadhar_card", "pan_card", "passport_size_photo",
+             "resume", "sow", "nda", "msa", "approval_mail", "other_documents"],
 };
 
 // Repeating-row tables: table name (API) -> column order for display
@@ -181,7 +182,7 @@ const FIELD_LABELS = {
   graduation_year: "Graduation Year", bank_account_number: "Bank Account Number",
   bank_ifsc_code: "Bank IFSC Code", emergency_contact_name: "Emergency Contact Name",
   emergency_contact_number: "Emergency Contact Number",
-  // On-Demand Candidate form
+  // Consultant form
   bank_account_name: "Name as per Bank", bank_name: "Bank Name",
   bank_account_type: "Savings / Current Account",
   bank_branch: "Branch",
@@ -326,6 +327,9 @@ const FIELD_LABELS = {
   additional_certifications: "Additional Certifications",
   passport_size_photo: "Passport Size Photo", pan_card: "Pan Card", aadhar_card: "Aadhar Card",
   passport_copy: "Passport Copy", address_proof: "Address Proof", id_proof: "ID Proof",
+  // On-Demand form uploads
+  resume: "Resume", sow: "SOW", nda: "NDA", msa: "MSA", approval_mail: "Approval Mail",
+  other_documents: "Other Documents",
   // Reference Check
   candidate_name: "Candidate Name", reference_check_date: "Date",
   ref1_name: "Referee 1 — Name", ref1_title: "Referee 1 — Title",

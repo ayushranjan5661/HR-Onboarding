@@ -42,14 +42,14 @@ const EMAIL_TEMPLATES = {
     ],
   },
   ONDEMAND: {
-    label: "On-Demand Candidate Form",
-    subject: "LevelShift - Complete Your On-Demand Candidate Form",
+    label: "Consultant Form",
+    subject: "LevelShift - Complete Your Consultant Form",
     body: (data, name) => [
         `Dear ${name},`,
         ``,
         `Greetings from LevelShift!`,
         ``,
-        `As the next step in your engagement as an On-Demand Consultant, please complete the On-Demand Candidate Form on our candidate portal.`,
+        `As the next step in your engagement as a Consultant, please complete the Consultant Form on our candidate portal.`,
         ``,
         `Please use the link below to access the form:`,
         ``,

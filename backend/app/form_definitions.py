@@ -217,9 +217,58 @@ ONDEMAND_FIELDS = [
     "bank_account_name", "bank_name", "bank_account_number", "bank_ifsc_code",
     "bank_account_type", "bank_branch",
 ]
-ONDEMAND_OPTIONAL = {"alternate_email", "alternate_number", "linkedin_link"}
+ONDEMAND_OPTIONAL = {"alternate_email", "alternate_number", "linkedin_link",
+                     "bank_account_name", "bank_name", "bank_account_number",
+                     "bank_ifsc_code", "bank_account_type", "bank_branch"}
 ONDEMAND_ACCOUNT_TYPES = ("Savings", "Current")
-ONDEMAND_FILE_FIELDS = ["aadhar_card", "pan_card", "passport_size_photo"]
+# Consultant sub-type HR picks on the candidate page; it is shown on the
+# Consultant form, decides its layout (CONSULTANT_LAYOUTS) and goes to Zoho.
+CONSULTANT_TYPES = {
+    "C2C_FULLTIME": "Corp to Corp (Full Time)",
+    "C2C_ONDEMAND": "Corp to Corp (On Demand)",
+    "FULLTIME": "Full Time Consultant",
+    "ONDEMAND": "On Demand Consultant",
+}
+DEFAULT_CONSULTANT_TYPE = "ONDEMAND"
+# Every upload any consultant type can have (storage, edit access, HR view).
+ONDEMAND_FILE_FIELDS = ["aadhar_card", "pan_card", "passport_size_photo",
+                        "resume", "sow", "nda", "msa", "approval_mail", "other_documents"]
+ONDEMAND_OPTIONAL_FILES = {"pan_card", "resume", "sow", "nda", "msa", "other_documents"}
+
+# Per consultant type: which uploads the form shows, which are mandatory, and
+# whether it has the Bank Details section. Types not listed use the default.
+_DEFAULT_LAYOUT = {
+    "docs": ["aadhar_card", "pan_card", "passport_size_photo",
+             "resume", "sow", "nda", "msa", "other_documents"],
+    "required_docs": ["aadhar_card", "passport_size_photo"],
+    "bank": True,
+}
+CONSULTANT_LAYOUTS = {
+    "C2C_FULLTIME": {
+        "docs": ["resume", "aadhar_card", "pan_card", "sow", "nda", "msa",
+                 "passport_size_photo", "approval_mail", "other_documents"],
+        "required_docs": ["resume", "aadhar_card", "passport_size_photo"],
+        "bank": False,   # paid to the vendor company
+    },
+    "C2C_ONDEMAND": {
+        "docs": ["resume", "aadhar_card", "pan_card", "sow", "nda", "msa",
+                 "passport_size_photo", "other_documents"],
+        "required_docs": ["resume", "aadhar_card", "passport_size_photo"],
+        "bank": False,   # paid to the vendor company
+    },
+    "FULLTIME": {
+        "docs": ["resume", "aadhar_card", "pan_card", "passport_size_photo",
+                 "sow", "msa", "nda", "other_documents"],
+        "required_docs": ["resume", "aadhar_card", "passport_size_photo"],
+        "bank": True,    # optional fields
+    },
+}
+BANK_FIELDS = ["bank_account_name", "bank_name", "bank_account_number",
+               "bank_ifsc_code", "bank_account_type", "bank_branch"]
+
+
+def consultant_layout(consultant_type) -> dict:
+    return CONSULTANT_LAYOUTS.get(consultant_type or DEFAULT_CONSULTANT_TYPE, _DEFAULT_LAYOUT)
 
 # --- Document Collection: the real LevelShift form (40 uploads) -------------
 # Two variants share the same fields; only which ones are mandatory differs.

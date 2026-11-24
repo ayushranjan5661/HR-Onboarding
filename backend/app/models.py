@@ -215,6 +215,8 @@ class Candidate(Base):
     zoho_decl_status = Column(String(20), nullable=True)
     zoho_decl_synced_at = Column(DateTime(timezone=True), nullable=True)
     zoho_decl_last_error = Column(Text, nullable=True)
+    # Consultant sub-type (form_definitions.CONSULTANT_TYPES); NULL = ONDEMAND.
+    consultant_type = Column(String(20), nullable=True)
     zoho_od_record_id = Column(String(50), nullable=True)
     zoho_od_status = Column(String(20), nullable=True)
     zoho_od_synced_at = Column(DateTime(timezone=True), nullable=True)
@@ -223,6 +225,9 @@ class Candidate(Base):
     # Collection" (Experienced) or "Documents Collection - Trainee" (Fresher)
     # form; zoho_doc_form records which one the record id belongs to.
     zoho_doc_record_id = Column(String(50), nullable=True)
+    # JSON {zoho_field: file signature} already uploaded to that record, so a
+    # re-sync sends only new or replaced files.
+    zoho_doc_sent = Column(Text, nullable=True)
     zoho_doc_form = Column(String(100), nullable=True)
     zoho_doc_status = Column(String(20), nullable=True)
     zoho_doc_synced_at = Column(DateTime(timezone=True), nullable=True)
