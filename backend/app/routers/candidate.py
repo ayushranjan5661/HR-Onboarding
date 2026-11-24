@@ -30,10 +30,15 @@ from app.form_definitions import (
     EDUCATION_COLUMNS,
     EDUCATION_SECTIONS,
     EMPLOYMENT_COLUMNS,
+    BANK_FIELDS,
+    CONSULTANT_TYPES,
+    DEFAULT_CONSULTANT_TYPE,
+    consultant_layout,
     ONDEMAND_ACCOUNT_TYPES,
     ONDEMAND_FIELDS,
     ONDEMAND_FILE_FIELDS,
     ONDEMAND_OPTIONAL,
+    ONDEMAND_OPTIONAL_FILES,
     PROFILE_FIELDS,
     REF_CHECK_FIELDS,
     REF_CHECK_FILE_FIELDS,
@@ -94,7 +99,13 @@ def my_status(db: Session = Depends(get_db), current: Candidate = Depends(get_cu
         .filter(Candidate.id == current.id)
         .first()
     )
+    ctype = layout = None
+    if candidate.candidate_type == CandidateType.ONDEMAND:
+        ctype = candidate.consultant_type or DEFAULT_CONSULTANT_TYPE
+        layout = consultant_layout(ctype)
     return MyStatusOut(stage=candidate.stage.value, candidate_type=candidate.candidate_type.value,
+                        consultant_type=ctype, consultant_type_label=CONSULTANT_TYPES.get(ctype),
+                        consultant_layout=layout,
                         forms=candidate.visible_submissions, profile=candidate.profile)
 
 
@@ -655,22 +666,26 @@ def _submit_ondemand(form, db: Session, current: Candidate):
         raise HTTPException(status_code=400,
                              detail="Your form has already been reviewed and can no longer be edited.")
 
-    values = {f: form.get(f) for f in ONDEMAND_FIELDS if f in form}
+    layout = consultant_layout(current.consultant_type)
+    fields = [f for f in ONDEMAND_FIELDS if layout["bank"] or f not in BANK_FIELDS]
+    file_fields = layout["docs"]
+    values = {f: form.get(f) for f in fields if f in form}
     _reject_invalid_dates(values)
-    missing = [f for f in ONDEMAND_FIELDS
+    missing = [f for f in fields
                if f not in ONDEMAND_OPTIONAL and not str(form.get(f) or "").strip()]
     if missing:
         raise HTTPException(status_code=400,
                              detail="Please fill in every field: " + ", ".join(missing))
-    if form.get("bank_account_type") not in ONDEMAND_ACCOUNT_TYPES:
+    if (layout["bank"] and form.get("bank_account_type")
+            and form.get("bank_account_type") not in ONDEMAND_ACCOUNT_TYPES):
         raise HTTPException(status_code=400, detail="Choose Savings or Current account.")
 
     already = {d.field_key for d in db.query(Document).filter(
         Document.candidate_id == current.id, Document.form_type == FormType.ONDEMAND).all()}
     already |= _draft_document_fields(db, current.id, FormType.ONDEMAND)
-    provided = {k for k in ONDEMAND_FILE_FIELDS
+    provided = {k for k in file_fields
                 if hasattr(form.get(k), "filename") and form.get(k).filename}
-    missing_docs = [k for k in ONDEMAND_FILE_FIELDS if k not in already and k not in provided]
+    missing_docs = [k for k in layout["required_docs"] if k not in already and k not in provided]
     if missing_docs:
         raise HTTPException(status_code=400,
                              detail="Missing required documents: " + ", ".join(missing_docs))
@@ -679,7 +694,7 @@ def _submit_ondemand(form, db: Session, current: Candidate):
     if not details:
         details = OnDemandDetails(candidate_id=current.id)
         db.add(details)
-    _apply_fields(details, form, ONDEMAND_FIELDS)
+    _apply_fields(details, form, fields)
 
     profile = db.query(CandidateProfile).filter(CandidateProfile.candidate_id == current.id).first()
     if not profile:
@@ -687,7 +702,7 @@ def _submit_ondemand(form, db: Session, current: Candidate):
         db.add(profile)
     _apply_fields(profile, form, _ONDEMAND_PROFILE_FIELDS)
 
-    replaced = _save_files(db, form, current, "ONDEMAND", ONDEMAND_FILE_FIELDS)
+    replaced = _save_files(db, form, current, "ONDEMAND", file_fields)
     _promote_draft_documents(db, current.id, FormType.ONDEMAND, provided)
     replaced += _discard_draft(db, current.id, FormType.ONDEMAND)
 

@@ -6,9 +6,11 @@
       "_setting": "ZOHO_DOCS_EXPERIENCED_WRITE_FORM",
       "name_field": "candidate_name1",
       "email_field": "Candidate_Email_ID",
+      "pre_induction_field": "preinduction_id",
       "generated": {
         "CIF": "cif",
-        "Declaration_document": "declaration"
+        "Declaration_document": "declaration",
+        "Reference_check": "reference_check"
       }
     },
     "FRESHER": {
@@ -16,6 +18,7 @@
       "_setting": "ZOHO_DOCS_TRAINEE_WRITE_FORM",
       "name_field": "Candidate_Name",
       "email_field": "Candidate_Email_ID",
+      "pre_induction_field": "pre_induction_id1",
       "generated": {
         "CIF": "cif",
         "Declaration_document": "declaration",
@@ -23,6 +26,7 @@
       }
     }
   },
+  "_pre_induction_readme": "pre_induction_field is a lookup into Pre_Induction_Procedure (form id 312853000006130865), re-read live 2026-11-23: preinduction_id on documents_collection, pre_induction_id1 on documents_collection_trainee. It takes the Pre_Induction_Procedure record id. When no Documents Collection record exists for the email, push_documents finds the Pre_Induction_Procedure record by Mail_ID and creates one (never a draft) with that id, the email and First_Name + Last_Name, as in the Zoho team's Deluge sample. With no Pre_Induction_Procedure record either, it creates the Documents Collection record unlinked. The portal never creates Pre_Induction_Procedure records: Zoho enforces DOJ, Designation, Department, Business Unit, Functional Head, Reporting Manager etc. there via the API (checked 2026-11-23), and HR does not have them.",
   "_generated_readme": "Zoho upload field -> PDF the portal builds itself (cif_pdf / declaration_pdf / reference_pdf). Uploaded from memory, and only once that form is submitted; a PDF that is not ready yet is skipped and named in the result.",
   "_files_readme": "Zoho upload field -> local Document.field_key(s), in priority order: the first one the candidate actually uploaded is sent. Fallbacks: the CIF profile picture fills Passport_size_photo when no Document Collection photo exists; the BGV passport copy fills Passport_Copy likewise.",
   "files": {
@@ -73,5 +77,5 @@
     "Th_marks_sheet_Diploma": "Missing from the Trainee sheet, but the live Trainee form has it.",
     "Assessment": "documents_collection spells it Assessment (as the Experienced sheet says); documents_collection_trainee spells it Assessement. Neither has a local source, so it is not mapped."
   },
-  "_no_local_source": "HR-side documents the portal never collects, left for HR to upload in Zoho: Offer_details_approved_document, Offer_acceptance_document, L1/L2/L3_document, HR_document, Assessment/Assessement, Other_documents, LevelShift_Offer_letter, Resume, PreludeSys_Resume (Experienced only), Level_1/2/3_Interview, HR_Interview, pre_induction_id, Employee_Name (Trainee lookup), and the Name / DOB / Relationship fields."
+  "_no_local_source": "HR-side documents the portal never collects, left for HR to upload in Zoho: Offer_details_approved_document, Offer_acceptance_document, L1/L2/L3_document, HR_document, Assessment/Assessement, Other_documents, LevelShift_Offer_letter, Resume, PreludeSys_Resume (Experienced only), Level_1/2/3_Interview, HR_Interview, Employee_Name (Trainee lookup), and the Name / DOB / Relationship fields."
 }

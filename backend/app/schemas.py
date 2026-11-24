@@ -162,6 +162,12 @@ class BatchRowEdit(BaseModel):
     values: dict[str, Optional[str]]
 
 
+class DocumentsPushRequest(BaseModel):
+    # Candidate email on the Zoho record (as the Zoho team entered it):
+    # update that exact record.
+    zoho_email: Optional[str] = None
+
+
 class ChangeSetRequest(BaseModel):
     """Everything one HR save touches, applied as a single audited action."""
     fields: list[BatchFieldEdit] = []
@@ -299,6 +305,7 @@ class CandidateDetailOut(BaseModel):
     email: str
     stage: str
     candidate_type: str = "EXPERIENCED"
+    consultant_type: Optional[str] = None
     rejection_reason: Optional[str] = None
     assigned_hr_id: Optional[int] = None
     assigned_hr_name: Optional[str] = None
@@ -358,5 +365,8 @@ class CandidateDetailOut(BaseModel):
 class MyStatusOut(BaseModel):
     stage: str
     candidate_type: str = "EXPERIENCED"
+    consultant_type: Optional[str] = None
+    consultant_type_label: Optional[str] = None
+    consultant_layout: Optional[dict[str, Any]] = None   # docs / required_docs / bank
     forms: list[FormSubmissionOut]
     profile: Optional[CandidateProfileOut] = None

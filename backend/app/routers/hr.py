@@ -20,6 +20,7 @@ from app.form_definitions import (BGV_FIELDS, BGV_FILE_FIELDS, BGV_TABLE_SECTION
                                     CIF_FIELDS, CIF_FILE_FIELDS, DECLARATION_FIELDS,
                                     DECLARATION_FILE_FIELDS, DOC_FIELDS,
                                     DOC_FILE_FIELDS, ONDEMAND_FIELDS,
+                                    CONSULTANT_TYPES, DEFAULT_CONSULTANT_TYPE,
                                     ONDEMAND_FILE_FIELDS, PROFILE_FIELDS, REF_CHECK_FIELDS,
                                     REF_CHECK_FILE_FIELDS)
 from app.models import (
@@ -60,6 +61,7 @@ from app.schemas import (
     CandidateDetailOut,
     ChangeSetRequest,
     DocumentOut,
+    DocumentsPushRequest,
     CandidateListItem,
     DecisionRequest,
     EditPermissionOut,
@@ -229,7 +231,7 @@ def invite_candidate(payload: InviteCandidateRequest, db: Session = Depends(get_
     db.add(candidate)
     db.flush()
     kind = {CandidateType.FRESHER: "Fresher / Trainee",
-            CandidateType.ONDEMAND: "On-Demand Consultant"}.get(candidate.candidate_type, "Permanent / Fulltime Consultant")
+            CandidateType.ONDEMAND: "Consultant"}.get(candidate.candidate_type, "Permanent / Fulltime Consultant")
     staff_service.audit(db, current, "CANDIDATE_INVITED", target_type="CANDIDATE", target=candidate,
                         detail=f"Invited {candidate.email} as {kind}"
                                + (f", assigned to {owner.name}" if owner.id != current.id else ""),
@@ -373,14 +375,14 @@ def declaration_pdf(candidate_id: int, db: Session = Depends(get_db),
 @router.get("/candidates/{candidate_id}/ondemand/pdf")
 def ondemand_pdf(candidate_id: int, db: Session = Depends(get_db),
                  current: HRUser = Depends(get_current_staff)):
-    """On-Demand Candidate form plus its Aadhaar, PAN and photo, as one PDF."""
+    """Consultant form plus its Aadhaar, PAN and photo, as one PDF."""
     candidate = scope.get_scoped_candidate(db, candidate_id, current)
     from app.services import ondemand_pdf as ondemand_service
     reason = ondemand_service.not_ready_reason(candidate)
     if reason:
         raise HTTPException(status_code=400, detail=reason)
     pdf = ondemand_service.build(candidate)
-    filename = f"On-Demand Candidate Form - {_pdf_name(candidate)}.pdf"
+    filename = f"Consultant Form - {_pdf_name(candidate)}.pdf"
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
@@ -468,6 +470,8 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         email=candidate.email,
         stage=candidate.stage.value,
         candidate_type=candidate.candidate_type.value,
+        consultant_type=((candidate.consultant_type or DEFAULT_CONSULTANT_TYPE)
+                         if candidate.candidate_type == CandidateType.ONDEMAND else None),
         rejection_reason=candidate.rejection_reason,
         assigned_hr_id=owner.get("assigned_hr_id"),
         assigned_hr_name=owner.get("assigned_hr_name"),
@@ -544,6 +548,28 @@ def regenerate_invite_link(candidate_id: int, db: Session = Depends(get_db),
     return {"detail": "New link issued. The previous link no longer works.",
             "login_url": _candidate_login_url(candidate),
             "login_link_expires_at": _link_expiry(candidate)}
+
+
+@router.post("/candidates/{candidate_id}/consultant-type")
+def set_consultant_type(candidate_id: int, payload: dict, db: Session = Depends(get_db),
+                        current: HRUser = Depends(get_current_staff)):
+    """Set a Consultant's sub-type (Corp to Corp / Full Time / On Demand)."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    if candidate.candidate_type != CandidateType.ONDEMAND:
+        raise HTTPException(status_code=400, detail="Only Consultants have a consultant type.")
+    new = str(payload.get("consultant_type") or "")
+    if new not in CONSULTANT_TYPES:
+        raise HTTPException(status_code=400, detail="Unknown consultant type.")
+    old = candidate.consultant_type or DEFAULT_CONSULTANT_TYPE
+    if new != old:
+        candidate.consultant_type = new
+        db.add(FieldEditLog(candidate_id=candidate_id, form_type="ACCOUNT",
+                             field_name="consultant_type", old_value=CONSULTANT_TYPES[old],
+                             new_value=CONSULTANT_TYPES[new], action="EDIT",
+                             edited_by_hr_id=current.id))
+        db.commit()
+    return {"detail": f"Consultant type set to {CONSULTANT_TYPES[new]}.",
+            "consultant_type": new}
 
 
 @router.post("/candidates/{candidate_id}/regenerate-declaration-link")
@@ -969,7 +995,7 @@ def approve_candidate(candidate_id: int, payload: DecisionRequest, db: Session =
             sub.reviewed_by_hr_id = current.id
         candidate.stage = CandidateStage.APPROVED_FOR_BGV
         db.commit()
-        return {"detail": "On-Demand Candidate form approved. Mark the onboarding complete when ready."}
+        return {"detail": "Consultant form approved. Mark the onboarding complete when ready."}
 
     # Mark the CIF submission reviewed + approved.
     cif = db.query(FormSubmission).filter(FormSubmission.candidate_id == candidate_id,
@@ -1039,7 +1065,7 @@ def mark_onboarding_complete(candidate_id: int, db: Session = Depends(get_db),
     if candidate.candidate_type == CandidateType.ONDEMAND:
         if FormType.ONDEMAND not in approved:
             raise HTTPException(status_code=400,
-                                 detail="Cannot mark complete: the On-Demand Candidate form has "
+                                 detail="Cannot mark complete: the Consultant form has "
                                         "not been approved yet.")
     elif FormType.DOCUMENT_COLLECTION not in approved:
         raise HTTPException(status_code=400,
@@ -1228,26 +1254,52 @@ def push_declaration_to_zoho(candidate_id: int, db: Session = Depends(get_db),
                       f"from the Declaration form.{note}{_pushed_by_note(result)}", **result}
 
 
+@router.get("/candidates/{candidate_id}/zoho/documents/lookup")
+def lookup_documents_record(candidate_id: int, email: str,
+                            db: Session = Depends(get_db),
+                            current: HRUser = Depends(get_current_staff)):
+    """Which Zoho Documents Collection record an email points at (name,
+    Pre-Induction ID), so HR confirms it before the push writes to it."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    actor = _zoho_actor(db, current)
+    try:
+        return zoho_push.find_documents_record(actor.token, candidate, email)
+    except zoho_push.ZohoPushError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 @router.post("/candidates/{candidate_id}/zoho/documents/push")
-def push_documents_to_zoho(candidate_id: int, db: Session = Depends(get_db),
+def push_documents_to_zoho(candidate_id: int, body: DocumentsPushRequest | None = None,
+                           db: Session = Depends(get_db),
                            current: HRUser = Depends(get_current_staff)):
     """Upload the Document Collection files plus the CIF / Declaration (and,
     for trainees, Reference Check) PDFs into Zoho's Documents Collection form
-    for the candidate's type. Tracked in zoho_doc_* columns."""
+    for the candidate's type. With zoho_email, into exactly the record with
+    that email. Tracked in zoho_doc_* columns."""
     candidate = scope.get_scoped_candidate(db, candidate_id, current)
     if candidate.stage not in _ZOHO_PUSH_STAGES:
         raise HTTPException(status_code=400,
                             detail="Only candidates approved for BGV / Document Collection can be "
                                    "published to Zoho People.")
     actor = _zoho_actor(db, current)
+    zoho_email = (body.zoho_email or "").strip() if body else ""
     try:
         form, _entry = zoho_push.documents_target(candidate)
-        result = zoho_push.push_documents(candidate, actor=actor)
+        result = zoho_push.push_documents(candidate, actor=actor, zoho_email=zoho_email or None)
     except zoho_push.ZohoPushError as exc:
         candidate.zoho_doc_last_error = str(exc)[:2000]
         db.commit()
         raise HTTPException(status_code=502, detail=str(exc))
 
+    import json
+    same_record = (candidate.zoho_doc_record_id == result["record_id"]
+                   and candidate.zoho_doc_form == form)
+    try:
+        sent = json.loads(candidate.zoho_doc_sent or "{}") if same_record else {}
+    except ValueError:
+        sent = {}
+    sent.update(result.get("sent") or {})
+    candidate.zoho_doc_sent = json.dumps(sent)
     candidate.zoho_doc_record_id = result["record_id"]
     candidate.zoho_doc_form = form
     candidate.zoho_doc_status = result["status"]
@@ -1258,19 +1310,23 @@ def push_documents_to_zoho(candidate_id: int, db: Session = Depends(get_db),
     verb = "Created" if result["created"] else "Updated"
     skipped = (" Not sent yet: " + "; ".join(result["skipped"]) + "."
                if result["skipped"] else "")
-    return {"detail": f"{verb} Zoho {form} record {result['record_id']} with "
-                      f"{result['files']} document(s).{skipped}{_pushed_by_note(result)}", **result}
+    which = f" ({zoho_email})" if zoho_email else ""
+    unchanged = (f" {result['unchanged']} unchanged document(s) were already in Zoho and "
+                 "not re-uploaded." if result.get("unchanged") else "")
+    return {"detail": f"{verb} Zoho {form} record {result['record_id']}{which} with "
+                      f"{result['files']} document(s).{unchanged}{skipped}"
+                      f"{_pushed_by_note(result)}", **result}
 
 
 @router.post("/candidates/{candidate_id}/zoho/ondemand/push")
 def push_ondemand_to_zoho(candidate_id: int, db: Session = Depends(get_db),
                           current: HRUser = Depends(get_current_staff)):
-    """Write the On-Demand Candidate form (details plus Aadhaar / PAN / photo)
+    """Write the Consultant form (details plus Aadhaar / PAN / photo)
     into Zoho's Consultant Tracker as a draft. Tracked in zoho_od_* columns."""
     candidate = scope.get_scoped_candidate(db, candidate_id, current)
     if candidate.candidate_type.value != "ONDEMAND":
         raise HTTPException(status_code=400,
-                            detail="Only On-Demand Consultants go to the Zoho Consultant Tracker.")
+                            detail="Only Consultants go to the Zoho Consultant Tracker.")
     actor = _zoho_actor(db, current)
     try:
         result = zoho_push.push_ondemand(candidate, actor=actor)
@@ -1287,7 +1343,7 @@ def push_ondemand_to_zoho(candidate_id: int, db: Session = Depends(get_db),
     db.commit()
     verb = "Created" if result["created"] else "Updated"
     return {"detail": f"{verb} Zoho Consultant Tracker draft {result['record_id']} from the "
-                      "On-Demand Candidate form. Complete the remaining mandatory fields "
+                      "Consultant form. Complete the remaining mandatory fields "
                       f"in Zoho and submit it there.{_pushed_by_note(result)}", **result}
 
 
@@ -1318,7 +1374,7 @@ def review_submission(submission_id: int, payload: ReviewSubmissionRequest, db: 
     # the candidate's stage; approving a CIF here would leave the stage behind
     # and let the candidate overwrite an approved form.
     if submission.form_type in (FormType.CIF, FormType.ONDEMAND):
-        name = "CIF" if submission.form_type == FormType.CIF else "The On-Demand Candidate form"
+        name = "CIF" if submission.form_type == FormType.CIF else "The Consultant form"
         raise HTTPException(status_code=400,
                              detail=f"{name} is reviewed via the candidate Approve/Reject decision, "
                                     "not per-submission review")
@@ -1373,12 +1429,12 @@ def _send_blocker(form: FormType, candidate: Candidate, db: Session) -> str | No
             FormSubmission.form_type == prev).first()
         return row is not None and row.status == FormStatus.APPROVED
 
-    # An On-Demand Consultant fills only the On-Demand Candidate form, which
+    # An On-Demand Consultant fills only the Consultant form, which
     # is open from the invite; nobody else ever gets it.
     if (form is FormType.ONDEMAND) != (candidate.candidate_type == CandidateType.ONDEMAND):
-        return ("On-Demand Consultants fill only the On-Demand Candidate form."
+        return ("Consultants fill only the Consultant form."
                 if candidate.candidate_type == CandidateType.ONDEMAND
-                else "The On-Demand Candidate form is only for On-Demand Consultants.")
+                else "The Consultant form is only for Consultants.")
 
     if form is FormType.DOCUMENT_COLLECTION:
         if candidate.stage in (CandidateStage.INVITED, CandidateStage.CIF_SUBMITTED):
