@@ -82,7 +82,7 @@ const DECLARATION_FIELDS = [
 
 const ONDEMAND_FIELDS = [
   "full_name", "email", "alternate_email", "contact_number", "alternate_number",
-  "linkedin_link", "date_of_birth",
+  "linkedin_link", "date_of_birth", "blood_group",
   "bank_account_name", "bank_name", "bank_account_number", "bank_ifsc_code",
   "bank_account_type", "bank_branch",
 ];

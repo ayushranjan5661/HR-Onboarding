@@ -984,6 +984,7 @@ def push_documents(candidate: Candidate, *, actor, zoho_email: str | None = None
     pre_draft = False
     pre_filled, pre_fill_error = [], None
     pre_id = None
+    old_unlinked = None
     fields = _form_fields(token, form)
     if zoho_email:
         target = find_documents_record(token, candidate, zoho_email)
@@ -1006,12 +1007,14 @@ def push_documents(candidate: Candidate, *, actor, zoho_email: str | None = None
                 pre_id, pre_draft = create_pre_induction(token, candidate, target["email"],
                                                          pre_induction)
                 pre_created = pre_id
-                if target["action"] != "update":
-                    workflow_id = _wait_for_workflow_record(token, form, entry,
-                                                            target["email"], pre_id)
-                    if workflow_id:
-                        # Upload into Zoho's own linked record.
-                        target = {**target, "action": "update", "record_id": workflow_id}
+                workflow_id = _wait_for_workflow_record(token, form, entry,
+                                                        target["email"], pre_id)
+                if workflow_id:
+                    # Upload into Zoho's own linked record, never leave it empty.
+                    # An older unlinked record of ours stays for HR to delete.
+                    if target["action"] == "update" and target["record_id"] != workflow_id:
+                        old_unlinked = target["record_id"]
+                    target = {**target, "action": "update", "record_id": workflow_id}
         if target["action"] == "update":
             # The Zoho team's record: its name / email stay as they entered them.
             record_id = target["record_id"]
@@ -1129,6 +1132,7 @@ def push_documents(candidate: Candidate, *, actor, zoho_email: str | None = None
             "pre_linked": bool(pre_id) and not link_refused, "pre_record_id": pre_id,
             "pre_created": pre_created, "pre_draft": pre_draft, "link_refused": link_refused,
             "pre_filled": pre_filled, "pre_fill_error": pre_fill_error,
+            "old_unlinked": old_unlinked,
             "pushed_by": pushed_by_status, "hidden_fields": hidden}
 
 
@@ -1352,7 +1356,7 @@ def ondemand_payload(candidate: Candidate) -> dict:
     notes = [f"{label}: {value}" for label, value in (
         ("Alternate Email", od.alternate_email), ("Alternate Contact Number", od.alternate_number),
         ("LinkedIn", od.linkedin_link), ("Date of Birth", od.date_of_birth),
-        ("Bank Branch", od.bank_branch)) if value]
+        ("Blood Group", od.blood_group), ("Bank Branch", od.bank_branch)) if value]
     if notes:
         payload[OD_COMMENT_FIELD] = "\n".join(notes)
     return {k: v for k, v in payload.items() if v}

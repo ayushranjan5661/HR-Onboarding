@@ -213,10 +213,11 @@ DECLARATION_FILE_FIELDS = ["declaration_signature"]
 # Collection keys so the same document checks apply.
 ONDEMAND_FIELDS = [
     "full_name", "email", "alternate_email", "contact_number", "alternate_number",
-    "linkedin_link", "date_of_birth",
+    "linkedin_link", "date_of_birth", "blood_group",
     "bank_account_name", "bank_name", "bank_account_number", "bank_ifsc_code",
     "bank_account_type", "bank_branch",
 ]
+ONDEMAND_BLOOD_GROUPS = ("A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-")
 ONDEMAND_OPTIONAL = {"alternate_email", "alternate_number", "linkedin_link",
                      "bank_account_name", "bank_name", "bank_account_number",
                      "bank_ifsc_code", "bank_account_type", "bank_branch"}
@@ -233,15 +234,20 @@ DEFAULT_CONSULTANT_TYPE = "ONDEMAND"
 # Every upload any consultant type can have (storage, edit access, HR view).
 ONDEMAND_FILE_FIELDS = ["aadhar_card", "pan_card", "passport_size_photo",
                         "resume", "sow", "nda", "msa", "approval_mail", "other_documents"]
-ONDEMAND_OPTIONAL_FILES = {"pan_card", "resume", "sow", "nda", "msa", "other_documents"}
+ONDEMAND_OPTIONAL_FILES = {"pan_card", "resume", "sow", "nda", "msa", "approval_mail",
+                           "other_documents"}
 
-# Per consultant type: which uploads the form shows, which are mandatory, and
-# whether it has the Bank Details section. Types not listed use the default.
+# Per consultant type: which uploads the form shows, which are mandatory,
+# whether it has the Bank Details section and the Blood Group field (mandatory
+# when shown), and per-type upload labels. Types not listed use the default.
+_OFFER_APPROVAL = {"approval_mail": "Offer Approval Mail"}
 _DEFAULT_LAYOUT = {
     "docs": ["aadhar_card", "pan_card", "passport_size_photo",
-             "resume", "sow", "nda", "msa", "other_documents"],
+             "resume", "sow", "nda", "msa", "approval_mail", "other_documents"],
     "required_docs": ["aadhar_card", "passport_size_photo"],
     "bank": True,
+    "blood_group": False,
+    "doc_labels": _OFFER_APPROVAL,
 }
 CONSULTANT_LAYOUTS = {
     "C2C_FULLTIME": {
@@ -249,18 +255,24 @@ CONSULTANT_LAYOUTS = {
                  "passport_size_photo", "approval_mail", "other_documents"],
         "required_docs": ["resume", "aadhar_card", "passport_size_photo"],
         "bank": False,   # paid to the vendor company
+        "blood_group": True,
+        "doc_labels": {},
     },
     "C2C_ONDEMAND": {
         "docs": ["resume", "aadhar_card", "pan_card", "sow", "nda", "msa",
-                 "passport_size_photo", "other_documents"],
+                 "passport_size_photo", "approval_mail", "other_documents"],
         "required_docs": ["resume", "aadhar_card", "passport_size_photo"],
         "bank": False,   # paid to the vendor company
+        "blood_group": False,
+        "doc_labels": {},
     },
     "FULLTIME": {
         "docs": ["resume", "aadhar_card", "pan_card", "passport_size_photo",
-                 "sow", "msa", "nda", "other_documents"],
+                 "sow", "msa", "nda", "approval_mail", "other_documents"],
         "required_docs": ["resume", "aadhar_card", "passport_size_photo"],
         "bank": True,    # optional fields
+        "blood_group": True,
+        "doc_labels": _OFFER_APPROVAL,
     },
 }
 BANK_FIELDS = ["bank_account_name", "bank_name", "bank_account_number",
@@ -269,6 +281,13 @@ BANK_FIELDS = ["bank_account_name", "bank_name", "bank_account_number",
 
 def consultant_layout(consultant_type) -> dict:
     return CONSULTANT_LAYOUTS.get(consultant_type or DEFAULT_CONSULTANT_TYPE, _DEFAULT_LAYOUT)
+
+
+def consultant_fields(layout: dict) -> list[str]:
+    """ONDEMAND_FIELDS this layout's form shows."""
+    return [f for f in ONDEMAND_FIELDS
+            if (layout["bank"] or f not in BANK_FIELDS)
+            and (layout["blood_group"] or f != "blood_group")]
 
 # --- Document Collection: the real LevelShift form (40 uploads) -------------
 # Two variants share the same fields; only which ones are mandatory differs.

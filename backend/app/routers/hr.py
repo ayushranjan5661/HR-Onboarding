@@ -1341,6 +1341,9 @@ def push_documents_to_zoho(candidate_id: int, body: DocumentsPushRequest | None 
                if result.get("link_refused") else "")
     if result.get("pre_linked") and not result.get("pre_created"):
         refused = f" Linked to Pre-Induction record {result['pre_record_id']}." + refused
+    if result.get("old_unlinked"):
+        refused += (f" Zoho created this linked record itself, so the documents went there; "
+                    f"delete the older unlinked record {result['old_unlinked']} in Zoho.")
     filled = (f" Filled on the Pre-Induction record: {', '.join(result['pre_filled'])}."
               if result.get("pre_filled") else "")
     if result.get("pre_fill_error"):
