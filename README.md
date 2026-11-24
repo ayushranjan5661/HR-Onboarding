@@ -1,158 +1,197 @@
 # HR Onboarding System
 
-Role-based candidate onboarding: HR invites a candidate → candidate fills the
-CIF → HR reviews/edits/approves or rejects → on approval, BGV + Document
-Collection forms unlock, pre-filled with the candidate's existing details →
-HR reviews those and closes out onboarding.
+Role-based candidate onboarding for LevelShift. HR invites a candidate → the
+candidate fills the CIF → HR reviews / edits / approves or rejects → follow-up
+forms (Document Collection, Declaration, Reference Check, BGV) are sent one at
+a time, pre-filled from what the candidate already gave → HR closes out
+onboarding and publishes the records to **Zoho People**.
 
 ## Stack
-- Backend: FastAPI + PostgreSQL (SQLAlchemy), JWT auth, two independent login
-  systems (staff vs Candidate).
-- Frontend: static HTML/CSS/JS — four portals (Super Admin, Manager, HR,
-  Candidate), no build step. The Master Admin uses the Super Admin portal.
+- **Backend:** FastAPI + PostgreSQL (SQLAlchemy), JWT auth, two independent
+  login systems (staff vs candidate), plus token-only public links for
+  referees and the Declaration form.
+- **Frontend:** static HTML/CSS/JS, no build step. Portals: Super Admin
+  (also used by Master Admin and Admin), Manager, HR, Candidate, Referee,
+  Declaration.
+- **AI:** Azure OpenAI for cross-form field mapping, CIF insights and
+  reference-email drafting. Identity documents are checked by **local OCR
+  only** (Tesseract), never sent to an AI service.
+- **Integrations:** Zoho People (per-HR OAuth, push per form).
+- **Hosting:** Azure App Service (F1) + Supabase Postgres — see
+  [Deploy](#deploy-to-azure).
 
 ## Staff roles
 One staff table (`hr_users`), one login (`/auth/staff/login`); the account's
-role decides the landing page and what the server lets it see.
+role decides the landing page and what the server lets it see. Hierarchy:
+`MASTER_ADMIN > SUPER_ADMIN > ADMIN > MANAGER > HR`.
 
 | Role | Who | Sees | Can do |
 | --- | --- | --- | --- |
-| `MASTER_ADMIN` | developer account, seeded from `SEED_MASTER_*` in `.env` only | everything, plus the **current password** of every staff login | everything below, plus create / deactivate / delete / reset Super Admins. Cannot be created by the API, deleted or deactivated. Invisible to Super Admins |
-| `SUPER_ADMIN` | the seeded account (`SEED_HR_*`); more can be created by the Master Admin | every candidate | create / deactivate / delete Managers and HR Executives, reset their passwords, move an HR between teams, reassign any candidate, global audit |
-| `MANAGER` | team lead | own + team candidates | create / deactivate / delete HR Executives in own team, invite candidates for any team member, reassign within team, everything an HR can do on team candidates, team audit |
-| `HR` | HR Executive | candidates assigned to them | invite, review, approve / reject, send / withdraw forms, edit access |
+| `MASTER_ADMIN` | developer account, seeded from `SEED_MASTER_*` in `.env` only | everything | everything below, plus create / deactivate / delete / reset Super Admins. Never created by the API, deleted or deactivated. Invisible to Super Admins |
+| `SUPER_ADMIN` | seeded account (`SEED_HR_*`); more can be created by the Master Admin | every candidate | create / manage Admins, Managers and HR Executives, reset passwords, move HRs between teams, reassign any candidate, global audit |
+| `ADMIN` | created by a Super Admin | every candidate | every Super Admin power over Managers, HRs, candidates and the audit trail — but never sees or touches Master, Super Admins or peer Admins |
+| `MANAGER` | team lead | own + team candidates | create / deactivate / delete HRs in own team, invite for any team member, reassign within team, everything an HR can do on team candidates, team audit |
+| `HR` | HR Executive | candidates assigned to them | invite, review, approve / reject, send / withdraw forms, edit access, Zoho push |
 
 Rules enforced server-side (`app/scope.py`, `app/staff_service.py`):
 - A candidate outside the caller's scope answers **404** on every `/hr` route,
-  including the ones keyed by submission / document / row id.
+  including those keyed by submission / document / row id.
 - Ownership is `candidates.assigned_hr_id` (moves on reassignment);
   `created_by_hr_id` records who invited and never changes.
+- Nobody can assign a candidate to a role ranked above them (`scope.ROLES_ABOVE`).
 - Deleting a staff user is blocked while they own candidates or lead HRs.
   Reassign / move first, or deactivate.
 - New staff get a generated password shown once; they must change it on first
   login (`must_reset_password` → every other call returns
   `403 PASSWORD_RESET_REQUIRED`).
+- **No one sees a password a user chose** — not even the Master Admin. Only the
+  generated one-time password is viewable, until it is changed.
 - An HR with no Manager (rows from before teams existed) is visible only to
   the Super Admin until moved into a team.
 - Staff-hierarchy changes are written to `staff_audit_log`.
-- Every staff password in force is also kept encrypted (`hr_users.password_enc`,
-  same key scheme as candidate passwords) so the Master Admin can read it.
-  Written on create, reset, self-service change and seed; rows whose password
-  was last set before this existed show "Not recorded" until reset.
-- Only the Master Admin may act on a Super Admin (`/admin/staff/{id}` returns
-  404 to a Super Admin for admin rows, including the Master Admin's).
 
-Portals: `frontend/super-admin/` (Master Admin and Super Admin), `frontend/manager/`,
-`frontend/hr-portal/`. The candidate detail page (`hr-portal/candidate.html`) is
-shared by every staff role.
-- Files (Aadhaar/PAN/mark sheets/resume/etc.) are stored on disk under
-  `backend/uploads/`, referenced from Postgres.
+## Candidate types and form sequence
+HR picks the type when inviting; it decides which forms the candidate gets.
+
+| Type (UI label) | Enum | Forms |
+| --- | --- | --- |
+| Permanent / Fulltime Consultant | `EXPERIENCED` | CIF → Document Collection → BGV, plus Declaration |
+| Fresher / Trainee | `FRESHER` | CIF → Document Collection → Reference Check → BGV, plus Declaration |
+| Consultant (On-Demand) | `ONDEMAND` | one On-Demand form only — no BGV / document flow |
+
+```
+CIF ─approve─▶ Document Collection ─approve─▶ [Reference Check] ─approve─▶ BGV ─approve─▶ Complete
+        └─────▶ Declaration (sendable once the CIF is approved)
+```
+- **Nothing is sent automatically.** Approval makes the next form *sendable*;
+  it stays LOCKED until HR presses **Send** (and can **Withdraw** it again).
+- **Every form locks the moment it is submitted** — see
+  [Correcting a submitted form](#correcting-a-submitted-form).
+- **Reject** at any gate stops the flow; the candidate portal shows the
+  application as closed.
+- **Reference Check** (Freshers only): the candidate names referees; each
+  referee gets a signed, login-free link to `referee form-portal/referee-form.html`.
+  HR can draft the reference email with AI and download the Reference Check PDF.
+- **Declaration** (undertaking for pending educational documents, with
+  per-document expected dates): opened through its own signed link
+  (`declaration-form-portal/`), no login. Reuses the CIF signature.
+- HR can download generated PDFs for CIF, Document Collection, Reference
+  Check, Declaration and On-Demand forms (`app/services/*_pdf.py`).
 
 ## Project layout
 ```
 HR-Onboarding/
 ├─ backend/
 │  ├─ app/
-│  │  ├─ main.py               FastAPI app, CORS, router wiring
-│  │  ├─ config.py             settings read from ../.env (DB, JWT, uploads, Azure OpenAI)
+│  │  ├─ main.py               FastAPI app, CORS, router wiring; installs the DNS fallback first
+│  │  ├─ config.py             settings read from ../.env
 │  │  ├─ database.py           SQLAlchemy engine + session factory
-│  │  ├─ deps.py               auth guards — get_current_hr / get_current_candidate
-│  │  ├─ security.py           password hashing, JWT issue/decode, invite tokens
-│  │  ├─ models.py             every table (see Data model below)
+│  │  ├─ deps.py               auth guards
+│  │  ├─ security.py           password hashing, JWT, invite tokens, password encryption
+│  │  ├─ scope.py / staff_service.py   staff hierarchy + candidate visibility
+│  │  ├─ models.py             every table (see Data model)
 │  │  ├─ schemas.py            Pydantic request / response models
-│  │  ├─ form_definitions.py   which field belongs to which form and which table
-│  │  ├─ field_catalog.py      canonical field list + human labels, read by the AI agents
-│  │  ├─ edit_access.py        what HR may unlock on a submitted form, and where it lives
+│  │  ├─ form_definitions.py   which field belongs to which form and table
+│  │  ├─ field_catalog.py      canonical field list + labels (generated)
+│  │  ├─ edit_access.py        what HR may unlock on a submitted form
+│  │  ├─ referee_links.py / declaration_links.py   signed login-free links
+│  │  ├─ date_format.py        DD-MM-YYYY handling
 │  │  ├─ routers/
-│  │  │  ├─ auth.py            HR + candidate login / logout / change-password
-│  │  │  ├─ hr.py              invite, review, edit, grant/revoke access, audit, decisions
-│  │  │  └─ candidate.py       status, drafts, form submission, applying granted edits
+│  │  │  ├─ auth.py            staff + candidate login / logout / change-password
+│  │  │  ├─ admin.py           /admin — staff management + global audit
+│  │  │  ├─ manager.py         /manager — team, reassignment, team audit
+│  │  │  ├─ hr.py              invite, review, edit, send, decisions, PDFs, Zoho push
+│  │  │  ├─ candidate.py       status, drafts, submission, granted edits
+│  │  │  ├─ referee.py         public referee feedback form
+│  │  │  ├─ declaration.py     public Declaration form
+│  │  │  └─ zoho.py            per-HR Zoho connect / disconnect / OAuth callback
 │  │  ├─ agents/
 │  │  │  ├─ field_mapper.py    LLM — which fields mean the same thing across forms
-│  │  │  ├─ prefill.py         turns those mappings into pre-filled values + carried documents
+│  │  │  ├─ prefill.py         mappings → pre-filled values + carried documents
 │  │  │  ├─ insights.py        LLM — CIF summary and anomaly flags for HR
-│  │  │  ├─ doc_validator.py   OCR + keyword scoring — is each upload the document its field asks for?
-│  │  │  └─ doc_lexicon.py     the words it looks for, in every Indian script + every state board
-│  ├─ tessdata/                Tesseract language packs: English + 13 Indian languages (~30 MB)
+│  │  │  ├─ reference_email.py LLM — draft email to referees
+│  │  │  ├─ doc_validator.py   local OCR + keyword scoring of uploads
+│  │  │  ├─ doc_lexicon.py     keywords in every Indian script + every state board
+│  │  │  └─ doc_check_queue.py background queue for document checks
+│  │  ├─ services/
+│  │  │  ├─ zoho_push.py       push each form to its Zoho People form
+│  │  │  ├─ zoho_oauth.py      per-HR Zoho tokens (encrypted at rest)
+│  │  │  └─ *_pdf.py           CIF / documents / reference / declaration / on-demand PDFs
 │  │  └─ utils/
-│  │     └─ file_storage.py    upload validation, safe storage, document snapshots
+│  │     ├─ file_storage.py    upload validation, safe storage, snapshots
+│  │     └─ dns_fallback.py    nslookup fallback when Python's DNS is blocked
+│  ├─ tessdata/                Tesseract packs: English + 13 Indian languages (~30 MB)
+│  ├─ tests/                   pytest: doc validator, DNS fallback, Zoho OAuth / push permissions
 │  ├─ uploads/                 candidate files + retained versions (gitignored)
-│  ├─ init_db.py               creates tables, runs light migrations, seeds the Super Admin login
+│  ├─ init_db.py               creates tables, light migrations, seeds Super / Master Admin
+│  ├─ migrate_*.py             one-off data migrations
+│  ├─ recheck_documents.py     re-score stored documents
 │  ├─ requirements.txt
 │  └─ .env.example
-├─ frontend/                   static — no build step; serve this folder as ONE site
-│  ├─ index.html               the only login page; Staff / Candidate toggle, routes staff by role
-│  ├─ js/
-│  │  ├─ config.js             API_BASE — the single place the backend URL is set
-│  │  └─ field-labels.js       field labels + section titles, shared by both portals
-│  ├─ assets/
-│  │  └─ logo-white.svg
-│  ├─ hr-portal/
-│  │  ├─ dashboard.html        candidate list, invite, delete
-│  │  ├─ candidate.html        one candidate: forms, decisions, edit access, change history
-│  │  ├─ js/api.js             fetch wrapper + HR session
-│  │  ├─ js/candidate.js       everything on the candidate page
-│  │  └─ css/style.css
-│  └─ candidate-portal/
-│     ├─ home.html             application status + the forms assigned to them
-│     ├─ cif-form.html         Candidate Information Form
-│     ├─ document-form.html    Document Collection (uploads only)
-│     ├─ bgv-form.html         Background Verification
-│     ├─ my-corrections.html   the fields HR has unlocked, with one reason per submission
-│     ├─ js/api.js             fetch wrapper + candidate session
-│     ├─ js/draft.js           save / restore an unsubmitted form
-│     ├─ js/auto-fill.js       applies what the prefill agent returned
-│     ├─ js/prefill.js         shows which values were carried from an earlier form
-│     ├─ js/doc-viewer.js      in-page preview for uploaded files
-│     ├─ js/dialog.js          styled replacements for alert() / confirm()
-│     ├─ js/edit-mode.js       shared helpers for reloading a saved submission
-│     └─ css/style.css
-├─ .env                        secrets: DB url, JWT key, seed HR login (NOT committed)
-├─ .gitignore
+├─ frontend/                   static — serve this folder as ONE site
+│  ├─ index.html               the only login page; Staff / Candidate toggle
+│  ├─ change-password.html     forced first-login password change
+│  ├─ js/                      shared: config.js (API_BASE), field labels, date format,
+│  │                           staff-* pages, mobile nav, Zoho connect, welcome email
+│  ├─ super-admin/             users, candidates, audit (Master / Super / Admin)
+│  ├─ manager/                 team, candidates, audit
+│  ├─ hr-portal/               dashboard + candidate.html (shared by every staff role)
+│  ├─ candidate-portal/        home, CIF, Document Collection, BGV, Reference,
+│  │                           On-Demand, my-corrections
+│  ├─ referee form-portal/     public referee feedback form
+│  └─ declaration-form-portal/ public Declaration form
+├─ integrations/zoho/          Zoho CLI, payload builder, field maps (see its README)
+├─ .claude/skills/deploy-azure/   Azure deploy skill + scripts
+├─ .env                        secrets (NOT committed)
 └─ README.md
 ```
 
 ### Data model
 | Table | What it holds |
 | --- | --- |
-| `hr_users` | every staff login: `role`, `manager_id` (HR → Manager), `must_reset_password`, `password_enc` (Master Admin view) |
+| `hr_users` | every staff login: `role`, `manager_id`, `must_reset_password`, one-time password, Zoho connection |
 | `staff_audit_log` | staff create / deactivate / delete / reset / move, candidate reassignment |
-| `candidates` | candidate login, stage, type, invite token |
+| `candidates` | candidate login, stage, type, invite token, Zoho record ids |
 | `candidate_profiles` | identity fields shared by every form |
-| `form_submissions` | one row per form: status, submitted/reviewed timestamps |
-| `cif_details` / `bgv_details` / `doc_collection_details` | each form's own flat fields |
+| `form_submissions` | one row per form: status, submitted / reviewed timestamps |
+| `cif_details` / `bgv_details` / `doc_collection_details` / `reference_check_details` / `declaration_details` / `ondemand_details` | each form's own flat fields |
 | `education_details` / `employment_details` / `reference_details` | CIF repeating sections |
 | `bgv_address_history` / `bgv_education_checks` / `bgv_employment_checks` / `bgv_reference_checks` / `bgv_gaps` | BGV repeating sections |
-| `documents` | the file currently on record for each upload field |
+| `referee_feedback` | one row per referee response |
+| `documents` | the file currently on record for each upload field, plus OCR verdict |
 | `document_snapshots` | superseded files, kept so old versions stay openable |
 | `form_drafts` / `form_draft_documents` | unsubmitted work; invisible to HR, deleted on submit |
 | `field_edit_permissions` | one row per field HR has unlocked for a candidate |
-| `field_edit_log` | the audit trail: before, after, reason, when, who |
+| `field_edit_log` | audit trail: before, after, reason, when, who |
+| `zoho_push_records` | what was pushed to Zoho, when, by whom |
+| `experience_declaration_details` | retired form — kept for existing rows only |
 
 ## One-time setup
-1. Create the Postgres database referenced by `DATABASE_URL` in `.env`
-   (default: `hr_onboarding`).
-2. Install deps and seed the DB. **Use Python 3.11 or 3.12** — the
-   pydantic/psycopg2 wheels don't have prebuilt binaries for 3.14 yet and
-   fail to compile without Rust/C++ build tools (tested: 3.11 installs
-   clean, 3.14 does not):
+1. Create the Postgres database referenced by `DATABASE_URL` in the root
+   `.env` (copy keys from `backend/.env.example`). Production uses Supabase.
+2. Install deps and seed the DB. **Use Python 3.11 or 3.12** — pydantic /
+   psycopg2 have no prebuilt wheels for 3.14 yet:
    ```
+   python3.11 -m venv myenv
+   myenv\Scripts\activate
+   pip install -r backend\requirements.txt
    cd backend
-   C:\Users\ayush_r\AppData\Local\Programs\Python\Python311\python.exe -m venv venv
-   venv\Scripts\activate
-   pip install -r requirements.txt
    python init_db.py
    ```
-   This prints the seeded HR login (from `SEED_HR_EMAIL` / `SEED_HR_PASSWORD`
-   in `.env`) — change the password after first login.
+   This seeds the Super Admin (`SEED_HR_*`) and, if `SEED_MASTER_PASSWORD` is
+   set, the Master Admin. Change passwords after first login.
+3. Install Tesseract for the document check:
+   `winget install UB-Mannheim.TesseractOCR` (or set `TESSERACT_CMD`).
 
 ## Run it
 ```
 cd backend
-venv\Scripts\activate
-uvicorn app.main:app --reload --port 8000
+..\myenv\Scripts\activate
+uvicorn app.main:app --port 8000
 ```
-Serve the whole `frontend/` folder as ONE static site (single entry point):
+(Add `--reload` if you want auto-restart on edits.)
+
+Serve the whole `frontend/` folder as ONE static site:
 ```
 cd frontend
 python -m http.server 5500
@@ -160,230 +199,165 @@ python -m http.server 5500
 Open **http://127.0.0.1:5500/index.html** — one login page with a Staff /
 Candidate toggle. Staff land in the portal for their role.
 
-**Ports must match in three places** — a mismatch shows up in the browser as
-a bare "Failed to fetch" on login:
+**Ports must match** — a mismatch shows as a bare "Failed to fetch" on login:
 
 | What | Port | Where it's configured |
 |---|---|---|
-| Backend | 8000 | `uvicorn --port`, and `API_BASE` in `frontend/js/config.js` |
-| Frontend | 5500 | `python -m http.server`, and `FRONTEND_ORIGINS` + `PORTAL_BASE_URL` in `.env` |
+| Backend | 8000 | `uvicorn --port`, `API_BASE` in `frontend/js/config.js` |
+| Frontend | 5500 | `python -m http.server`, `FRONTEND_ORIGINS` + `PORTAL_BASE_URL` in `.env` |
 
-`frontend/js/config.js` is the single place the frontend's backend URL is
-defined — every page loads it, so change it there only.
+**DNS on this machine:** endpoint protection blocks Python's own DNS when a
+script runs as a program (`getaddrinfo 11001`). `app/utils/dns_fallback.py`
+falls back to `nslookup`; any new standalone script that calls Azure OpenAI or
+Zoho must call `dns_fallback.install()` first.
 
 ## Demo flow
-1. Log in as HR (role toggle → HR) with the seeded HR login → **Invite
-   Candidate**. HR gets a login ID, password, and a **one-click link**. The
-   same details stay on the candidate's detail page, with **New Link** to
-   reissue and **Delete Invitation** (on the dashboard list) to remove
+1. Log in as staff → **Invite Candidate**, pick the candidate type. HR gets a
+   login ID, password and a **one-click link**; these stay on the candidate
+   page with **New Link** to reissue and **Delete Invitation** to remove
    everything.
-2. Candidate opens the one-click link — it signs them in and drops them
-   straight into the **CIF** (a local duplicate of the Zoho form's fields,
-   since we don't have API access to the live Zoho form). Email + password
-   still works as a fallback.
+2. The candidate opens the link — it signs them in and lands on the pending
+   form. Email + password still works as a fallback.
+3. HR opens the candidate → reviews every field, edits or deletes anything,
+   then **Approve** or **Reject**.
+4. HR **Sends** each follow-up form in turn (see
+   [sequence](#candidate-types-and-form-sequence)), reviewing each one.
+5. HR marks onboarding complete and pushes the forms to Zoho People.
 
 ### One-click invite links
-The link looks like `index.html?token=<43 random chars>&next=form`.
-
-- The token *is* a credential — anyone holding the link can fill that
-  candidate's forms. Send it to the candidate only.
-- It grants exactly what a password login grants: that one candidate's own
-  forms, never HR access.
-- It expires after `INVITE_LINK_EXPIRY_DAYS` (default 30) and dies instantly
-  when HR clicks **New Link** or deletes the candidate.
-- `next=form` picks whichever form is pending — CIF, then BGV, then Document
-  Collection — so one link keeps working through the whole process. Once
-  nothing is pending it lands on the status page instead.
-- Expired or revoked links fall back to the normal login form with an
-  explanation rather than a dead end.
-3. Back in the HR portal, open the candidate → review every submitted field,
-   edit or delete anything, then **Approve** or **Reject**.
-4. **Approve** makes the **Document Collection** form sendable, but it stays
-   withdrawn until HR presses **Send** on it — nothing reaches the candidate
-   automatically. Details already on file (name/email/contact/PAN/etc.) are
-   pulled from the CIF, so the candidate fills only what is unique to that form.
-5. Candidate submits their documents → HR reviews them. **Approving the
-   Document Collection is what allows the BGV form to be sent** (again with
-   **Send**) — the stages are sequential, so BGV cannot be started or
-   submitted before then. Rejecting the documents leaves BGV locked.
-6. Candidate submits BGV → HR approves it → HR marks onboarding complete.
-
-### Form sequence
-```
-CIF  ──HR approves──▶  Document Collection  ──HR approves──▶  BGV  ──HR approves──▶  Complete
-```
-**Every form locks the moment it is submitted** — see below. A form that is
-not yet its turn shows as LOCKED in both portals.
-
-7. **Reject** at any gate stops the flow — the candidate portal shows the
-   application as closed and no further form can be submitted.
+`index.html?token=<43 random chars>&next=form`
+- The token *is* a credential — send it to the candidate only. It grants that
+  one candidate's own forms, never staff access.
+- Expires after `INVITE_LINK_EXPIRY_DAYS` (default 3) and dies instantly on
+  **New Link** or candidate deletion.
+- `next=form` picks whichever form is pending, so one link works through the
+  whole process; once nothing is pending it lands on the status page.
+- Expired / revoked links fall back to the login form with an explanation.
 
 ### Correcting a submitted form
-A submitted form is the record HR reviews, so the candidate cannot go back and
-rewrite it. When something does turn out to be wrong — a mistyped Aadhaar
-number, say — HR opens that **one value**, not the form:
+A submitted form is the record HR reviewed, so the candidate cannot rewrite
+it. HR opens **one value**, not the form:
 
-1. HR portal → candidate → each submitted form card has **Allow Candidate
-   Edit** → tick what needs correcting, optionally add a note explaining why.
-2. The candidate sees *Corrections requested by HR* on their home page and
-   changes only those values, in `my-corrections.html`, grouped by form. They
-   fill in as many as they want, give **one reason for the submission** (HR
-   opened the fields together, so they are not asked field by field), and
-   submit once. Anything left blank stays open for later.
-3. Each grant is single-use: submitting the change closes it again. HR can
-   withdraw unused ones with **Revoke** on a single field or **Revoke all** in
-   the banner header. Either asks for a reason and is itself recorded, so a
-   field that was opened and then closed without an edit still has an
-   explanation on file.
-4. Every change — by HR or by the candidate — is written to `field_edit_log`
-   with the value before, the value after, the reason, the timestamp and who
-   made it. It is **HR-only**: they read it in the **Change History** card, and
-   there is no candidate-facing endpoint for it. The log records internal
-   actions too (invite links reissued, passwords reset), so it is not something
-   to show the person it is about.
+1. Candidate page → form card → **Allow Candidate Edit** → tick what needs
+   correcting, optionally add a note.
+2. The candidate sees *Corrections requested by HR* and changes only those
+   values in `my-corrections.html`, gives **one reason per submission**, and
+   submits. Anything left blank stays open.
+3. Each grant is single-use. HR can **Revoke** one field or **Revoke all**;
+   either needs a reason and is recorded.
+4. Every change — by HR or candidate — goes to `field_edit_log` (before,
+   after, reason, time, who). **HR-only**: shown in the **Change History**
+   card, never exposed to the candidate.
 
-Everything saved in one action shares a `change_set_id` and shows as **one
-entry** in the Change History: one HR *Save Changes* covering four fields is one
-box with four lines, not four boxes, and *Revoke all* over three fields is one
-box reading "Edit access withdrawn — 3 fields". Every batch applies in a single
-transaction, so a partial failure changes nothing.
+Changes saved in one action share a `change_set_id` and show as **one entry**;
+each batch is a single transaction, so a partial failure changes nothing.
 
-### Document versions
-When a document is replaced or removed — by HR or by the candidate — the old
-file is **no longer deleted**. A `document_snapshots` row pins it on disk and
-the audit entry points at both sides, so HR can open **Previous file** and
-**New file** straight from the Change History and compare them. A file that is
-the "new" side of one change is the same snapshot row referenced as the "old"
-side of the next, so a chain of replacements does not duplicate rows.
-
-The trade-off is deliberate: superseded uploads accumulate in
-`backend/uploads/` rather than being cleaned up, because you cannot show what a
-document used to contain after deleting it. Deleting a candidate still removes
-every file they own, archived versions included.
-
-This covers every column of every form. Three kinds of value can be opened:
+Three kinds of value can be opened:
 
 | Kind | What it is | Example |
 | --- | --- | --- |
-| `FIELD` | a column on a one-row detail table | Aadhaar Number, Passport Number |
-| `DOCUMENT` | one uploaded file | Aadhar Card, Signed BGV Consent Form |
-| `ROW_FIELD` | one column of one entry in a repeating section | *Employment #1 — Acme Ltd → Reason for Leaving* |
+| `FIELD` | a column on a one-row detail table | Aadhaar Number |
+| `DOCUMENT` | one uploaded file | Aadhar Card |
+| `ROW_FIELD` | one column of one repeating-section entry | *Employment #1 — Acme Ltd → Reason for Leaving* |
 
-Repeating entries are listed individually, so HR opens one cell of one entry
-rather than a whole table. The guard rails: a value can only be opened once
-its form is submitted, the HR-only columns (`hr_candidate_id`,
-`hr_candidate_email`) are never grantable, a column that does not belong to
-the named section is rejected, and a row belonging to another candidate is
-rejected.
+Guard rails: only submitted forms, HR-only columns (`hr_candidate_id`,
+`hr_candidate_email`) are never grantable, and columns / rows must belong to
+the named section and candidate.
 
-## Notes on the two source forms you shared
-- The **CIF** (`cif-form.html`) and **Document Collection** form
-  (`document-form.html`) are local duplicates built for this demo — Zoho
-  People and Recruber are third-party SaaS with their own auth/paid plans, so
-  we can't embed or call their live endpoints without your account API keys.
-  Field sets were matched to what those forms typically collect.
-- The **BGV form** (`bgv-form.html`) was designed from standard Indian IT
-  background-verification practice, not from a supplied vendor form. It asks
-  *who can verify* each claim rather than repeating the CIF:
-  consent & authorisation (including a separate "may we contact your current
-  employer now?"), identity extras (passport/DL), address history, education
-  with roll & registration numbers and study mode, employment with manager/HR
-  contacts, payroll company and rehire eligibility, gaps over 60 days, two
-  professional references, and the legal declarations (conviction, pending
-  case, termination, disciplinary action, bond/non-compete, dual employment).
-  Education and employment rows are pre-filled from the candidate's CIF.
-  If your BGV vendor has a prescribed layout, adjust
-  `backend/app/form_definitions.py` (BGV_* lists) and regenerate the form.
+### Document versions
+A replaced or removed document is **not deleted**: a `document_snapshots` row
+pins it on disk and the audit entry points at both sides, so HR can open
+**Previous file** and **New file** from Change History. Superseded uploads
+therefore accumulate in `backend/uploads/` by design; deleting a candidate
+still removes every file they own, archived versions included.
 
 ## Cross-form AI mapping agent
-
-The three forms ask for many of the same things under different names — the
-CIF's *"Candidate Profile Picture"* is the Document Collection's *"Passport
-size photo"*. An agent works these equivalences out from the labels the
-candidate sees, so nothing is entered or uploaded twice.
-
-`backend/app/agents/field_mapper.py` decides, in this order:
+The forms ask for many of the same things under different names (CIF
+*"Candidate Profile Picture"* = Document Collection *"Passport size photo"*).
+`backend/app/agents/field_mapper.py` resolves equivalences in this order:
 
 1. **Curated** — hand-verified pairs that must always hold.
-2. **LLM** — Azure OpenAI (`VITE_AZURE_OPENAI_*` in `.env`) reasons over the
-   label lists and proposes the rest.
-3. **Heuristic** — token-overlap matching, used whenever the LLM is
-   unreachable, so a form never breaks because an API call failed.
+2. **LLM** — Azure OpenAI (`AZURE_OPENAI_*`; `VITE_`-prefixed names also
+   accepted) proposes the rest.
+3. **Heuristic** — token overlap, used whenever the LLM is unreachable.
 
-Every LLM proposal is validated before use: both keys must exist in the
-catalogue, the kinds must match, the source must be an *earlier* form, and
-low-confidence guesses are dropped (`AI_MAPPING_MIN_CONFIDENCE`, default 0.75).
-A bad model response therefore cannot inject a nonsense mapping.
+Every LLM proposal is validated (keys exist, kinds match, source is an
+*earlier* form, confidence ≥ `AI_MAPPING_MIN_CONFIDENCE`, default 0.75).
+**Never inherited** (`BLOCKED_TARGETS`): consents, declarations, agreement
+checkboxes and dates, and BGV-specific evidence.
 
-**Never inherited** (`BLOCKED_TARGETS`): consents, declarations, signature-of-
-agreement checkboxes and dates — these must be given afresh on each form —
-plus BGV-specific evidence (Form 16, bank statement, police clearance).
+For the candidate it pre-fills matched fields (highlighted, always editable),
+carries documents forward as independent copies, and names company sections
+after the employers listed on the CIF.
 
-What the agent does for the candidate:
-- **Pre-fills fields** it matched, highlighted green with *"Filled from your
-  CIF — edit if this is wrong"*. Always editable.
-- **Carries documents forward.** A mapped upload left blank is satisfied by
-  copying the file already on record; the copy is independent, so deleting one
-  form's document never removes another's. A mandatory upload counts as
-  satisfied if it can be carried over.
-- **Names company sections** in the Document Collection form after the actual
-  employers listed on the CIF, instead of "Previous company 1".
+Inspect: `GET /hr/field-mappings` (`?refresh=true` to re-run). Results are
+cached in-process. `AI_MAPPING_ENABLED=false` runs on curated + heuristic
+only. `field_catalog.py` is generated — regenerate it after changing any form
+definition.
 
-Inspect what it decided: `GET /hr/field-mappings` (add `?refresh=true` to
-re-run after changing a form). Resolved mappings are cached in-process, so the
-LLM is not called per request. Set `AI_MAPPING_ENABLED=false` in `.env` to run
-on curated + heuristic rules only.
+## Document check (local OCR + keyword scoring)
+`backend/app/agents/doc_validator.py` reads every upload and records
+`ai_status`, `ai_doc_type`, `ai_confidence` (0-100), `ai_note` and
+`ai_id_match` on the document row.
 
-`backend/app/field_catalog.py` is generated — regenerate it with
-`scratchpad/gen_catalog.py` after changing any form definition.
-
-## Document check (OCR + keyword scoring)
-
-Candidates attach the wrong file to a slot more often than you would think —
-a PAN card under "Aadhaar", a signature under "PAN", a transfer certificate as
-the "10th marksheet". `backend/app/agents/doc_validator.py` reads every upload
-and records a score on the document row (`ai_status`, `ai_doc_type`,
-`ai_confidence` = score 0-100, `ai_note`, `ai_id_match`).
-
-**Nothing leaves the server.** Identity documents are sensitive, so the check
-is entirely local — no AI service is involved:
+**Nothing leaves the server** — no AI service is involved:
 
 | Step | What it does |
 |---|---|
-| Extract | A PDF's own text layer when it has one (e-Aadhaar, bank statements); otherwise Tesseract OCR on the image / rasterised pages in **one pass with English plus every major Indian script** (Devanagari, Bengali/Assamese, Odia, Gurmukhi, Gujarati, Tamil, Telugu, Kannada, Malayalam, Urdu; ~0.8 s a page). Candidates' Aadhaar cards and board certificates are bilingual, and the regional half is read too. `.docx` text is read directly. |
-| Score | Each document type in `RULES` is a list of weighted keyword/pattern rules drawn from `doc_lexicon.py` — "Aadhaar", "Government of India", "date of birth", "marks", "Class 10/12" in every script, plus every state board by name and by what it calls its exams (SSC, SSLC, HSLC, Matric, Madhyamik, Intermediate, PUC, Plus Two, HS …). Regional words match on stems because OCR reorders vowel signs. — "Income Tax Department", a PAN-shaped number, "Class X", a board name, "Net Pay"… A type's score is the share of its weight that matched (0-100); negative weights let a 12th marksheet lose points as a 10th one. Photos and signatures have no text, so they are scored from pixel statistics (ink coverage, brightness, colour). |
-| Decide | Score for the field's expected type ≥ `DOC_VALIDATION_MATCH_SCORE` (80) → `MATCH`; < `DOC_VALIDATION_MISMATCH_SCORE` (40) → `MISMATCH`, naming the type that scored best; in between → `UNCERTAIN` for HR. A PAN/Aadhaar number found in the text is checked for shape (regex / Verhoeff checksum) and compared with the profile. Anything unreadable (OCR missing, legacy .doc, blank scan) is `UNVERIFIED`/`UNCERTAIN` and always accepted. |
+| Extract | PDF text layer when present; otherwise Tesseract OCR (`OCR_PRIMARY_LANGUAGES` first, then every pack in `tessdata` if not a clear match). `.docx` read directly. |
+| Score | Weighted keyword / pattern rules from `doc_lexicon.py` — every Indian script, every state board and its exam names. Photos and signatures are scored from pixel statistics. |
+| Decide | ≥ `DOC_VALIDATION_MATCH_SCORE` (80) → `MATCH`; < `DOC_VALIDATION_MISMATCH_SCORE` (40) → `MISMATCH`; between → `UNCERTAIN`. PAN / Aadhaar numbers are shape-checked (regex / Verhoeff) and compared with the profile. Unreadable → `UNVERIFIED`, always accepted. |
 
-The note stored with each verdict says *why* ("Looks like a PAN card (score
-92%: Income Tax Department, PAN-format number, Government of India)"), so HR
-can judge the check as well as the document.
+The stored note explains the verdict ("Looks like a PAN card (score 92%:
+Income Tax Department, PAN-format number…)"). Runs on Save Draft, Submit,
+granted re-uploads and HR Attach / Replace. **Verdicts are HR-only** (except
+in `block` mode, where a refused upload must say why).
 
-Where it runs: on Save Draft, on Submit, on an HR-granted re-upload, and on
-HR's own Attach/Replace. **Verdicts are for HR only** — the candidate portal
-never shows them and the candidate API never returns them (the one exception
-is `block` mode, where a refused upload has to say why). Drafts and
-carried-over documents keep their verdict rather than being re-read.
+`DOC_VALIDATION_MODE`: `off`, `warn` (default — record for HR, never refuse)
+or `block` (refuse a `MISMATCH`). Re-score old uploads with **Re-check
+documents** on the candidate page, or `python recheck_documents.py [--all]`.
 
-Documents uploaded before the check existed have no score; the **Re-check
-documents** button on the HR candidate page scores everything that candidate
-has on record, and `python recheck_documents.py` (add `--all` after tuning
-the rules) does it for the whole database.
+## Zoho People integration
+- **Connect Zoho:** each HR links their own Zoho account (server-based OAuth
+  app, `ZOHO_OAUTH_*`). Tokens are encrypted with `ZOHO_TOKEN_ENCRYPTION_KEY`.
+  `ZOHO_AUTH_MODE=per_user` (default) pushes on the HR's own token;
+  `admin` uses the shared `ZOHO_REFRESH_TOKEN`.
+- **Push buttons** on the candidate page, one per target form, each enabled by
+  its `ZOHO_*_WRITE_FORM` setting (blank = button refuses):
+  Confirmation Process / Candidate, Documents (Experienced or Trainee),
+  Reference Check, Declaration, On-Demand.
+- First push inserts; later pushes update the same record. An email lookup
+  runs before the first insert to avoid duplicates. Fields the HR's Zoho
+  account can't see are dropped and reported. `ZOHO_PUSHED_BY_FIELD` records
+  the pushing HR.
+- **Documents push** needs a Pre-Induction record for the email; if missing,
+  the portal creates one first (`ZOHO_PRE_INDUCTION_DEFAULTS`).
+- Every request / response is logged to `integrations/zoho/out/zoho_push.log`
+  (gitignored, contains PII).
 
-Setup: `winget install UB-Mannheim.TesseractOCR` (or set `TESSERACT_CMD`);
-language packs ship in `backend/tessdata`. `DOC_VALIDATION_MODE` in `.env`:
-`off`, `warn` (default — record and show to the candidate and HR, never
-refuse) or `block` (refuse a `MISMATCH`). Start in `warn`, look at what HR
-sees on the candidate page for a few weeks, tune the rule weights, then
-switch to `block`.
+CLI, field maps and form-schema notes: [integrations/zoho/README.md](integrations/zoho/README.md).
 
-Tests for the scoring layer: `cd backend && ../myenv/Scripts/python.exe -m pytest tests -q`.
+## Deploy to Azure
+Frontend `HR-Onboarding-Portal` and backend `HR-Onboarding-Portal-API` share a
+free F1 Linux plan in resource group `HR-Onboarding`; the database is
+Supabase. Steps, app-settings sync and troubleshooting are in
+[.claude/skills/deploy-azure/SKILL.md](.claude/skills/deploy-azure/SKILL.md).
+Note: Group Policy blocks the `.ps1` scripts on this machine — run the
+equivalent `az` commands directly.
+
+## Tests
+```
+cd backend
+..\myenv\Scripts\python.exe -m pytest tests -q
+```
 
 ## Security notes
-- Passwords are bcrypt-hashed; HR and candidate sessions use separate JWTs
-  scoped by role, so an HR token cannot access candidate endpoints or vice
-  versa.
-- All secrets (DB URL, `JWT_SECRET_KEY`, seed HR password) live in `.env`,
-  which is not checked into source control — set your own values before
-  going beyond local demo use, especially `JWT_SECRET_KEY`.
-- Uploaded documents are only reachable via authenticated download endpoints
-  (HR can fetch any candidate's files; a candidate can only fetch their own).
+- Passwords are bcrypt-hashed; staff and candidate sessions use separate,
+  role-scoped JWTs.
+- All secrets live in the root `.env` (gitignored) and, in Azure, in app
+  settings. Set your own `JWT_SECRET_KEY` before going beyond local use.
+- Uploaded documents are reachable only via authenticated download endpoints
+  (staff within scope; a candidate only their own).
+- Referee and Declaration links are HMAC-signed, per-candidate tokens; they
+  expose only that one form.
+- ID documents are never sent to an external AI service.
