@@ -533,14 +533,299 @@ def documents_files(candidate: Candidate, entry: dict) -> tuple[list, list, list
     return files, skipped, missing
 
 
-# The Zoho team creates each candidate's Pre_Induction_Procedure record
-# (Pre-Induction ID e.g. PRECND2236, Mail_ID, names, Reporting_Manager...).
-# The Documents Collection record links to it through a lookup that takes
-# its record id (per-form name: pre_induction_field in the docs map). The
-# portal never creates Pre_Induction_Procedure records.
+# Each candidate's Pre_Induction_Procedure record (Pre-Induction ID e.g.
+# PRECND2236 is a Zoho AutoNumber). The Documents Collection record links to
+# it through a lookup that takes its record id (per-form name:
+# pre_induction_field in the docs map). When none exists for the email, the
+# Documents push creates it first from what HR enters in the portal's
+# Pre-Induction popup (pre_induction_form), then the linked Documents record.
 PRE_INDUCTION_FORM = "Pre_Induction_Procedure"
 PRE_INDUCTION_EMAIL_FIELD = "Mail_ID"
 PRE_INDUCTION_ID_FIELD = "Pre_Induction_ID"
+PRE_INDUCTION_PHOTO_FIELD = "Photo"
+PRE_INDUCTION_PHOTO_KEYS = ("passport_size_photo", "profile_picture")
+
+# Fields HR fills in the popup, in display order. Zoho's API refused a
+# record without the starred ones (insertRecord 7052, 2026-11-23); the rest
+# are mandatory on Zoho's own form, or needed by some choices (RRF Reference
+# for "Regular (RRF)", Reason for "Internal"). Labels, types and options are
+# read live from the form. First / Last Name, Mail ID, Contact Number,
+# Blood Group, Address and Photo come from the candidate's own data.
+PRE_INDUCTION_HR_FIELDS = (
+    "Date_of_Joining", "Designation", "Department", "business_unit1", "Reporting_Manager",
+    "Functional_Head", "HR_Incharge", "Employment_Type", "Category", "Recruitment_Type",
+    "RRF_Reference", "Reason", "Onboarding_From_Office", "Laptop_Required", "Cab_Required",
+    "Training_Applicable", "Emergency_Contact_Number", "Blood_Group",
+)
+PRE_INDUCTION_REQUIRED = {
+    "Date_of_Joining", "Designation", "Department", "business_unit1", "Reporting_Manager",
+    "Functional_Head", "HR_Incharge", "Employment_Type", "Category", "Recruitment_Type",
+    "Onboarding_From_Office", "Laptop_Required", "Cab_Required", "Training_Applicable",
+    "Emergency_Contact_Number", "Blood_Group",
+}
+_PRE_COMPONENTS_CACHE: dict = {}   # token -> (fetched_at, {labelname: component})
+
+
+def _pre_induction_components(token) -> dict:
+    """{labelname: component dict} of the Pre_Induction_Procedure form, as
+    the token's account sees it. Cached like _form_fields."""
+    import time
+    hit = _PRE_COMPONENTS_CACHE.get(token)
+    if hit and time.monotonic() - hit[0] < _FIELDS_TTL_SECONDS:
+        return hit[1]
+    try:
+        raw = _zc.api("GET", f"forms/{PRE_INDUCTION_FORM}/components", token=token)
+    except _zc.ZohoUnreachable as exc:
+        raise ZohoPushError(_network_message(exc)) from exc
+    except _zc.ZohoError as exc:
+        raise ZohoPushError(f"Could not read the Zoho Pre-Induction form: {exc}") from exc
+    comps = {}
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("labelname"):
+                comps[node["labelname"]] = node
+            for value in node.values():
+                if isinstance(value, (dict, list)):
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(raw)
+    if not comps:
+        raise ZohoPushError("Your Zoho account cannot see the Pre-Induction form."
+                            + _PERMISSION_HELP)
+    _PRE_COMPONENTS_CACHE[token] = (time.monotonic(), comps)
+    return comps
+
+
+def _component_options(comp: dict) -> list[dict]:
+    """[{"id", "label"}]: a lookup's option id is the record id Zoho wants;
+    a picklist's is its value."""
+    opts = comp.get("Options") or {}
+    if not isinstance(opts, dict):
+        return []
+    out = []
+    for opt in opts.values():
+        if isinstance(opt, dict):
+            out.append({"id": str(opt.get("Id") or ""), "label": str(opt.get("Value") or "")})
+        else:
+            out.append({"id": str(opt), "label": str(opt)})
+    return sorted((o for o in out if o["id"]), key=lambda o: o["label"].lower())
+
+
+def _pre_induction_defaults() -> dict:
+    """ZOHO_PRE_INDUCTION_DEFAULTS: a JSON object {field: value} — lookup
+    record ids (as in the Zoho team's rec.insert("Consultant_Name": <id>))
+    or exact picklist values. Bad JSON counts as no defaults."""
+    import json
+    try:
+        data = json.loads(settings.ZOHO_PRE_INDUCTION_DEFAULTS or "{}")
+    except ValueError:
+        return {}
+    return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+
+
+def _split_name(candidate: Candidate) -> tuple[str, str]:
+    """(First_Name, Last_Name); a one-word name repeats as the last name,
+    because Zoho requires both."""
+    parts = _candidate_name(candidate).split()
+    if not parts:
+        return "", ""
+    return (" ".join(parts[:-1]) or parts[0]), parts[-1]
+
+
+def _match_option(value: str, options: list[dict]) -> str:
+    """The option id whose label matches `value` ignoring case, spaces and
+    "ve" (CIF "B+" -> Zoho "B +ve"), else ""."""
+    def norm(s):
+        s = str(s or "").lower().replace(" ", "").replace("ve", "")
+        return s.replace("positive", "+").replace("negative", "-")
+    want = norm(value)
+    if not want:
+        return ""
+    return next((o["id"] for o in options if norm(o["label"]) == want), "")
+
+
+def _candidate_prefill(candidate: Candidate, comps: dict) -> dict:
+    """Popup values the portal already knows for this candidate."""
+    profile = candidate.profile
+    cif = candidate.cif_details
+    out = {}
+    if profile and profile.emergency_contact_number:
+        out["Emergency_Contact_Number"] = profile.emergency_contact_number.strip()
+    if cif and cif.blood_group and "Blood_Group" in comps:
+        match = _match_option(cif.blood_group, _component_options(comps["Blood_Group"]))
+        if match:
+            out["Blood_Group"] = match
+    category = {"EXPERIENCED": "Experienced", "FRESHER": "Fresher"}.get(
+        candidate.candidate_type.value)
+    if category:
+        out["Category"] = category
+    return out
+
+
+def pre_induction_form(token, candidate: Candidate) -> dict:
+    """What the HR popup shows: {"fields": [{name, label, type, required,
+    options, value}], "candidate": {what the portal fills itself}}. Values:
+    the candidate's own data, else ZOHO_PRE_INDUCTION_DEFAULTS."""
+    comps = _pre_induction_components(token)
+    defaults = _pre_induction_defaults()
+    prefill = _candidate_prefill(candidate, comps)
+    fields = []
+    for name in PRE_INDUCTION_HR_FIELDS:
+        comp = comps.get(name)
+        if comp is None:
+            continue   # hidden from this HR's Zoho role
+        kind = {"Lookup": "select", "Picklist": "select", "BloodGroup": "select",
+                "Date": "date", "Text_Area": "textarea"}.get(comp.get("comptype"), "text")
+        fields.append({
+            "name": name, "label": comp.get("displayname") or name, "type": kind,
+            "required": False,   # all optional; blanks save a draft
+            "options": _component_options(comp) if kind == "select" else [],
+            "value": prefill.get(name) or defaults.get(name, ""),
+        })
+    first, last = _split_name(candidate)
+    profile = candidate.profile
+    return {"fields": fields, "candidate": {
+        "First_Name": first, "Last_Name": last,
+        "Personal_Number": "".join(ch for ch in ((profile.contact_number if profile else "")
+                                                  or "") if ch.isdigit()),
+        "Address": ((profile.current_address or profile.permanent_address or "")
+                    if profile else "").strip(),
+        "photo": bool(_pre_induction_photo(candidate)),
+    }}
+
+
+def _pre_induction_photo(candidate: Candidate):
+    """(Photo, filename, ctype, path) from the candidate's photo upload, or None."""
+    from app.utils.file_storage import upload_path
+    latest = {}
+    for doc in sorted(candidate.documents, key=lambda d: d.id or 0):
+        latest[doc.field_key] = doc
+    for key in PRE_INDUCTION_PHOTO_KEYS:
+        doc = latest.get(key)
+        if doc is not None and os.path.exists(upload_path(doc.stored_filename)):
+            return (PRE_INDUCTION_PHOTO_FIELD, doc.original_filename,
+                    doc.content_type or "application/octet-stream",
+                    upload_path(doc.stored_filename))
+    return None
+
+
+def create_pre_induction(token, candidate: Candidate, email: str,
+                         values: dict | None = None) -> tuple[str, bool]:
+    """Insert the Pre_Induction_Procedure record for `email`: name, mail and
+    what the portal knows (contact, address, blood group, category,
+    emergency contact, photo), plus ZOHO_PRE_INDUCTION_DEFAULTS and any
+    `values` given. Sent with skipMandatoryFields, so it is a normal,
+    linkable record without DOJ, Designation etc.; Zoho still demands
+    Reporting_Manager (2026-11-24), which defaults from .env. Returns
+    (record id, False) — never a draft: a lookup cannot point at a draft
+    (7016)."""
+    payload, files, comps = _pre_induction_payload(token, candidate, email, values)
+    return _insert_pre_induction(token, candidate, email, payload, files), False
+
+
+def _pre_induction_payload(token, candidate: Candidate, email: str, values: dict | None):
+    """(payload, files, components) for a Pre_Induction_Procedure write."""
+    comps = _pre_induction_components(token)
+    merged = {**_pre_induction_defaults(), **_candidate_prefill(candidate, comps)}
+    merged.update({k: str(v).strip() for k, v in (values or {}).items()
+                   if k in PRE_INDUCTION_HR_FIELDS and str(v or "").strip()})
+    values = {k: v for k, v in merged.items() if k in PRE_INDUCTION_HR_FIELDS and v}
+    if not values.get("Reporting_Manager"):
+        raise ZohoPushError("Zoho needs a Reporting Manager to create the Pre-Induction record: "
+                            "set \"Reporting_Manager\" (a Zoho employee record id) in "
+                            "ZOHO_PRE_INDUCTION_DEFAULTS in .env.")
+    for name, value in list(values.items()):
+        comp = comps.get(name) or {}
+        if comp.get("comptype") in ("Picklist", "BloodGroup"):
+            if value not in {o["id"] for o in _component_options(comp)}:
+                del values[name]   # a stale default must not sink the push
+    if "Date_of_Joining" in values:
+        values["Date_of_Joining"] = _zoho_date(values["Date_of_Joining"])
+
+    info = pre_induction_form(token, candidate)["candidate"]
+    payload = {"First_Name": info["First_Name"], "Last_Name": info["Last_Name"],
+               PRE_INDUCTION_EMAIL_FIELD: email, **values}
+    if info["Personal_Number"]:
+        payload["Personal_Number"] = info["Personal_Number"]
+    # Not Address: it is the cab-pickup address (with Mode / Shift_Time);
+    # Zoho accepts it and saves nothing unless Cab_Required is Yes (2026-11-24).
+    if not payload["First_Name"]:
+        raise ZohoPushError("The candidate has no name on record for the Pre-Induction form.")
+    photo = _pre_induction_photo(candidate)
+    files = [photo] if photo else []
+    _drop_hidden(set(comps), payload, files)
+    return payload, files, comps
+
+
+def _insert_pre_induction(token, candidate: Candidate, email: str, payload: dict,
+                          files: list) -> str:
+    _zc.log("push.request", source="hr-portal", target="pre_induction", form=PRE_INDUCTION_FORM,
+            candidate_id=candidate.id, email=email, fields=sorted(payload),
+            files=[f[0] for f in files])
+    try:
+        response = _zc.insert_record(token, PRE_INDUCTION_FORM, payload, files=files,
+                                     skip_mandatory=True)
+    except _zc.ZohoUnreachable as exc:
+        raise ZohoPushError(_network_message(exc)) from exc
+    except _zc.ZohoError as exc:
+        raise ZohoPushError(f"Zoho rejected the Pre-Induction record: {exc}") from exc
+    _zc.log("push.response", source="hr-portal", form=PRE_INDUCTION_FORM,
+            candidate_id=candidate.id, response=response)
+    if _zc.has_errors(response):
+        errors = (response.get("response") or {}).get("errors")
+        if isinstance(errors, dict) and isinstance(errors.get("message"), dict):
+            errors = [errors]
+        if isinstance(errors, list):   # field errors, e.g. 7052 "... is required"
+            texts = [" ".join(str(v) for v in e["message"].values())
+                     if isinstance(e, dict) and isinstance(e.get("message"), dict)
+                     else str(e.get("message") if isinstance(e, dict) else e) for e in errors]
+            raise ZohoPushError("Zoho refused the Pre-Induction record: "
+                                + "; ".join(t.strip() for t in texts if t.strip()))
+        raise ZohoPushError(_error_message(response, PRE_INDUCTION_FORM, None,
+                                           "Zoho refused the Pre-Induction record"))
+    new_id = _zc.record_id_from(response)
+    if not new_id:
+        raise ZohoPushError(f"Zoho did not return the Pre-Induction record id: {str(response)[:600]}")
+    return new_id
+
+
+# Filled on an existing Pre-Induction record only where Zoho has it blank.
+PRE_INDUCTION_FILL_FIELDS = ("Personal_Number", "Blood_Group", "Emergency_Contact_Number",
+                             "Category")
+
+
+def fill_pre_induction(token, candidate: Candidate, record_id: str, row: dict,
+                       email: str) -> list[str]:
+    """Write the portal's photo, contact number, blood group,
+    emergency contact and category onto an existing Pre-Induction record
+    where it has none; never overwrites. Returns the fields written. Raises
+    ZohoPushError."""
+    payload, files, comps = _pre_induction_payload(token, candidate, email, None)
+    def blank(key):
+        return not str(row.get(key) or "").strip()
+    fill = {k: v for k, v in payload.items() if k in PRE_INDUCTION_FILL_FIELDS and blank(k)}
+    files = [f for f in files if blank(f[0])]
+    if not fill and not files:
+        return []
+    _zc.log("push.request", source="hr-portal", target="pre_induction_fill",
+            form=PRE_INDUCTION_FORM, candidate_id=candidate.id, record_id=record_id,
+            fields=sorted(fill), files=[f[0] for f in files])
+    try:
+        response = _zc.update_record(token, PRE_INDUCTION_FORM, record_id, fill, files=files,
+                                     skip_mandatory=True)
+    except _zc.ZohoUnreachable as exc:
+        raise ZohoPushError(_network_message(exc)) from exc
+    except _zc.ZohoError as exc:
+        raise ZohoPushError(str(exc)) from exc
+    _zc.log("push.response", source="hr-portal", form=PRE_INDUCTION_FORM,
+            candidate_id=candidate.id, response=response)
+    if _zc.has_errors(response):
+        raise ZohoPushError(str(response)[:400])
+    return sorted(fill) + [f[0] for f in files]
 
 
 def _hit_row(hit) -> dict:
@@ -551,15 +836,22 @@ def _hit_row(hit) -> dict:
     return rows if isinstance(rows, dict) else {}
 
 
+def _is_draft(hit) -> bool:
+    """getRecords returns the account's own drafts too, marked
+    ApprovalStatus "Drafts" (seen 2026-11-24); a lookup cannot point at one."""
+    return str(_hit_row(hit).get("ApprovalStatus") or "").strip().lower() == "drafts"
+
+
 def _one_by_email(token, form: str, email: str, field: str, what: str):
-    """The single hit on `form` whose `field` is `email`, or None. Several
-    hits or a failed search raise ZohoPushError — never guesses."""
+    """The single non-draft hit on `form` whose `field` is `email`, or None.
+    Several hits or a failed search raise ZohoPushError — never guesses."""
     try:
         hits = _zc.find_by_email(token, form, email, field)
     except _zc.ZohoUnreachable as exc:
         raise ZohoPushError(_network_message(exc)) from exc
     except _zc.ZohoError as exc:
         raise ZohoPushError(f"Could not search {what} ('{form}') by email: {exc}") from exc
+    hits = [h for h in hits if not _is_draft(h)]
     if len(hits) > 1:
         raise ZohoPushError(f"{len(hits)} {what} records have the email {email}; "
                             "fix the duplicates in Zoho first.")
@@ -578,9 +870,9 @@ def find_documents_record(token, candidate: Candidate, zoho_email: str) -> dict:
     """Where a push by `zoho_email` would write. The Documents Collection
     record with that email -> {"action": "update", "record_id", ...}; else
     the Pre_Induction_Procedure record with that Mail_ID -> {"action":
-    "create", "pre_record_id", ...}; else {"action": "create_unlinked"}: a
-    new record with no Pre-Induction link (the portal does not create
-    Pre-Induction records — HR has no DOJ, Reporting Manager etc. for them).
+    "create", "pre_record_id", ...}; else {"action": "create_pre_induction"}:
+    HR fills the Pre-Induction popup, the push creates that record first and
+    then the linked Documents record.
     All carry "form", "pre_induction_id", "name", "email", "email_matches"."""
     email = (zoho_email or "").strip()
     if not email or "@" not in email or len(email) > 254:
@@ -592,20 +884,63 @@ def find_documents_record(token, candidate: Candidate, zoho_email: str) -> dict:
     hit = _one_by_email(token, form, email, entry["email_field"], "Documents Collection")
     if hit:
         row = _hit_row(hit)
-        return {**base, "action": "update", "record_id": _hit_id(hit),
-                "pre_induction_id": str(row.get(entry["pre_induction_field"]) or "").strip(),
-                "name": str(row.get(entry["name_field"]) or "").strip()}
+        linked = str(row.get(entry["pre_induction_field"]) or "").strip()
+        out = {**base, "action": "update", "record_id": _hit_id(hit),
+               "pre_induction_id": linked,
+               "name": str(row.get(entry["name_field"]) or "").strip()}
+        if linked:
+            return out
+        # Not linked yet: the push links it to the Pre-Induction record
+        # (found, or created first) in the same go.
+        out["needs_link"] = True
+        pre = _one_by_email(token, PRE_INDUCTION_FORM, email, PRE_INDUCTION_EMAIL_FIELD,
+                            "Pre-Induction")
+        if pre:
+            prow = _hit_row(pre)
+            out.update(pre_record_id=_hit_id(pre), pre_row=prow,
+                       pre_induction_id=str(prow.get(PRE_INDUCTION_ID_FIELD) or "").strip())
+        return out
 
     pre = _one_by_email(token, PRE_INDUCTION_FORM, email, PRE_INDUCTION_EMAIL_FIELD,
                         "Pre-Induction")
     if not pre:
-        return {**base, "action": "create_unlinked", "pre_induction_id": "",
+        return {**base, "action": "create_pre_induction", "pre_induction_id": "",
                 "name": _candidate_name(candidate)}
     row = _hit_row(pre)
     name = " ".join(str(row.get(k) or "").strip() for k in ("First_Name", "Last_Name")).strip()
-    return {**base, "action": "create", "pre_record_id": _hit_id(pre),
+    return {**base, "action": "create", "pre_record_id": _hit_id(pre), "pre_row": row,
             "pre_induction_id": str(row.get(PRE_INDUCTION_ID_FIELD) or "").strip(),
             "name": name}
+
+
+# Zoho runs a workflow when a Pre_Induction_Procedure record is added (the
+# Zoho team's Deluge: zoho.people.create("documents_collection_trainee", ...)):
+# it creates the linked, empty Documents Collection record itself, as the
+# Portalsupport account, about 2 s later (seen 2026-11-24). The push waits for
+# that record and uploads into it rather than inserting a second one.
+WORKFLOW_WAIT_SECONDS = 30
+WORKFLOW_POLL_SECONDS = 3
+
+
+def _wait_for_workflow_record(token, form: str, entry: dict, email: str,
+                              pre_id: str) -> str | None:
+    """Id of the Documents record Zoho's workflow made for `pre_id`, or None
+    when none appears within WORKFLOW_WAIT_SECONDS."""
+    import time
+    deadline = time.monotonic() + WORKFLOW_WAIT_SECONDS
+    while True:
+        try:
+            hits = _zc.find_by_email(token, form, email, entry["email_field"])
+        except _zc.ZohoError:
+            hits = []
+        for hit in hits:
+            row = _hit_row(hit)
+            if not _is_draft(hit) and str(row.get(entry["pre_induction_field"] + ".ID")
+                                          or "").strip() == str(pre_id):
+                return _hit_id(hit)
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(WORKFLOW_POLL_SECONDS)
 
 
 def _file_signature(source) -> str:
@@ -617,12 +952,14 @@ def _file_signature(source) -> str:
     return "path:" + os.path.basename(str(source))
 
 
-def push_documents(candidate: Candidate, *, actor, zoho_email: str | None = None) -> dict:
+def push_documents(candidate: Candidate, *, actor, zoho_email: str | None = None,
+                   pre_induction: dict | None = None) -> dict:
     """Upload the candidate's Document Collection files (and generated PDFs)
     into their Documents Collection form. With `zoho_email` (see
     find_documents_record): updates the record with that email, leaving the
     Zoho team's name / email alone; else creates one (not a draft), linked to
-    the Pre-Induction record with that Mail_ID when there is one. Without one: the record
+    the Pre-Induction record with that Mail_ID — created first from the
+    popup's `pre_induction` values when there is none. Without zoho_email: the record
     already linked, else the one Zoho has for their email, else inserts one.
     Returns {"record_id", "form", "status", "created", "files", "skipped"};
     raises ZohoPushError."""
@@ -643,28 +980,58 @@ def push_documents(candidate: Candidate, *, actor, zoho_email: str | None = None
     email_field = entry["email_field"]
     token = actor.token   # the pushing HR's own token (app/services/zoho_oauth.py)
     record_id = None
+    pre_created = None
+    pre_draft = False
+    pre_filled, pre_fill_error = [], None
+    pre_id = None
     fields = _form_fields(token, form)
     if zoho_email:
         target = find_documents_record(token, candidate, zoho_email)
-        if target["action"] == "update":
-            # The Zoho team's record: its name / email stay as they entered them.
-            record_id = target["record_id"]
-            payload = {}
-        elif target["action"] == "create_unlinked":
-            # No Pre-Induction record: plain record, the link is left for Zoho.
-            payload = {email_field: target["email"], entry["name_field"]: target["name"] or name}
-        else:
-            # New record tied to the Pre-Induction one, as the Zoho team's
-            # Deluge sample does it. Unlinked is worse than failing.
-            pre_field = entry["pre_induction_field"]
+        pre_field = entry["pre_induction_field"]
+        if target["action"] != "update" or target.get("needs_link"):
+            # One go: Pre-Induction record (existing, else created now) first,
+            # then the Documents record linked to it.
             if pre_field not in fields:
                 raise ZohoPushError(f"Your Zoho role cannot see the Pre-Induction ID field "
                                     f"({pre_field}) on '{form}'." + _PERMISSION_HELP)
+            if target.get("pre_record_id"):
+                pre_id = target["pre_record_id"]
+                # Fill its blanks from the portal; never blocks the documents.
+                try:
+                    pre_filled = fill_pre_induction(token, candidate, pre_id,
+                                                    target.get("pre_row") or {}, target["email"])
+                except ZohoPushError as exc:
+                    pre_fill_error = str(exc)
+            else:
+                pre_id, pre_draft = create_pre_induction(token, candidate, target["email"],
+                                                         pre_induction)
+                pre_created = pre_id
+                if target["action"] != "update":
+                    workflow_id = _wait_for_workflow_record(token, form, entry,
+                                                            target["email"], pre_id)
+                    if workflow_id:
+                        # Upload into Zoho's own linked record.
+                        target = {**target, "action": "update", "record_id": workflow_id}
+        if target["action"] == "update":
+            # The Zoho team's record: its name / email stay as they entered them.
+            record_id = target["record_id"]
+            payload = {pre_field: pre_id} if pre_id else {}
+        else:
+            # New record tied to the Pre-Induction one, as the Zoho team's
+            # Deluge sample does it.
             payload = {email_field: target["email"], entry["name_field"]: target["name"] or name,
-                       pre_field: target["pre_record_id"]}
+                       pre_field: pre_id}
     else:
         payload = {email_field: email, entry["name_field"]: name}
 
+    # A failure after this point leaves the new Pre-Induction record in Zoho;
+    # the next push finds a complete one by email and links to it. A draft
+    # it cannot see, so publishing again would add a second draft.
+    pre_note = ("" if not pre_created else
+                f" The Pre-Induction draft ({pre_created}) was created in Zoho; delete it there "
+                "before publishing again, or the next attempt adds another draft." if pre_draft else
+                f" The Pre-Induction record ({pre_created}) was created; publish again to "
+                "link the documents to it.")
     hidden = _drop_hidden(fields, payload, files)
     pushed_by_status = _add_pushed_by(fields, payload, actor.employee_record_id)
 
@@ -723,23 +1090,45 @@ def push_documents(candidate: Candidate, *, actor, zoho_email: str | None = None
     except _zc.ZohoUnreachable as exc:
         _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
                 reason="unreachable", message=str(exc))
-        raise ZohoPushError(_network_message(exc)) from exc
+        raise ZohoPushError(_network_message(exc) + pre_note) from exc
     except _zc.ZohoError as exc:
         _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
                 message=str(exc))
-        raise ZohoPushError(f"Zoho rejected the push: {exc}") from exc
+        raise ZohoPushError(f"Zoho rejected the push: {exc}{pre_note}") from exc
 
     _zc.log("push.response", source="hr-portal", form=form, candidate_id=candidate.id,
             response=response)
+    # Zoho can return a Pre-Induction record by email (a draft, say) that the
+    # lookup then refuses (7016 "Invalid value ... for the field
+    # 'pre_induction_id1'"). The documents still go in: retry unlinked.
+    pre_field = entry["pre_induction_field"]
+    link_refused = None
+    if (pre_field in payload and _zc.has_errors(response)
+            and "7016" in str(response) and pre_field in str(response)):
+        link_refused = payload.pop(pre_field)
+        _zc.log("push.request", source="hr-portal", target="documents", form=form,
+                candidate_id=candidate.id, email=email, retry="without_pre_induction_link",
+                refused=link_refused, files=[f[0] for f in files])
+        try:
+            response = (_zc.update_record(token, form, record_id, payload, files=files)
+                        if record_id else _zc.insert_record(token, form, payload, files=files))
+        except _zc.ZohoUnreachable as exc:
+            raise ZohoPushError(_network_message(exc) + pre_note) from exc
+        except _zc.ZohoError as exc:
+            raise ZohoPushError(f"Zoho rejected the push: {exc}{pre_note}") from exc
+        _zc.log("push.response", source="hr-portal", form=form, candidate_id=candidate.id,
+                response=response)
     if _zc.has_errors(response):
-        raise ZohoPushError(_error_message(response, form, record_id))
+        raise ZohoPushError(_error_message(response, form, record_id) + pre_note)
 
     new_id = record_id or _zc.record_id_from(response)
     if not new_id:
         raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
     return {"record_id": new_id, "form": form, "status": "SYNCED", "created": not record_id,
             "files": len(files), "unchanged": unchanged, "sent": sent, "skipped": skipped,
-            "pre_linked": bool(zoho_email) and target["action"] == "create",
+            "pre_linked": bool(pre_id) and not link_refused, "pre_record_id": pre_id,
+            "pre_created": pre_created, "pre_draft": pre_draft, "link_refused": link_refused,
+            "pre_filled": pre_filled, "pre_fill_error": pre_fill_error,
             "pushed_by": pushed_by_status, "hidden_fields": hidden}
 
 

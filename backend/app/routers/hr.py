@@ -1268,6 +1268,19 @@ def lookup_documents_record(candidate_id: int, email: str,
         raise HTTPException(status_code=502, detail=str(exc))
 
 
+@router.get("/candidates/{candidate_id}/zoho/pre-induction/form")
+def pre_induction_form(candidate_id: int, db: Session = Depends(get_db),
+                       current: HRUser = Depends(get_current_staff)):
+    """Fields, live Zoho options and pre-filled values for the Pre-Induction
+    popup HR fills when Zoho has no Pre-Induction record for the candidate."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    actor = _zoho_actor(db, current)
+    try:
+        return zoho_push.pre_induction_form(actor.token, candidate)
+    except zoho_push.ZohoPushError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 @router.post("/candidates/{candidate_id}/zoho/documents/push")
 def push_documents_to_zoho(candidate_id: int, body: DocumentsPushRequest | None = None,
                            db: Session = Depends(get_db),
@@ -1285,7 +1298,8 @@ def push_documents_to_zoho(candidate_id: int, body: DocumentsPushRequest | None 
     zoho_email = (body.zoho_email or "").strip() if body else ""
     try:
         form, _entry = zoho_push.documents_target(candidate)
-        result = zoho_push.push_documents(candidate, actor=actor, zoho_email=zoho_email or None)
+        result = zoho_push.push_documents(candidate, actor=actor, zoho_email=zoho_email or None,
+                                          pre_induction=body.pre_induction if body else None)
     except zoho_push.ZohoPushError as exc:
         candidate.zoho_doc_last_error = str(exc)[:2000]
         db.commit()
@@ -1313,8 +1327,27 @@ def push_documents_to_zoho(candidate_id: int, body: DocumentsPushRequest | None 
     which = f" ({zoho_email})" if zoho_email else ""
     unchanged = (f" {result['unchanged']} unchanged document(s) were already in Zoho and "
                  "not re-uploaded." if result.get("unchanged") else "")
-    return {"detail": f"{verb} Zoho {form} record {result['record_id']}{which} with "
-                      f"{result['files']} document(s).{unchanged}{skipped}"
+    pre = ("" if not result.get("pre_created") else
+           f"Saved a Zoho Pre-Induction draft ({result['pre_created']}) because some mandatory "
+           "fields were blank; Zoho cannot link a draft, so complete it in Zoho and set the "
+           "Pre-Induction ID on the Documents record. Then "
+           if result.get("pre_draft") else
+           f"Created Zoho Pre-Induction record {result['pre_created']}, then ")
+    if pre:
+        verb = verb.lower()
+    refused = (f" Zoho would not link it to Pre-Induction record {result['link_refused']} "
+               "(probably still a draft), so the Pre-Induction ID is empty: complete that "
+               "record in Zoho, then set the Pre-Induction ID on this one."
+               if result.get("link_refused") else "")
+    if result.get("pre_linked") and not result.get("pre_created"):
+        refused = f" Linked to Pre-Induction record {result['pre_record_id']}." + refused
+    filled = (f" Filled on the Pre-Induction record: {', '.join(result['pre_filled'])}."
+              if result.get("pre_filled") else "")
+    if result.get("pre_fill_error"):
+        filled = (" Could not fill the Pre-Induction record's photo / contact / blood group: "
+                  f"{result['pre_fill_error']}")
+    return {"detail": f"{pre}{verb} Zoho {form} record {result['record_id']}{which} with "
+                      f"{result['files']} document(s).{refused}{filled}{unchanged}{skipped}"
                       f"{_pushed_by_note(result)}", **result}
 
 
