@@ -525,6 +525,8 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db), current: HRU
         zoho_od_status=candidate.zoho_od_status,
         zoho_od_synced_at=candidate.zoho_od_synced_at,
         zoho_od_last_error=candidate.zoho_od_last_error,
+        zoho_od_pre_record_id=candidate.zoho_od_pre_record_id,
+        zoho_od_pre_induction_id=candidate.zoho_od_pre_induction_id,
         zoho_doc_record_id=candidate.zoho_doc_record_id,
         zoho_doc_form=candidate.zoho_doc_form,
         zoho_doc_status=candidate.zoho_doc_status,
@@ -1357,8 +1359,9 @@ def push_documents_to_zoho(candidate_id: int, body: DocumentsPushRequest | None 
 @router.post("/candidates/{candidate_id}/zoho/ondemand/push")
 def push_ondemand_to_zoho(candidate_id: int, db: Session = Depends(get_db),
                           current: HRUser = Depends(get_current_staff)):
-    """Write the Consultant form (details plus Aadhaar / PAN / photo)
-    into Zoho's Consultant Tracker as a draft. Tracked in zoho_od_* columns."""
+    """Write the Consultant form (details plus uploads) into Zoho's Consultant
+    Tracker as a normal record (skip mandatory, not a draft). Full Time types
+    need their Pre-Induction record first. Tracked in zoho_od_* columns."""
     candidate = scope.get_scoped_candidate(db, candidate_id, current)
     if candidate.candidate_type.value != "ONDEMAND":
         raise HTTPException(status_code=400,
@@ -1372,15 +1375,58 @@ def push_ondemand_to_zoho(candidate_id: int, db: Session = Depends(get_db),
         raise HTTPException(status_code=502, detail=str(exc))
 
     candidate.zoho_od_record_id = result["record_id"]
+    if result.get("pre_induction_id"):
+        candidate.zoho_od_pre_induction_id = result["pre_induction_id"]
     candidate.zoho_od_status = result["status"]
     candidate.zoho_od_synced_at = datetime.now(timezone.utc)
     candidate.zoho_od_last_error = None
     _record_zoho_push(db, candidate, "ondemand", result, current, actor)
     db.commit()
     verb = "Created" if result["created"] else "Updated"
-    return {"detail": f"{verb} Zoho Consultant Tracker draft {result['record_id']} from the "
-                      "Consultant form. Complete the remaining mandatory fields "
-                      f"in Zoho and submit it there.{_pushed_by_note(result)}", **result}
+    linked = ("" if not result.get("pre_induction_id") else
+              f" This is the record Zoho made for Pre-Induction {result['pre_induction_id']}."
+              if not result["created"] else
+              f" Zoho had not made a record for Pre-Induction {result['pre_induction_id']}, so "
+              "one was created and linked to it.")
+    draft = (f" The earlier draft {result['old_draft']} is still in Zoho; delete it there."
+             if result.get("old_draft") else "")
+    return {"detail": f"{verb} Zoho Consultant Tracker record {result['record_id']} from the "
+                      f"Consultant form.{linked} Fill the remaining fields in Zoho."
+                      f"{draft}{_pushed_by_note(result)}", **result}
+
+
+@router.post("/candidates/{candidate_id}/zoho/ondemand/pre-induction")
+def create_consultant_pre_induction(candidate_id: int, db: Session = Depends(get_db),
+                                    current: HRUser = Depends(get_current_staff)):
+    """Full Time / Corp to Corp (Full Time) consultants: create their Zoho
+    Pre-Induction record (skip mandatory, not a draft), or adopt the one
+    Zoho already has for their email. The Consultant Tracker push links to it."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    if candidate.candidate_type.value != "ONDEMAND":
+        raise HTTPException(status_code=400, detail="Only Consultants use this button.")
+    if candidate.zoho_od_pre_record_id:
+        raise HTTPException(status_code=400,
+                            detail="The Pre-Induction record already exists "
+                                   f"({candidate.zoho_od_pre_induction_id or candidate.zoho_od_pre_record_id}).")
+    actor = _zoho_actor(db, current)
+    try:
+        result = zoho_push.create_consultant_pre_induction(candidate, actor=actor)
+    except zoho_push.ZohoPushError as exc:
+        candidate.zoho_od_last_error = str(exc)[:2000]
+        db.commit()
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    candidate.zoho_od_pre_record_id = result["record_id"]
+    candidate.zoho_od_pre_induction_id = result["pre_induction_id"] or None
+    candidate.zoho_od_last_error = None
+    _record_zoho_push(db, candidate, "od_pre_induction", result, current, actor)
+    db.commit()
+    which = result["pre_induction_id"] or result["record_id"]
+    return {"detail": (f"Created Zoho Pre-Induction record {which}." if result["created"] else
+                       f"Zoho already had Pre-Induction record {which} for this email; "
+                       "it will be used.")
+                      + " Now upload the documents to the Consultant Tracker."
+                      + _pushed_by_note(result), **result}
 
 
 # ---------------------------------------------------------------------------

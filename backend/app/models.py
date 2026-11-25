@@ -221,6 +221,11 @@ class Candidate(Base):
     zoho_od_status = Column(String(20), nullable=True)
     zoho_od_synced_at = Column(DateTime(timezone=True), nullable=True)
     zoho_od_last_error = Column(Text, nullable=True)
+    # Full Time / Corp to Corp (Full Time) consultants: the Pre-Induction
+    # record created first (record id, and its PRECND... Pre-Induction ID),
+    # which the Consultant Tracker push then links through pre_induction_id.
+    zoho_od_pre_record_id = Column(String(50), nullable=True)
+    zoho_od_pre_induction_id = Column(String(50), nullable=True)
     # Same four, for the Document Collection uploads into Zoho's "Documents
     # Collection" (Experienced) or "Documents Collection - Trainee" (Fresher)
     # form; zoho_doc_form records which one the record id belongs to.

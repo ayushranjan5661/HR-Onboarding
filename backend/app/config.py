@@ -145,6 +145,10 @@ class Settings(BaseSettings):
     # Reporting_Manager is the one field Zoho demands even with
     # skipMandatoryFields; 312853000034502005 is "1234 - Team - HR".
     ZOHO_PRE_INDUCTION_DEFAULTS: str = '{"Reporting_Manager":"312853000034502005"}'
+    # Consultant Tracker's Consultant_Name lookup (into P_Employee) takes a
+    # record id; the Zoho team's sample: rec.insert("Consultant_Name":
+    # 312853000034502005.toLong()). Blank leaves the field out.
+    ZOHO_CONSULTANT_NAME_DEFAULT: str = "312853000034502005"
     # API name of the editable "Pushed By" lookup (into P_Employee) on the
     # Zoho forms. Filled with the pushing HR's employee record on any form
     # that has it; forms without it are left alone. Blank turns it off.
