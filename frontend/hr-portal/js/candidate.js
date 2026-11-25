@@ -47,6 +47,7 @@ async function saveConsultantType(sel) {
       method: "POST", body: JSON.stringify({ consultant_type: sel.value }),
     });
     currentData.consultant_type = res.consultant_type;
+    renderZoho(currentData, "ondemand");   // one button or two, by type
     await showAlert(res.detail, { title: "Consultant type saved" });
   } catch (err) {
     sel.value = previous;
@@ -975,12 +976,13 @@ const ZOHO_TARGETS = {
       + "and the Declaration PDF.",
     confirmAgain: "Update the Zoho New Joiner Documents Track record with the latest Declaration?",
   },
-  // Consultant form into Zoho's Consultant Tracker, as a draft.
+  // Consultant form into Zoho's Consultant Tracker (a record, not a draft).
   ondemand: {
     prefix: "zoho_od_", bodyId: "zohoOdBody", btnId: "zohoOdPushBtn",
     path: "zoho/ondemand/push", label: "Zoho Consultant Tracker",
-    confirmNew: "Create a Zoho Consultant Tracker draft from this Consultant form, "
-      + "with the Aadhar, PAN, photo, Resume, SOW, NDA and MSA uploads and the form PDF (as Other Documents)?",
+    confirmNew: "Create a Zoho Consultant Tracker record from this Consultant form, "
+      + "with the Aadhar, PAN, photo, Resume, SOW, NDA and MSA uploads and the form PDF (as Other Documents)? "
+      + "Mandatory fields it has no data for are skipped; fill them in Zoho.",
     confirmAgain: "Update the Zoho Consultant Tracker record with the latest Consultant form?",
   },
 };
@@ -1014,12 +1016,50 @@ function renderZoho(c, target) {
   const waitLine = noDecl
     ? `<p style="color:#92400e;font-size:0.85rem;">Waiting for the candidate to submit the ${target === "ondemand" ? "On-Demand Candidate" : "Declaration"} form.</p>`
     : "";
+  // Full Time / Corp to Corp (Full Time) consultants: Pre-Induction record
+  // first (its own button), then the documents into the Consultant Tracker.
+  const twoStep = target === "ondemand" && OD_PRE_INDUCTION_TYPES.has(c.consultant_type || "ONDEMAND");
+  const preId = c.zoho_od_pre_induction_id || c.zoho_od_pre_record_id;
+  const preLine = !twoStep ? ""
+    : `<p style="color:#6b7280;font-size:0.88rem;">${preId
+        ? `Pre-Induction record <code>${escapeHtml(preId)}</code> created in Zoho.`
+        : "Step 1: create the Pre-Induction record. Step 2: upload the documents to it."}</p>`;
+  const preBtn = !twoStep ? ""
+    : `<button class="btn ${preId ? "btn-outline" : "btn-primary"}" id="zohoOdPreBtn"
+         onclick="createConsultantPreInduction()"${noDecl || preId ? " disabled" : ""}>
+         ${preId ? "Pre-Induction Record Created" : "Create Pre-Induction Record"}
+       </button> `;
+  const pushLabel = twoStep
+    ? (pushed ? "Re-upload Documents" : "Upload Documents")
+    : (pushed ? `Re-sync to ${t.label}` : `Publish to ${t.label}`);
   document.getElementById(t.bodyId).innerHTML = `
     <p style="color:#6b7280;font-size:0.88rem;">${statusLine}</p>
-    ${errorLine}${waitLine}
-    <button class="btn btn-primary" id="${t.btnId}" onclick="pushToZoho('${target}')"${noDecl ? " disabled" : ""}>
-      ${pushed ? `Re-sync to ${t.label}` : `Publish to ${t.label}`}
+    ${preLine}${errorLine}${waitLine}
+    ${preBtn}<button class="btn btn-primary" id="${t.btnId}" onclick="pushToZoho('${target}')"${noDecl || (twoStep && !preId) ? " disabled" : ""}>
+      ${pushLabel}
     </button>`;
+}
+
+const OD_PRE_INDUCTION_TYPES = new Set(["FULLTIME", "C2C_FULLTIME"]);
+
+async function createConsultantPreInduction() {
+  const btn = document.getElementById("zohoOdPreBtn");
+  if (!await showConfirm("Create this consultant's Zoho Pre-Induction record (name, email, "
+        + "contact, blood group, photo, consultant type)? Mandatory fields it has no data for "
+        + "are skipped. If Zoho already has one for this email, that one is used.",
+        { title: "Create Pre-Induction Record", confirmText: "Create" })) return;
+  btn.disabled = true;
+  btn.textContent = "Creating…";
+  try {
+    const result = await apiFetch(`/hr/candidates/${candidateId}/zoho/ondemand/pre-induction`,
+      { method: "POST", body: "{}" });
+    await load();
+    await showAlert(result.detail, { title: "Pre-Induction record" });
+  } catch (err) {
+    await load();
+    if (err.status === 428) return promptZohoConnect(err.message);
+    await showAlert(err.message, { title: "Zoho push failed", danger: true });
+  }
 }
 
 async function pushToZoho(target = "confirmation") {

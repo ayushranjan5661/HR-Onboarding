@@ -1308,18 +1308,29 @@ def push_declaration(candidate: Candidate, *, actor) -> dict:
 
 # "Consultant Tracker" (form API name consultant_tracker). The On-Demand form
 # answers only a few of its fields; the rest (department, manager, agreement,
-# SOW/NDA/MSA...) are mandatory there, so the record is written as a DRAFT
-# for HR to complete in Zoho. Matched on Consultant_Email.
+# SOW/NDA/MSA...) are mandatory there, so the record is written with
+# skipMandatoryFields (a normal record, not a draft) for HR to complete in
+# Zoho. Matched on Consultant_Email.
 OD_EMAIL_FIELD = "Consultant_Email"
 OD_CONSULTANT_TYPE = "On - Demand Consultant"
-# Portal consultant sub-type -> Zoho Consultant_Type picklist value. Only the
-# On-Demand value is confirmed; fix the others to Zoho's exact spelling.
+# Portal consultant sub-type -> Zoho Consultant_Type picklist value, spelled
+# exactly as Zoho lists them (consultant_tracker and Pre_Induction_Procedure's
+# consultant_type, read 2026-11-25).
 OD_CONSULTANT_TYPES = {
     "ONDEMAND": OD_CONSULTANT_TYPE,
-    "FULLTIME": "Full Time Consultant",
-    "C2C_FULLTIME": "Corp to Corp (Full Time)",
-    "C2C_ONDEMAND": "Corp to Corp (On Demand)",
+    "FULLTIME": "Full time Consultant",
+    "C2C_FULLTIME": "Corp to Corp (Full time)",
+    "C2C_ONDEMAND": "Corp to Corp (On-Demand)",
 }
+# These get a Pre-Induction record first (its own button), and their
+# Consultant Tracker record carries its Pre-Induction ID.
+OD_PRE_INDUCTION_TYPES = {"FULLTIME", "C2C_FULLTIME"}
+OD_PRE_INDUCTION_LINK_FIELD = "pre_induction_id"   # Text on consultant_tracker
+OD_CONSULTANT_NAME_FIELD = "Consultant_Name"       # lookup into P_Employee
+PRE_CREATE_CONSULTANT_FIELD = "create_consultant_record"   # Checkbox on Pre-Induction
+# On-Demand types: RM / FH / HR / COO status picklists start at this value.
+OD_PENDING = "Pending"
+OD_PENDING_FIELDS = ("RM_Status", "Agreement_Status", "Head_HR_status", "COO_Status")
 OD_COMMENT_FIELD = "Comments_Notes"      # answers the form has no field for
 # On-Demand document key -> Zoho upload field
 OD_FILES = {"aadhar_card": "Aadhar_Card", "pan_card": "Pan_Card",
@@ -1359,12 +1370,181 @@ def ondemand_payload(candidate: Candidate) -> dict:
         ("Blood Group", od.blood_group), ("Bank Branch", od.bank_branch)) if value]
     if notes:
         payload[OD_COMMENT_FIELD] = "\n".join(notes)
+    if settings.ZOHO_CONSULTANT_NAME_DEFAULT:
+        payload[OD_CONSULTANT_NAME_FIELD] = settings.ZOHO_CONSULTANT_NAME_DEFAULT
     return {k: v for k, v in payload.items() if v}
 
 
+def _consultant_type(candidate: Candidate) -> str:
+    return candidate.consultant_type or "ONDEMAND"
+
+
+def needs_pre_induction(candidate: Candidate) -> bool:
+    """Full Time / Corp to Corp (Full Time) consultants."""
+    return _consultant_type(candidate) in OD_PRE_INDUCTION_TYPES
+
+
+def create_consultant_pre_induction(candidate: Candidate, *, actor) -> dict:
+    """The first of a Full Time consultant's two buttons: the
+    Pre_Induction_Procedure record for their email, created with
+    skipMandatoryFields (a normal record, not a draft). When Zoho already has
+    one for the email it is reused, never duplicated.
+    Returns {"record_id", "pre_induction_id", "created", "form"}; raises
+    ZohoPushError."""
+    if not needs_pre_induction(candidate):
+        raise ZohoPushError("Only Full Time and Corp to Corp (Full Time) consultants get a "
+                            "Pre-Induction record.")
+    od = candidate.ondemand_details
+    if od is None:
+        raise ZohoPushError("The candidate has not submitted the Consultant form yet.")
+    email = (od.email or candidate.email or "").strip()
+    if not email:
+        raise ZohoPushError("Candidate has no email on record — Zoho's duplicate check needs one.")
+    token = actor.token
+
+    existing = _one_by_email(token, PRE_INDUCTION_FORM, email, PRE_INDUCTION_EMAIL_FIELD,
+                             "Pre-Induction")
+    if existing:
+        return {"record_id": _hit_id(existing), "form": PRE_INDUCTION_FORM, "created": False,
+                "pre_induction_id": str(_hit_row(existing).get(PRE_INDUCTION_ID_FIELD)
+                                        or "").strip()}
+
+    comps = _pre_induction_components(token)
+    first, _, last = (od.full_name or candidate.name or "").strip().partition(" ")
+    if not first:
+        raise ZohoPushError("The candidate has no name on record for the Pre-Induction form.")
+    values = {k: v for k, v in _pre_induction_defaults().items()
+              if k in PRE_INDUCTION_HR_FIELDS and v}
+    if not values.get("Reporting_Manager"):
+        raise ZohoPushError("Zoho needs a Reporting Manager to create the Pre-Induction record: "
+                            "set \"Reporting_Manager\" (a Zoho employee record id) in "
+                            "ZOHO_PRE_INDUCTION_DEFAULTS in .env.")
+    values.pop("Category", None)   # Fresher / Experienced: employees only
+    payload = {"First_Name": first, "Last_Name": last.strip() or first,
+               PRE_INDUCTION_EMAIL_FIELD: email, **values,
+               "Employment_Type": "Consultant",
+               "consultant_type": OD_CONSULTANT_TYPES[_consultant_type(candidate)],
+               # Ticked, Zoho's workflow creates the linked Consultant Tracker
+               # record (pre_induction_id = this PRECND... id) itself.
+               PRE_CREATE_CONSULTANT_FIELD: "true"}
+    phone = "".join(ch for ch in od.contact_number or "" if ch.isdigit())
+    if phone:
+        payload["Personal_Number"] = phone
+    if od.blood_group and "Blood_Group" in comps:
+        match = _match_option(od.blood_group, _component_options(comps["Blood_Group"]))
+        if match:
+            payload["Blood_Group"] = match
+    # A picklist value Zoho does not list must not sink the push.
+    for name in list(payload):
+        comp = comps.get(name) or {}
+        if (comp.get("comptype") in ("Picklist", "BloodGroup")
+                and payload[name] not in {o["id"] for o in _component_options(comp)}):
+            del payload[name]
+    photo = _pre_induction_photo(candidate)
+    files = [photo] if photo else []
+    hidden = _drop_hidden(set(comps), payload, files)
+
+    record_id = _insert_pre_induction(token, candidate, email, payload, files)
+    return {"record_id": record_id, "pre_induction_id": _pre_induction_id(token, record_id, email),
+            "created": True, "form": PRE_INDUCTION_FORM, "hidden_fields": hidden}
+
+
+def _record_fields(token, form: str, record_id: str) -> dict:
+    """One record's fields, flattened: getRecordByID nests them in a
+    section list ({"<Form> Details": [{...}], "ApprovalStatus": ...})."""
+    out = {}
+    for key, value in _zc.get_record(token, form, record_id).items():
+        if isinstance(value, list):
+            for section in value:
+                if isinstance(section, dict):
+                    out.update(section)
+        elif isinstance(value, dict):
+            out.update(value)
+        else:
+            out[key] = value
+    return out
+
+
+def _pre_induction_id(token, record_id: str, email: str = "") -> str:
+    """The PRECND... Pre-Induction ID of a Pre_Induction_Procedure record, or
+    "". Read by record id; when that gives nothing (the account may lack
+    getRecordByID access), from the email search, matched on record id."""
+    try:
+        found = str(_record_fields(token, PRE_INDUCTION_FORM, record_id)
+                    .get(PRE_INDUCTION_ID_FIELD) or "").strip()
+        if found:
+            return found
+        _zc.log("push.error", source="hr-portal", form=PRE_INDUCTION_FORM, record_id=record_id,
+                message="getRecordByID returned no Pre_Induction_ID")
+    except Exception as exc:   # noqa: BLE001 - fall through to the email search
+        _zc.log("push.error", source="hr-portal", form=PRE_INDUCTION_FORM, record_id=record_id,
+                message=f"getRecordByID failed: {exc}")
+    if not email:
+        return ""
+    try:
+        hits = _zc.find_by_email(token, PRE_INDUCTION_FORM, email, PRE_INDUCTION_EMAIL_FIELD)
+    except _zc.ZohoError as exc:
+        _zc.log("push.error", source="hr-portal", form=PRE_INDUCTION_FORM, record_id=record_id,
+                message=f"email search failed: {exc}")
+        return ""
+    for hit in hits:
+        if str(_hit_id(hit)) == str(record_id):
+            return str(_hit_row(hit).get(PRE_INDUCTION_ID_FIELD) or "").strip()
+    return ""
+
+
+def _workflow_consultant_record(token, form: str, email: str, wait: bool) -> str | None:
+    """Id of the Consultant Tracker record whose Consultant_Email is the
+    Pre-Induction record's Mail_ID (Zoho's workflow copies it across),
+    polling up to WORKFLOW_WAIT_SECONDS when `wait`. Drafts are ignored;
+    several records raise ZohoPushError."""
+    import time
+    deadline = time.monotonic() + (WORKFLOW_WAIT_SECONDS if wait else 0)
+    while True:
+        hit = _one_by_email(token, form, email, OD_EMAIL_FIELD, "Consultant Tracker")
+        if hit:
+            return _hit_id(hit)
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(WORKFLOW_POLL_SECONDS)
+
+
+def _consultant_record_for_pre(token, form: str, candidate: Candidate,
+                               email: str) -> tuple[str, str | None]:
+    """(Pre-Induction ID or "", Consultant Tracker record id or None) for a
+    Full Time consultant, matched on mail id: the Pre-Induction record was
+    created with Mail_ID = `email`. When Zoho's workflow has not made the
+    record yet, ticks Create Consultant Record on the Pre-Induction record
+    (missing on records made before 2026-11-25) and waits for it. The
+    Pre-Induction ID is optional: some Zoho roles cannot see it."""
+    pre_rec = candidate.zoho_od_pre_record_id
+    pre_id = candidate.zoho_od_pre_induction_id or _pre_induction_id(token, pre_rec, email)
+    found = _workflow_consultant_record(token, form, email, wait=False)
+    if found:
+        return pre_id, found
+    _zc.log("push.request", source="hr-portal", target="pre_induction_flag",
+            form=PRE_INDUCTION_FORM, candidate_id=candidate.id, record_id=pre_rec)
+    try:
+        response = _zc.update_record(token, PRE_INDUCTION_FORM, pre_rec,
+                                     {PRE_CREATE_CONSULTANT_FIELD: "true"}, skip_mandatory=True)
+    except _zc.ZohoUnreachable as exc:
+        raise ZohoPushError(_network_message(exc)) from exc
+    except _zc.ZohoError as exc:
+        _zc.log("push.error", source="hr-portal", form=PRE_INDUCTION_FORM,
+                candidate_id=candidate.id, message=f"tick create_consultant_record: {exc}")
+        return pre_id, None   # cannot trigger the workflow: insert a linked record
+    _zc.log("push.response", source="hr-portal", form=PRE_INDUCTION_FORM,
+            candidate_id=candidate.id, response=response)
+    if _zc.has_errors(response):
+        return pre_id, None
+    return pre_id, _workflow_consultant_record(token, form, email, wait=True)
+
+
 def push_ondemand(candidate: Candidate, *, actor) -> dict:
-    """Write the Consultant form, with its Aadhaar / PAN / photo
-    uploads, into ZOHO_ONDEMAND_WRITE_FORM as a draft. Updates the record
+    """Write the Consultant form, with its uploads and the form PDF, into
+    ZOHO_ONDEMAND_WRITE_FORM as a normal record (skipMandatoryFields, never a
+    draft). Full Time types need their Pre-Induction record first
+    (create_consultant_pre_induction) and are linked to it. Updates the record
     already linked to this candidate, else the one Zoho has for their email,
     else inserts one. Returns {"record_id", "status", "created"}; raises
     ZohoPushError."""
@@ -1383,6 +1563,9 @@ def push_ondemand(candidate: Candidate, *, actor) -> dict:
     if not email:
         raise ZohoPushError("Candidate has no email on record — Zoho's duplicate check needs one.")
     payload[OD_EMAIL_FIELD] = email
+    two_step = needs_pre_induction(candidate)
+    if two_step and not candidate.zoho_od_pre_record_id:
+        raise ZohoPushError("Create the Pre-Induction record first, then upload the documents.")
 
     latest = {}
     for doc in sorted(candidate.documents, key=lambda d: d.id or 0):
@@ -1410,32 +1593,50 @@ def push_ondemand(candidate: Candidate, *, actor) -> dict:
     hidden = _drop_hidden(fields, payload, files)
     pushed_by_status = _add_pushed_by(fields, payload, actor.employee_record_id)
 
+    # Earlier pushes saved drafts. A draft is not carried forward: a real
+    # record is created and HR deletes the old draft in Zoho.
     record_id = candidate.zoho_od_record_id
-    if not record_id:
-        try:
-            existing = _zc.find_by_email(token, form, email, OD_EMAIL_FIELD)
-        except _zc.ZohoUnreachable as exc:
-            raise ZohoPushError(_network_message(exc)) from exc
-        except _zc.ZohoError as exc:
-            raise ZohoPushError(
-                f"Duplicate check against Zoho failed, refusing to insert: {exc}") from exc
-        if len(existing) > 1:
-            raise ZohoPushError(
-                f"{len(existing)} records for {email} already exist on '{form}'. "
-                "Remove the duplicates in Zoho first, then publish again.")
-        if existing:
-            record_id = _hit_id(existing[0])
-            if not record_id:
-                raise ZohoPushError(f"Could not read the id of the existing Zoho record: "
-                                    f"{str(existing[0])[:400]}")
+    old_draft = None
+    if record_id and candidate.zoho_od_status == "DRAFT":
+        old_draft, record_id = record_id, None
+    pre_id = None
+    if two_step:
+        # Into the Consultant Tracker record Zoho's workflow made for the
+        # Pre-Induction record; inserted (linked) only if it never appears.
+        pre_id, record_id = _consultant_record_for_pre(token, form, candidate, email)
+        if pre_id and OD_PRE_INDUCTION_LINK_FIELD in fields:
+            payload[OD_PRE_INDUCTION_LINK_FIELD] = pre_id
+    elif not record_id:
+        # The record Zoho already has for the email (made by hand, or by a
+        # Zoho workflow from the Pre-Induction record), drafts excluded.
+        hit = _one_by_email(token, form, email, OD_EMAIL_FIELD, "Consultant Tracker")
+        record_id = _hit_id(hit) if hit else None
+    if not two_step:
+        # On-Demand types: approval statuses start Pending (only where Zoho
+        # has none, so a re-sync never undoes an approval), and Pre-Induction
+        # ID (Admin Use) carries the record's own Zoho id.
+        current = {}
+        if record_id:
+            try:
+                current = _record_fields(token, form, record_id)
+            except _zc.ZohoError:
+                current = {k: "?" for k in OD_PENDING_FIELDS}   # unknown: leave them alone
+            payload[OD_PRE_INDUCTION_LINK_FIELD] = record_id
+        for key in OD_PENDING_FIELDS:
+            if key in fields and not str(current.get(key) or "").strip():
+                payload[key] = OD_PENDING
+        if OD_PRE_INDUCTION_LINK_FIELD not in fields:
+            payload.pop(OD_PRE_INDUCTION_LINK_FIELD, None)
 
     _zc.log("push.request", source="hr-portal", target="ondemand", form=form,
             candidate_id=candidate.id, email=email, record_id=record_id, fields=len(payload),
             files=[f[0] for f in files])
     try:
-        response = (_zc.update_record(token, form, record_id, payload, files=files, draft=True)
+        response = (_zc.update_record(token, form, record_id, payload, files=files,
+                                      skip_mandatory=True)
                     if record_id
-                    else _zc.insert_record(token, form, payload, draft=True, files=files))
+                    else _zc.insert_record(token, form, payload, files=files,
+                                           skip_mandatory=True))
     except _zc.ZohoUnreachable as exc:
         _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
                 reason="unreachable", message=str(exc))
@@ -1455,5 +1656,18 @@ def push_ondemand(candidate: Candidate, *, actor) -> dict:
     new_id = record_id or _zc.record_id_from(response)
     if not new_id:
         raise ZohoPushError(f"Zoho did not return a record id: {str(response)[:600]}")
-    return {"record_id": new_id, "form": form, "status": "DRAFT", "created": not record_id,
+    if not two_step and not record_id and OD_PRE_INDUCTION_LINK_FIELD in fields:
+        # The new record's id is only known now: write it into Pre-Induction
+        # ID (Admin Use). Failure here does not undo the created record.
+        try:
+            follow = _zc.update_record(token, form, new_id, {OD_PRE_INDUCTION_LINK_FIELD: new_id},
+                                       skip_mandatory=True)
+            _zc.log("push.response", source="hr-portal", form=form, candidate_id=candidate.id,
+                    target="ondemand_record_id", response=follow)
+        except _zc.ZohoError as exc:
+            _zc.log("push.error", source="hr-portal", form=form, candidate_id=candidate.id,
+                    message=f"writing pre_induction_id: {exc}")
+    return {"record_id": new_id, "form": form, "status": "SYNCED", "created": not record_id,
+            "old_draft": old_draft if old_draft != new_id else None,
+            "pre_induction_id": pre_id,
             "pushed_by": pushed_by_status, "hidden_fields": hidden}
