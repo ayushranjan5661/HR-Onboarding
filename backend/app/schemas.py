@@ -96,6 +96,12 @@ class StaffAuditOut(BaseModel):
 # HR managing candidates
 # ---------------------------------------------------------------------------
 
+class CandidateIdentityUpdate(BaseModel):
+    """HR correcting a candidate's name and/or login email."""
+    name: str
+    email: EmailStr
+
+
 class InviteCandidateRequest(BaseModel):
     name: str
     email: EmailStr

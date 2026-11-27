@@ -57,6 +57,70 @@ async function saveConsultantType(sel) {
   }
 }
 
+// Inline editors for the candidate's name and email (their Login ID), one row each.
+const IDENTITY_FIELDS = {
+  name: { label: "Name", type: "text", maxlength: 150, placeholder: "Full name" },
+  email: { label: "Login ID", type: "email", maxlength: 255, placeholder: "Email" },
+};
+const identityRowHtml = {};
+
+function cancelIdentity(field) {
+  document.getElementById(`identityRow-${field}`).innerHTML = identityRowHtml[field];
+}
+
+function editIdentity(field) {
+  const f = IDENTITY_FIELDS[field];
+  const row = document.getElementById(`identityRow-${field}`);
+  identityRowHtml[field] = row.innerHTML;
+  row.innerHTML = `
+    <div class="fname">${f.label}</div>
+    <div class="fval">
+      <input id="identityInput-${field}" type="${f.type}" maxlength="${f.maxlength}"
+        value="${escapeHtml(currentData[field])}" placeholder="${f.placeholder}"
+        style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;min-width:260px;"
+        onkeydown="if (event.key === 'Enter') saveIdentity('${field}');
+                   if (event.key === 'Escape') cancelIdentity('${field}');">
+    </div>
+    <div class="field-actions">
+      <button class="btn btn-small" id="identitySave-${field}" onclick="saveIdentity('${field}')">Save</button>
+      <button class="btn btn-outline btn-small" onclick="cancelIdentity('${field}')">Cancel</button>
+    </div>`;
+  document.getElementById(`identityInput-${field}`).focus();
+}
+
+async function saveIdentity(field) {
+  const value = document.getElementById(`identityInput-${field}`).value.trim();
+  if (!value) {
+    await showAlert(`${IDENTITY_FIELDS[field].label} cannot be empty.`,
+                    { title: "Could not save", danger: true });
+    return;
+  }
+  const name = field === "name" ? value : currentData.name;
+  const email = field === "email" ? value : currentData.email;
+  if (email.toLowerCase() !== (currentData.email || "").toLowerCase()) {
+    const ok = await showConfirm(
+      `The candidate will sign in with ${email} instead of ${currentData.email}. ` +
+      "Their password and login link stay the same. Records already in Zoho are not changed.",
+      { title: "Change login email?", confirmText: "Change email" });
+    if (!ok) return;
+  }
+  const btn = document.getElementById(`identitySave-${field}`);
+  btn.disabled = true;
+  try {
+    const res = await apiFetch(`/hr/candidates/${currentData.id}/identity`, {
+      method: "POST", body: JSON.stringify({ name, email }),
+    });
+    currentData.name = res.name;
+    currentData.email = res.email;
+    render();
+    loadAudit().catch(() => {});
+    await showAlert(res.detail, { title: "Candidate updated" });
+  } catch (err) {
+    btn.disabled = false;
+    await showAlert(err.message, { title: "Could not save", danger: true });
+  }
+}
+
 // Values long enough that a single-line input is unusable.
 const LONG_TEXT_FIELDS = new Set([
   "current_address", "permanent_address", "skills_technologies",
@@ -691,7 +755,18 @@ function render() {
         ${Object.entries(CONSULTANT_TYPES).map(([k, v]) =>
           `<option value="${k}"${(c.consultant_type || "ONDEMAND") === k ? " selected" : ""}>${v}</option>`).join("")}
       </select></div></div>` : ""}
-    <div class="field-row"><div class="fname">Login ID</div><div class="fval"><code>${escapeHtml(c.email)}</code></div></div>
+    <div class="field-row" id="identityRow-name"><div class="fname">Name</div>
+      <div class="fval">${escapeHtml(c.name)}</div>
+      <div class="field-actions">
+        <button class="btn btn-outline btn-small" onclick="editIdentity('name')">Edit</button>
+      </div>
+    </div>
+    <div class="field-row" id="identityRow-email"><div class="fname">Login ID</div>
+      <div class="fval"><code>${escapeHtml(c.email)}</code></div>
+      <div class="field-actions">
+        <button class="btn btn-outline btn-small" onclick="editIdentity('email')">Edit</button>
+      </div>
+    </div>
     <div class="field-row"><div class="fname">Password</div>
       <div class="fval" id="pwdCell">${c.temp_password
         ? `<code>${escapeHtml(c.temp_password)}</code>`
