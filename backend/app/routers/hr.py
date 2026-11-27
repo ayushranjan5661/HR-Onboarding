@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -59,6 +60,7 @@ from app.schemas import (
     AuditEntryOut,
     AuditFileOut,
     CandidateDetailOut,
+    CandidateIdentityUpdate,
     ChangeSetRequest,
     DocumentOut,
     DocumentsPushRequest,
@@ -550,6 +552,50 @@ def regenerate_invite_link(candidate_id: int, db: Session = Depends(get_db),
     return {"detail": "New link issued. The previous link no longer works.",
             "login_url": _candidate_login_url(candidate),
             "login_link_expires_at": _link_expiry(candidate)}
+
+
+@router.post("/candidates/{candidate_id}/identity")
+def update_candidate_identity(candidate_id: int, payload: CandidateIdentityUpdate,
+                              db: Session = Depends(get_db),
+                              current: HRUser = Depends(get_current_staff)):
+    """Correct a candidate's name and/or email. The email is their Login ID:
+    the password and login link keep working, but they sign in with the new
+    email from now on. Records already pushed to Zoho are not changed."""
+    candidate = scope.get_scoped_candidate(db, candidate_id, current)
+    name = " ".join(payload.name.split())
+    email = str(payload.email).strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty.")
+    if len(name) > 150:
+        raise HTTPException(status_code=400, detail="Name is too long (150 characters max).")
+    if email.lower() != (candidate.email or "").lower():
+        clash = (db.query(Candidate.id)
+                 .filter(func.lower(Candidate.email) == email.lower(), Candidate.id != candidate.id)
+                 .first())
+        if clash:
+            raise HTTPException(status_code=400,
+                                detail="Another candidate already uses this email.")
+
+    changes = [(f, old, new) for f, old, new in (("name", candidate.name, name),
+                                                 ("email", candidate.email, email))
+               if old != new]
+    if not changes:
+        return {"detail": "Nothing changed.", "name": candidate.name, "email": candidate.email}
+    for field, old, new in changes:
+        setattr(candidate, field, new)
+        db.add(FieldEditLog(candidate_id=candidate_id, form_type="ACCOUNT", field_name=field,
+                            old_value=old, new_value=new, action="EDIT",
+                            edited_by_hr_id=current.id))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Another candidate already uses this email.")
+    detail = "Saved."
+    if any(f == "email" for f, _, _ in changes):
+        detail = (f"Saved. The candidate now signs in with {email}. "
+                  "Records already in Zoho keep the old email; update them in Zoho if needed.")
+    return {"detail": detail, "name": candidate.name, "email": candidate.email}
 
 
 @router.post("/candidates/{candidate_id}/consultant-type")
